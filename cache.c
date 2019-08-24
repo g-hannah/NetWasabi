@@ -69,10 +69,8 @@ wr_cache_destroy(wr_cache_t *cachep)
 		free(cachep->url);
 		cachep->url = NULL;
 
+		/* objects should have been deconstructed in wr_cache_dealloc() */
 		cur_obj = (cachep->cache + (objsize * i));
-
-		if (cachep->dtor)
-			cachep->dtor(cur_obj);
 	}
 
 	free(cachep->cache);
