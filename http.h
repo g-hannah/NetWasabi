@@ -3,6 +3,7 @@
 
 #include <stdint.h>
 #include <time.h>
+#include "cache.h"
 
 #define HTTP_OK 200u
 #define HTTP_MOVED_PERMANENTLY 301u
@@ -20,10 +21,11 @@
 
 typedef struct http_link_t
 {
-	int status;
+	int http_status;
 	char *url;
 	time_t time_reaped;
 	struct http_link_t *next;
+	int used;
 } http_link_t;
 
 /**
