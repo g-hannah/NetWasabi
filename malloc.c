@@ -1,3 +1,5 @@
+#include <assert.h>
+#include <errno.h>
 #include <stdlib.h>
 #include "malloc.h"
 
@@ -9,7 +11,7 @@ wr_malloc(size_t size)
 
 	void *mem = malloc(size);
 
-	assert(mem != NULL);
+	wr_assert(mem != NULL);
 
 	return mem;
 }
@@ -22,7 +24,7 @@ wr_zmalloc(size_t size)
 
 	void *mem = malloc(size);
 
-	assert(mem);
+	wr_assert(mem != NULL);
 
 	memset(mem, 0, size);
 
@@ -34,7 +36,7 @@ wr_calloc(int nr, size_t size)
 {
 	void *mem = calloc(nr, size);
 
-	assert(mem);
+	wr_assert(mem != NULL);
 
 	return mem;
 }
@@ -47,4 +49,14 @@ wr_realloc(void *old_ptr, size_t size)
 	assert(old_ptr);
 
 	return old_ptr;
+}
+
+char *
+wr_strdup(char *str)
+{
+	char *dup_str = strdup(str);
+
+	wr_assert(dup_str != NULL);
+
+	return dup_str;
 }
