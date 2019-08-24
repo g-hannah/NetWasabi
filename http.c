@@ -1,16 +1,39 @@
 #include <assert.h>
+#include <errno.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include "buffer.h"
 #include "cache.h"
 #include "http.h"
+#include "webreaper.h"
 
-wr_cache_ctor_type wr_cache_http_link_ctor
+int wr_cache_http_link_ctor(void *http_link)
 {
-	http_link_t *http_link = (http_link_t *)cptr;
-	http_link->url = calloc(HTTP_URL_MAX, 1);
-
+	http_link_t *hl = (http_link_t *)http_link;
+	clear_struct(hl);
+	if (!(hl->url = calloc(HTTP_URL_MAX, 1)))
+	{
+		fprintf(stderr, "wr_cache_http_link_ctor: calloc error (%s)\n", strerror(errno));
+		return -1;
+	}
 	memset(http_link->url, 0, HTTP_URL_MAX);
+	return 0;
+}
+
+void wr_cache_http_link_dtor(void *http_link)
+{
+	assert(http_link);
+
+	http_link_t *hl = (http_link_t *)http_link;
+
+	if (hl->url)
+	{
+		free(hl->url);
+		hl->url = NULL;
+	}
+
+	clear_struct(hl);
+	return;
 }
 
 int
