@@ -11,7 +11,6 @@
  */
 #define __wr_cache_mark_used(c, i, type)	\
 do {\
-	(type)__obj = (type)((char *)(c)->cache + ((c)->objsize * (i)));\
 	(unsigned char *)bm = ((c)->bitmap + ((i) >> 3));								\
 	(bm |= (128 >> ((i) & 7)));																			\
 while (0)
@@ -24,7 +23,6 @@ while (0)
  */
 #define __wr_cache_mark_unused(c, i, type)	\
 do {\
-	(type)__obj = (type)((char *)(c)->cache + ((c)->objsize * (i)));\
 	(unsigned char *)bm = ((c)->bitmap + ((i) >> 3));								\
 	(bm &= ~(128 >> ((i) & 7)));																		\
 while (0)
