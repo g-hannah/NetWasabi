@@ -1,4 +1,17 @@
+#include <assert.h>
+#include <stdio.h>
+#include <stdlib.h>
+#include "buffer.h"
+#include "cache.h"
 #include "http.h"
+
+wr_cache_ctor_type wr_cache_http_link_ctor
+{
+	http_link_t *http_link = (http_link_t *)cptr;
+	http_link->url = calloc(HTTP_URL_MAX, 1);
+
+	memset(http_link->url, 0, HTTP_URL_MAX);
+}
 
 int
 http_status_code_int(buf_t *buf)
@@ -143,6 +156,7 @@ http_response_header(buf_t *buf)
 		return -1;
 
 	q = strstr(p, "\r\n\r\n");
+
 	if (!q)
 		return -1;
 }
