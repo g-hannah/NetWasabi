@@ -7,9 +7,8 @@
  * __wr_cache_mark_used - mark an object as used
  * @c: pointer to wr_cache_t
  * @i: the index of the object in the cache
- * @type: the type of objects in the cache
  */
-#define __wr_cache_mark_used(c, i, type)	\
+#define __wr_cache_mark_used(c, i)	\
 do {\
 	(unsigned char *)bm = ((c)->bitmap + ((i) >> 3));								\
 	(bm |= (128 >> ((i) & 7)));																			\
@@ -19,9 +18,8 @@ while (0)
  * __wr_cache_mark_unused - mark an object as unused
  * @c: pointer to wr_cache_t
  * @i: the index of the object in the cache
- * @type: the type of objects in the cache
  */
-#define __wr_cache_mark_unused(c, i, type)	\
+#define __wr_cache_mark_unused(c, i)	\
 do {\
 	(unsigned char *)bm = ((c)->bitmap + ((i) >> 3));								\
 	(bm &= ~(128 >> ((i) & 7)));																		\
@@ -105,7 +103,15 @@ wr_cache_dealloc(wr_cache_t *cachep, void *slot)
 	assert(cachep);
 	assert(obj);
 
-	cachep->dtor(cachep, slot); /* calls wr_cache_mark_unused() */
+	off_t obj_off;
+	size_t objsize = cachep->objsize;
+
+	obj_off = (((char *)slot - (char *)cachep->cache) / objsize);
+
+	if (cachep->dtor)
+		cachep->dtor(cachep, slot);
+
+	__wr_cache_mark_unused(cachep, obj_off);
 
 	return;
 }
