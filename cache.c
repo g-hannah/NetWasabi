@@ -61,7 +61,6 @@ wr_cache_destroy(wr_cache_t *cachep)
 	int	i;
 	int	capacity = cachep->capacity
 	void *cur_obj = NULL;
-	char *p = NULL;
 	size_t objsize = cachep->objsize;
 
 	for (i = 0; i < capacity; ++i)
@@ -69,8 +68,10 @@ wr_cache_destroy(wr_cache_t *cachep)
 		free(cachep->url);
 		cachep->url = NULL;
 
-		/* objects should have been deconstructed in wr_cache_dealloc() */
-		cur_obj = (cachep->cache + (objsize * i));
+		cur_obj = (void *)((char *)cachep->cache + (objsize * i));
+
+		if (cachep->dtor)
+			cachep->dtor(cur_obj);
 	}
 
 	free(cachep->cache);
@@ -89,7 +90,7 @@ wr_cache_alloc(wr_cache_t *cachep)
 	if (idx == 1)
 		return NULL;
 
-	void *slot = ((char *)cache + (cachep->objsize * idx));
+	void *slot = (void *)((char *)cache + (cachep->objsize * idx));
 	__wr_cache_mark_used(cachep, idx);
 
 	return slot;
@@ -104,10 +105,7 @@ wr_cache_dealloc(wr_cache_t *cachep, void *slot)
 	off_t obj_off;
 	size_t objsize = cachep->objsize;
 
-	obj_off = (((char *)slot - (char *)cachep->cache) / objsize);
-
-	if (cachep->dtor)
-		cachep->dtor(cachep, slot);
+	obj_off = (off_t)(((char *)slot - (char *)cachep->cache) / objsize);
 
 	__wr_cache_mark_unused(cachep, obj_off);
 
