@@ -16,14 +16,13 @@
 #define HTTP_SERVICE_UNAV 503u
 #define HTTP_GATEWAY_TIMEOUT 504u
 
-#define link_is_dead(l) (l)->dead
+#define HTTP_URL_MAX	256
 
 typedef struct http_link_t
 {
-	int nr_refs;
+	int status;
 	char *url;
-	time_t reaped_when;
-	int dead;
+	time_t time_reaped;
 	struct http_link_t *next;
 } http_link_t;
 
@@ -53,12 +52,13 @@ typedef struct http_link_t
 
 typedef struct http_state_t
 {
-	int nr_requests;
-	char **http_cookies;
-	int nr_cookies;
-	int nr_links;
+	int nr_requests; /* total number page requests we've sent */
+	int nr_links; /* total number links we've reaped */
 	http_link_t *head;
 	http_link_t *tail;
+	char **http_cookies; /* cookies we must set in outgoing http headers */
+	int nr_cookies; /* number cookies we have set */
+	char *base_page; /* website specified by user */
 } http_state_t;
 
 #endif /* !defined HTTP_H */
