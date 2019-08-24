@@ -6,35 +6,27 @@
 /**
  * __wr_cache_mark_used - mark an object as used
  * @c: pointer to wr_cache_t
- * @s: the slot in the cache
+ * @i: the index of the object in the cache
  * @type: the type of objects in the cache
  */
-#define __wr_cache_mark_used(c, s, type)	\
-	off_t ioff = (((char *)(s) - (char *)(c)->cache) / (c)->objsize);\
-	(type)((type)(c)->cache + ioff)->used = 1;
+#define __wr_cache_mark_used(c, i, type)	\
+do {\
+	(type)__obj = (type)((char *)(c)->cache + ((c)->objsize * (i)));\
+	(unsigned char *)bm = ((c)->bitmap + ((i) >> 3));								\
+	(bm |= (128 >> ((i) & 7)));																			\
+while (0)
 
 /**
  * __wr_cache_mark_unused - mark an object as unused
  * @c: pointer to wr_cache_t
- * @s: the slot in the cache
+ * @i: the index of the object in the cache
  * @type: the type of objects in the cache
  */
-#define __wr_cache_mark_unused(c, s, type) \
-	off_t ioff = (((char *)(s) - (char *)(c)->cache) / (c)->objsize);\
-	(type)((type)(c)->cache + ioff)->used = 0;
-
-/**
- * __wr_cache_next_free_slot - get next free object from cache
- * @c: pointer to wr_cache_t
- * @type: type of objects stored in cache
- */
-#define __wr_cache_next_free_slot(c, type)	\
-do {																				\
-	void *__slot;															\
-	pthread_mutex_lock((c)->mutex);						\
-	__slot = ((c)->cache + ((c)->objsize * (c)->next_free));\
-	__wr_cache_mark_used(c, __slot, type);		\
-	pthread_mutex_unlock((c)->mutex);					\
+#define __wr_cache_mark_unused(c, i, type)	\
+do {\
+	(type)__obj = (type)((char *)(c)->cache + ((c)->objsize * (i)));\
+	(unsigned char *)bm = ((c)->bitmap + ((i) >> 3));								\
+	(bm &= ~(128 >> ((i) & 7)));																		\
 while (0)
 
 void *
@@ -98,8 +90,13 @@ wr_cache_alloc(wr_cache_t *cachep)
 {
 	assert(cachep);
 
-	void *slot = __wr_cache_next_free_obj(cachep);
-	wr_cache_mark_used(cachep, slot);
+	void *cache = cachep->cache;
+	int idx = __wr_cache_next_free_idx(cachep);
+	if (idx == 1)
+		return NULL;
+
+	void *slot = ((char *)cache + (cachep->objsize * idx));
+	__wr_cache_mark_used(cachep, idx);
 
 	return slot;
 }
@@ -113,4 +110,33 @@ wr_cache_dealloc(wr_cache_t *cachep, void *slot)
 	cachep->dtor(cachep, slot); /* calls wr_cache_mark_unused() */
 
 	return;
+}
+
+/**
+ * __wr_cache_next_free_idx - get index of next free object
+ * @cachep: pointer to our &wr_cache_t
+ */
+static inline __wr_cache_next_free_idx(wr_cache_t *cachep)
+{
+	unsigned char *bm = cachep->free_bitmap;
+	unsigned char bit = 128;
+	int idx = 0;
+
+	while (bm && (bm & bit))
+	{
+		bit >>= 1;
+
+		++idx;
+
+		if (!bit)
+		{
+			++bm;
+			bit = 128;
+		}
+	}
+
+	if (bm)
+		return idx;
+	else
+		return -1;
 }
