@@ -1,6 +1,8 @@
 #ifndef BUFFER_H
 #define BUFFER_H 1
 
+#include <stdlib.h>
+
 #define DEFAULT_BUFSIZE 16384
 #define BUFFER_MAGIC 0x12344321
 

@@ -1,6 +1,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <unistd.h>
+#include "cache.h"
 #include "http.h"
 #include "webreaper.h"
 

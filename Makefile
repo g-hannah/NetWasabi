@@ -1,19 +1,54 @@
-CFILES=main.c http.c cache.c buffer.c malloc.c
-OBJ=main.o http.o cache.o buffer.o malloc.o
-WFLAGS=-Wall -Werror
-DEBUG:=0
+CC := gcc
+CFLAGS := -Wall -Werror
+BUILD := 0.0.1
+VPATH := include
+DEBUG := 0
 
 .PHONY: clean
 
-webreaper: $(OBJ)
-	gcc $(WFLAGS) -o webreaper $(OBJ)
+MM_DEP = \
+	include/buffer.h \
+	include/cache.h \
+	include/malloc.h
 
-$(OBJ): $(CFILES)
-ifeq ($(DEBUG),1)
-	gcc $(WFLAGS) -g -c -DDEBUG $(CFILES)
-else
-	gcc $(WFLAGS) -c $(CFILES)
-endif
+MM_SOURCE = \
+	src/mm/buffer.c \
+	src/mm/cache.c \
+	src/mm/malloc.c
+
+MM_OBJS=$(MM_SOURCE:.c=.o)
+
+HTTP_DEP = \
+	include/http.h \
+	include/buffer.h \
+	include/cache.h \
+	include/malloc.h
+
+HTTP_SOURCE = \
+	src/http/http.c
+
+HTTP_OBJS=$(HTTP_SOURCE:.c=.o)
+
+PRIMARY_DEP = \
+	include/cache.h \
+	include/http.h
+
+PRIMARY_SOURCE = \
+	src/main.c
+
+PRIMARY_OBJS=$(PRIMARY_SOURCE:.c=.o)
+
+webreaper: $(MM_OBJS) $(HTTP_OBJS) $(PRIMARY_OBJS)
+	$(CC) $(CFLAGS) -Iinclude $< -o webreaper
+
+$(PRIMARY_OBJS): $(PRIMARY_SOURCE) $(PRIMARY_DEP)
+	$(CC) $(CFLAGS) -Iinclude $(PRIMARY_SOURCE) $(PRIMARY_DEP) -o $@
+
+$(MM_OBJS): $(MM_SOURCE) $(MM_DEP)
+	$(CC) $(CFLAGS) -Iinclude $(MM_SOURCE) $(MM_DEP) -o $@
+
+$(HTTP_OBJS): $(HTTP_SOURCE) $(HTTP_DEP)
+	$(CC) $(CFLAGS) -Iinclude $(HTTP_SOURCE) $(HTTP_DEP) -o $@
 
 clean:
-	rm *.o
+	rm $(OBJ)
