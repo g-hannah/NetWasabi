@@ -1,0 +1,5 @@
+.*
+!.gitignore
+*.o
+*.txt
+webreaper
