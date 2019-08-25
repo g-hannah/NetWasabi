@@ -6,4 +6,4 @@ void *wr_zmalloc(size_t) __wur;
 void *wr_calloc(int, size_t) __wur;
 void *wr_realloc(void *, size_t) __nonnull((1)) __wur;
 
-#endif /* !defined MALLOC_H
+#endif /* !defined MALLOC_H */

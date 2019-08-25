@@ -63,4 +63,7 @@ typedef struct http_state_t
 	char *base_page; /* website specified by user */
 } http_state_t;
 
+int wr_cache_http_link_ctor(void *) __nonnull((1)) __wur;
+void wr_cache_http_link_dtor(void *) __nonnull((1));
+
 #endif /* !defined HTTP_H */

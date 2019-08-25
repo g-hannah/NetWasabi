@@ -1,9 +1,10 @@
 #include <stdio.h>
+#include <stdlib.h>
 #include <unistd.h>
 #include "http.h"
 #include "webreaper.h"
 
-static int get_opts(int, char *[]) __nonnull((2)) __wur;
+//static int get_opts(int, char *[]) __nonnull((2)) __wur;
 
 /*
  * ./webreaper <url> [options]
@@ -11,18 +12,40 @@ static int get_opts(int, char *[]) __nonnull((2)) __wur;
 int
 main(int argc, char *argv[])
 {
-	if (get_opts(argc, argv) < 0)
-		goto fail;
+	//if (get_opts(argc, argv) < 0)
+		//goto fail;
 
-	static http_state_t http_state;
+	wr_cache_t *http_link_cache = wr_cache_create("http_link_cache",
+							sizeof(struct http_link_t),
+							0,
+							wr_cache_http_link_ctor,
+							wr_cache_http_link_dtor);
 
-	clear_struct(&http_state);
-	http_state->base_page = wr_strdup(argv[1]);
+	printf("created cache for http_link_t objects\n");
 
-	reap(
+	http_link_t *hl = wr_cache_alloc(http_link_cache);
 
-	fail:
-	exit(EXIT_FAILURE);
+	printf("obtained an object from cache\n");
+
+	wr_cache_dealloc(http_link_cache, (void *)hl);
+
+	printf("returned object to cache\n");
+
+	wr_cache_destroy(http_link_cache);
+
+	printf("destroyed the cache\n");
+
+	exit(EXIT_SUCCESS);
+
+	//fail:
+	//exit(EXIT_FAILURE);
+}
+
+static void
+__noret usage(int exit_status)
+{
+	printf("webreaper <url> [options]\n");
+	exit(exit_status);
 }
 
 int

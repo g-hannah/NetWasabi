@@ -5,6 +5,7 @@
 #include "buffer.h"
 #include "cache.h"
 #include "http.h"
+#include "malloc.h"
 #include "webreaper.h"
 
 int wr_cache_http_link_ctor(void *http_link)
@@ -16,7 +17,7 @@ int wr_cache_http_link_ctor(void *http_link)
 		fprintf(stderr, "wr_cache_http_link_ctor: calloc error (%s)\n", strerror(errno));
 		return -1;
 	}
-	memset(http_link->url, 0, HTTP_URL_MAX);
+	memset(hl->url, 0, HTTP_URL_MAX);
 	return 0;
 }
 
@@ -46,7 +47,7 @@ http_status_code_int(buf_t *buf)
 	char *tail = buf->buf_tail;
 	char *head = buf->buf_head;
 	static char code_str[16];
-	size_t data_len = buf->data_len;
+	//size_t data_len = buf->data_len;
 
 	/*
 	 * HTTP/1.1 200 OK\r\n
@@ -71,7 +72,7 @@ http_status_code_int(buf_t *buf)
 	return atoi(code_str);
 }
 
-void
+const char *
 http_status_code_string(int code)
 {
 	switch(code)
@@ -84,9 +85,6 @@ http_status_code_string(int code)
 			break;
 		case HTTP_FOUND:
 			return "Found";
-			break;
-		case HTTP_SEE_OTHER:
-			return "See other";
 			break;
 		case HTTP_BAD_REQUEST:
 			return "Bad request";
@@ -121,7 +119,7 @@ http_set_cookies(buf_t *buf, http_state_t *http_state)
 
 	char	*p = buf->data;
 	char	*q = NULL;
-	char	*tail = buf->tail;
+	char	*tail = buf->buf_tail;
 	size_t	cookie_len;
 	char	**cookies = NULL;
 	int nrcookies;
@@ -165,9 +163,11 @@ http_set_cookies(buf_t *buf, http_state_t *http_state)
 			http_inc_cookies(http_state);
 		}
 	}
+
+	return 0;
 }
 
-int
+ssize_t
 http_response_header(buf_t *buf)
 {
 	assert(buf);
@@ -182,4 +182,6 @@ http_response_header(buf_t *buf)
 
 	if (!q)
 		return -1;
+
+	return (q - p);
 }
