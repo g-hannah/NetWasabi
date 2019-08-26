@@ -3,7 +3,22 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <unistd.h>
 #include "buffer.h"
+
+static inline void
+__push_buf_tail(buf_t *buf, size_t by)
+{
+	buf->buf_tail += by;
+	buf->data_len += by;
+}
+
+static inline void
+__pull_buf_tail(buf_t *buf, size_t by)
+{
+	buf->buf_tail -= by;
+	buf->data_len -= by;
+}
 
 int
 buf_integrity(buf_t *buf)
@@ -118,6 +133,7 @@ buf_init(buf_t *buf, size_t bufsize)
 	buf->buf_size = bufsize;
 	buf->buf_end = (buf->data + bufsize);
 	buf->buf_head = buf->buf_tail = buf->data;
+	buf->magic = BUFFER_MAGIC;
 
 	return 0;
 }
@@ -137,4 +153,46 @@ buf_destroy(buf_t *buf)
 	memset(buf, 0, sizeof(*buf));
 
 	return;
+}
+
+
+ssize_t
+buf_read_fd(int fd, buf_t *buf, size_t bytes)
+{
+	assert(buf);
+
+	size_t toread = bytes;
+	ssize_t n = 0;
+	ssize_t total_read = 0;
+	size_t buf_size = buf->buf_size;
+	char *p = buf->data;
+
+	if (bytes <= 0)
+		return 0;
+
+	if (bytes > buf_size)
+		buf_extend(buf, (bytes - buf_size));
+
+	while (toread > 0)
+	{
+		n = read(fd, p, toread);
+		if (n < 0)
+		{
+			if (errno == EINTR)
+				continue;
+			else
+				goto fail;
+		}
+
+		p += n;
+		toread -= n;
+		total_read += n;
+
+		__push_buf_tail(buf, (size_t)n);
+	}
+
+	return total_read;
+
+	fail:
+	return (ssize_t)-1;
 }
