@@ -1,7 +1,7 @@
 CC := gcc
 CFLAGS := -Wall -Werror
 BUILD := 0.0.1
-VPATH := include:src
+VPATH := include
 DEBUG := 0
 
 .PHONY: clean
@@ -26,8 +26,13 @@ ALL_OBJS := $(MM_OBJS) $(HTTP_OBJS) $(PRIMARY_OBJS)
 webreaper: $(ALL_OBJS)
 ifeq ($(DEBUG),1)
 	@echo Compiling debug v$(BUILD)
-	$(CC) $(CFLAGS) -Iinclude -g -DDEBUG $^ -o webreaper
+	cd $(MM_DIR); make DEBUG=1
+	cd $(HTTP_DIR); make DEBUG=1
+	cd $(TOP_DIR); make DEGBUG=1
 else
 	@echo Compiling v$(BUILD)
-	$(CC) $(CFLAGS) -Iinclude $^ -o webreaper
+	cd $(MM_DIR); make
+	cd $(HTTP_DIR); make
+	cd $(TOP_DIR); make
 endif
+	$(CC) $(CFLAGS) -Iinclude $^ -o webreaper

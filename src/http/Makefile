@@ -1,5 +1,6 @@
 CC := gcc
 CFLAGS := -Wall -Werror
+DEBUG := 0
 
 INCLUDE_DIR := ../../include
 
@@ -17,7 +18,11 @@ HTTP_OBJS := $(HTTP_SOURCE:.c=.o)
 .PHONY: clean
 
 $(HTTP_OBJS): $(HTTP_SOURCE) $(HTTP_DEPENDENCIES)
+ifeq ($(DEBUG),1)
+	$(CC) -c $(CFLAGS) -I$(INCLUDE_DIR) -g -DDEBUG $^
+else
 	$(CC) -c $(CFLAGS) -I$(INCLUDE_DIR) $^
+endif
 
 clean:
 	rm $(HTTP_OBJS)
