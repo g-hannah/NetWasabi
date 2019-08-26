@@ -19,7 +19,8 @@ MM_OBJS := \
 	$(MM_DIR)/malloc.o
 
 HTTP_OBJS := \
-	$(HTTP_DIR)/http.o
+	$(HTTP_DIR)/http.o \
+	$(HTTP_DIR)/http_parse_links.o
 
 ALL_OBJS := $(MM_OBJS) $(HTTP_OBJS) $(PRIMARY_OBJS)
 
