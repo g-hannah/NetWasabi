@@ -1,6 +1,11 @@
+#include <assert.h>
+#include <errno.h>
+#include <fcntl.h>
 #include <stdio.h>
 #include <stdlib.h>
+#include <sys/stat.h>
 #include <unistd.h>
+#include "buffer.h"
 #include "cache.h"
 #include "http.h"
 #include "webreaper.h"
@@ -22,15 +27,55 @@ main(int argc, char *argv[])
 							wr_cache_http_link_ctor,
 							wr_cache_http_link_dtor);
 
-	printf("created cache for http_link_t objects\n");
+	printf("created cache\n");
 
-	http_link_t *hl = wr_cache_alloc(http_link_cache);
+	buf_t buf;
 
-	printf("obtained an object from cache\n");
+	buf_init(&buf, (size_t)16384);
 
-	wr_cache_dealloc(http_link_cache, (void *)hl);
+	printf("initialised buffer (magic=0x%02x)\n", (unsigned)buf.magic);
 
-	printf("returned object to cache\n");
+	static char *filename = "/home/oppa/Projects/WebReaper/humans.txt";
+
+	int fd = open(filename, O_RDONLY);
+	if (fd < 0)
+		goto fail;
+
+	printf("opened file on fd %d\n", fd);
+
+	struct stat statb;
+
+	clear_struct(&statb);
+	if (lstat(filename, &statb) < 0)
+		goto fail;
+
+	printf("reading into buffer\n");
+	buf_read_fd(fd, &buf, statb.st_size);
+
+	assert(buf.buf_tail != buf.data);
+
+	http_parse_links(http_link_cache, &buf);
+
+	http_link_t	*hl = (http_link_t *)http_link_cache->cache;
+
+	int capacity = http_link_cache->capacity;
+
+	while(capacity)
+	{
+		if (hl->url)
+			printf("%s (%ld)\n", hl->url, hl->time_reaped);
+
+		wr_cache_dealloc(http_link_cache, (void *)hl);
+		hl->used = 0;
+
+		while (capacity && !hl->used)
+		{
+			++hl;
+			--capacity;
+		}
+	}
+
+	buf_destroy(&buf);
 
 	wr_cache_destroy(http_link_cache);
 
@@ -38,8 +83,9 @@ main(int argc, char *argv[])
 
 	exit(EXIT_SUCCESS);
 
-	//fail:
-	//exit(EXIT_FAILURE);
+	fail:
+	fprintf(stderr, "%s\n", strerror(errno));
+	exit(EXIT_FAILURE);
 }
 
 static void
