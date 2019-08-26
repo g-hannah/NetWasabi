@@ -117,6 +117,7 @@ wr_cache_destroy(wr_cache_t *cachep)
 	}
 
 	free(cachep->cache);
+	free(cachep->free_bitmap);
 	free(cachep);
 
 	return;
