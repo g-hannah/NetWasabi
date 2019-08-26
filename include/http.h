@@ -24,27 +24,8 @@ typedef struct http_link_t
 	int http_status;
 	char *url;
 	time_t time_reaped;
-	struct http_link_t *next;
 	int used;
 } http_link_t;
-
-/**
- * for_each_http_link - iterate over linked list
- * @ptr: &http_link_t to use as a loop cursor
- * @head: the head for the list
- */
-#define for_each_http_link(ptr, head) \
-	for (ptr = (head)->next; ptr != (head); ptr = ptr->next)
-
-/**
- * for_each_http_link_safe - iterate over linked list, safe to remove members
- * @ptr: &http_link_t to use as a loop cursor
- * @n: another &http_link_t to use as temp storage
- * @head: head of linked list
- */
-#define for_each_http_link_safe(ptr, n, head) \
-	for (ptr = (head)->next, n = ptr->next; ptr != (head); \
-				ptr = n, n = ptr->next)
 
 #define http_inc_cookies(h) (++(h)->nr_cookies)
 #define http_dec_cookies(h) (--(h)->nr_cookies)
