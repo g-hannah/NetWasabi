@@ -3,6 +3,7 @@
 
 #include <stdint.h>
 #include <time.h>
+#include "buffer.h"
 #include "cache.h"
 
 #define HTTP_OK 200u
@@ -44,6 +45,7 @@ typedef struct http_state_t
 	char *base_page; /* website specified by user */
 } http_state_t;
 
+int http_parse_links(wr_cache_t *, buf_t *) __nonnull((1,2)) __wur;
 int wr_cache_http_link_ctor(void *) __nonnull((1)) __wur;
 void wr_cache_http_link_dtor(void *) __nonnull((1));
 
