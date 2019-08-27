@@ -71,9 +71,9 @@ do {\
 			__p = memchr(__q, '\n', (__e - __q));\
 			strncpy(tmp, __q, (__p - __q));\
 			tmp[__p - __q] = 0;\
+			__blacklist_token(tmp);\
 		}\
 	}\
-	__blacklist_token(tmp);\
 } while(0)
 
 int
