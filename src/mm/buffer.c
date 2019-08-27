@@ -135,12 +135,10 @@ buf_append(buf_t *buf, char *str)
 	{
 		buf_extend(buf, len);
 	}
-	else
-	{
-		buf->buf_tail += len;
-	}
 
 	strcat(buf->buf_tail, str);
+	
+	__buf_pull_tail(buf, len);
 
 	return 0;
 }
