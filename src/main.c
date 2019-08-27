@@ -58,20 +58,47 @@ main(int argc, char *argv[])
 
 	http_link_t	*hl = (http_link_t *)http_link_cache->cache;
 
-	int capacity = http_link_cache->capacity;
+	wr_cache_t *ptr = http_link_cache;
+	int nr_used = wr_cache_nr_used(ptr);
+	int remaining = wr_cache_capacity(ptr);
 
-	while(capacity)
+	for(;;)
 	{
+		if (nr_used > 0 && !wr_cache_obj_used(ptr, hl))
+		{
+			while (remaining && !wr_cache_obj_used(ptr, hl))
+			{
+				++hl;
+				--remaining;
+			}
+
+			if (unlikely(!remaining && !wr_cache_obj_used(ptr, hl)))
+			{
+				fprintf(stderr,
+						"main: used objects=%d but iterated over entire cache (remaining=%d)\n",
+						nr_used, remaining);
+				abort();
+			}
+		}
+
 		if (hl->url)
 			printf("%s (%ld)\n", hl->url, hl->time_reaped);
 
 		wr_cache_dealloc(http_link_cache, (void *)hl);
-		hl->used = 0;
 
-		while (capacity && !hl->used)
+		--nr_used;
+
+		if (!nr_used)
 		{
-			++hl;
-			--capacity;
+			if (ptr->next)
+			{
+				ptr = ptr->next;
+				nr_used = wr_cache_nr_used(ptr);
+				remaining = wr_cache_capacity(ptr);
+				hl = (http_link_t *)ptr->cache;
+			}
+			else
+				break;
 		}
 	}
 
