@@ -27,92 +27,46 @@ main(int argc, char *argv[])
 							wr_cache_http_link_ctor,
 							wr_cache_http_link_dtor);
 
-	printf("created cache\n");
+	//http_link_t	*hl = (http_link_t *)http_link_cache->cache;
+	void *obj = NULL;
+	void *prev_obj = NULL;
+	int capacity = wr_cache_capacity(http_link_cache);
+	int i;
+	int nr_used = 0;
 
-	buf_t buf;
-
-	buf_init(&buf, (size_t)16384);
-
-	printf("initialised buffer (magic=0x%02x)\n", (unsigned)buf.magic);
-
-	static char *filename = "/home/oppa/Projects/WebReaper/humans.txt";
-
-	int fd = open(filename, O_RDONLY);
-	if (fd < 0)
-		goto fail;
-
-	printf("opened file on fd %d\n", fd);
-
-	struct stat statb;
-
-	clear_struct(&statb);
-	if (lstat(filename, &statb) < 0)
-		goto fail;
-
-	printf("reading into buffer\n");
-	buf_read_fd(fd, &buf, statb.st_size);
-
-	assert(buf.buf_tail != buf.data);
-
-	http_parse_links(http_link_cache, &buf);
-
-	http_link_t	*hl = (http_link_t *)http_link_cache->cache;
-
-	wr_cache_t *ptr = http_link_cache;
-	int nr_used = wr_cache_nr_used(ptr);
-	int remaining = wr_cache_capacity(ptr);
-
-	for(;;)
+	for (i = 0; i < capacity; ++i)
 	{
-		if (nr_used > 0 && !wr_cache_obj_used(ptr, hl))
-		{
-			while (remaining && !wr_cache_obj_used(ptr, hl))
-			{
-				++hl;
-				--remaining;
-			}
-
-			if (unlikely(!remaining && !wr_cache_obj_used(ptr, hl)))
-			{
-				fprintf(stderr,
-						"main: used objects=%d but iterated over entire cache (remaining=%d)\n",
-						nr_used, remaining);
-				abort();
-			}
-		}
-
-		if (hl->url)
-			printf("%s (%ld)\n", hl->url, hl->time_reaped);
-
-		wr_cache_dealloc(http_link_cache, (void *)hl);
-
-		--nr_used;
-
-		if (!nr_used)
-		{
-			if (ptr->next)
-			{
-				ptr = ptr->next;
-				nr_used = wr_cache_nr_used(ptr);
-				remaining = wr_cache_capacity(ptr);
-				hl = (http_link_t *)ptr->cache;
-			}
-			else
-				break;
-		}
+		obj = wr_cache_alloc(http_link_cache);
+		assert(obj);
+		printf("obj @ %p\n", obj);
+		assert(obj != prev_obj);
+		printf("prev_obj @ %p\n", prev_obj);
+		assert(wr_cache_obj_used(http_link_cache, obj));
+		printf("obj used=%d\n", wr_cache_obj_used(http_link_cache, obj));
+		++nr_used;
+		assert(wr_cache_nr_used(http_link_cache) == nr_used);
+		printf("nr_used (%d) == ->nr_used (%d)\n",
+			nr_used, wr_cache_nr_used(http_link_cache));
+		prev_obj = obj;
 	}
 
-	buf_destroy(&buf);
-
-	wr_cache_destroy(http_link_cache);
-
-	printf("destroyed the cache\n");
+	obj = http_link_cache->cache;
+	for (i = 0; i < capacity; ++i)
+	{
+		printf("obj @ %p\n", obj);
+		wr_cache_dealloc(http_link_cache, obj);
+		assert(!wr_cache_obj_used(http_link_cache, obj));
+		printf("obj used=%d\n", wr_cache_obj_used(http_link_cache, obj));
+		obj = (void *)((char *)obj + sizeof(http_link_t));
+	}
 
 	exit(EXIT_SUCCESS);
 
+#if 0
 	fail:
 	fprintf(stderr, "%s\n", strerror(errno));
 	exit(EXIT_FAILURE);
+#endif
 }
 
 static void
