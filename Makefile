@@ -11,7 +11,8 @@ HTTP_DIR := src/http
 TOP_DIR := src
 
 PRIMARY_OBJS := \
-	$(TOP_DIR)/main.o
+	$(TOP_DIR)/main.o \
+	$(TOP_DIR)/robots.o
 
 MM_OBJS := \
 	$(MM_DIR)/buffer.o \
