@@ -8,6 +8,21 @@
 #include "malloc.h"
 #include "webreaper.h"
 
+inline int connection_socket(connection_t *conn)
+{
+	return conn->sock;
+}
+
+inline SSL *connection_tls(connection_t *conn)
+{
+	return conn->ssl;
+}
+
+inline int connection_using_tls(connection_t *conn)
+{
+	return conn->using_tls;
+}
+
 int wr_cache_http_link_ctor(void *http_link)
 {
 	http_link_t *hl = (http_link_t *)http_link;
@@ -35,6 +50,36 @@ void wr_cache_http_link_dtor(void *http_link)
 
 	clear_struct(hl);
 	return;
+}
+
+int
+http_send_request(connection_t *conn, const char *http_verb, const char *target)
+{
+	assert(conn);
+	assert(http_verb);
+	assert(target);
+
+	static char tmp_buf[4096];
+	buf_t *buf = &conn->write_buf;
+
+	memset(tmp_buf, 0, 4096);
+	buf_clear(buf);
+
+	sprintf(tmp_buf,
+			"%s /%s HTTP/1.1\r\n"
+			"Accept: text/html\r\n"
+			"User-Agent: WebReaper/0.0.1 (Linux x86_64)\r\n"
+			"\r\n",
+			http_verb, target);
+
+	buf_append(buf, tmp_buf);
+
+	if (connection_using_tls(conn))
+		buf_write_tls(connection_tls(conn), buf);
+	else
+		buf_write_socket(connection_socket(conn), buf);
+
+	return 0;
 }
 
 int
