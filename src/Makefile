@@ -7,7 +7,8 @@ INCLUDE_DIR := ../include
 PRIMARY_DEPENDENCIES = \
 	$(INCLUDE_DIR)/buffer.h \
 	$(INCLUDE_DIR)/cache.h \
-	$(INCLUDE_DIR)/http.h
+	$(INCLUDE_DIR)/http.h \
+	$(INCLUDE_DIR)/robots.h
 
 PRIMARY_SOURCE = \
 	main.c \
