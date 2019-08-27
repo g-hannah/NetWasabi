@@ -23,20 +23,20 @@ static char line_buffer[1024];
 
 #define CONSUME_UNTIL(c, sp, p, t) \
 do {\
-	p = memchr((sp), (c), ((t) - (sp)));\
+	(p) = memchr((sp), (c), ((t) - (sp)));\
 	(sp) = (p);\
 } while(0)
 
 #define FIND_TOKEN(tok, p, sp, t) \
 do {\
-	p = strstr((sp), (tok));\
+	(p) = strstr((sp), (tok));\
 	if ((p) > (t))\
-		p = NULL;\
+		(p) = NULL;\
 } while(0)
 
 #define GET_LINE(p, sp, t) \
 do {\
-	p = memchr((sp), '\n', ((t) - (sp)));\
+	(p) = memchr((sp), '\n', ((t) - (sp)));\
 	if (p)\
 	{\
 		strncpy(line_buffer, (sp), ((p) - (sp)));\
