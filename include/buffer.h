@@ -1,6 +1,7 @@
 #ifndef BUFFER_H
 #define BUFFER_H 1
 
+#include <openssl/ssl.h>
 #include <stdlib.h>
 
 #define DEFAULT_BUFSIZE 16384
@@ -28,6 +29,9 @@ int buf_append(buf_t *, char *) __nonnull((1,2)) __wur;
 void buf_clear(buf_t *) __nonnull((1));
 int buf_integrity(buf_t *) __nonnull((1)) __wur;
 ssize_t buf_read_fd(int, buf_t *, size_t) __nonnull((2)) __wur;
+ssize_t buf_read_socket(int, buf_t *) __nonnull((2)) __wur;
+ssize_t buf_write_socket(int, buf_t *) __nonnull((2)) __wur;
+ssize_t buf_write_tls(SSL *, buf_t *) __nonnull((1,2)) __wur;
 int toggle_buffer_size(buf_t *, size_t) __nonnull((1)) __wur;
 
 #endif /* !defined BUFFER_H */
