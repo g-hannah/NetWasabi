@@ -25,6 +25,8 @@ HTTP_OBJS := \
 
 ALL_OBJS := $(MM_OBJS) $(HTTP_OBJS) $(PRIMARY_OBJS)
 
+LIBS=-lssl
+
 webreaper: $(ALL_OBJS)
 ifeq ($(DEBUG),1)
 	@echo Compiling debug v$(BUILD)
@@ -37,4 +39,4 @@ else
 	cd $(HTTP_DIR); make
 	cd $(TOP_DIR); make
 endif
-	$(CC) $(CFLAGS) -Iinclude $^ -o webreaper
+	$(CC) $(CFLAGS) -Iinclude $^ -o webreaper $(LIBS)
