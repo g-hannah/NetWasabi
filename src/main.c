@@ -8,6 +8,7 @@
 #include "buffer.h"
 #include "cache.h"
 #include "http.h"
+#include "robots.h"
 #include "webreaper.h"
 
 //static int get_opts(int, char *[]) __nonnull((2)) __wur;
@@ -21,6 +22,17 @@ main(int argc, char *argv[])
 	//if (get_opts(argc, argv) < 0)
 		//goto fail;
 
+	int rv;
+	buf_t buffer;
+
+	rv = parse_robots(&buffer);
+	rv += 10;
+	int c = rv - 2;
+	rv = c++;
+	rv = --c;
+	rv -= 10;
+
+#if 0
 	wr_cache_t *http_link_cache = wr_cache_create("http_link_cache",
 							sizeof(struct http_link_t),
 							0,
@@ -59,8 +71,9 @@ main(int argc, char *argv[])
 		printf("obj used=%d\n", wr_cache_obj_used(http_link_cache, obj));
 		obj = (void *)((char *)obj + sizeof(http_link_t));
 	}
+#endif
 
-	exit(EXIT_SUCCESS);
+	exit(rv);
 
 #if 0
 	fail:
