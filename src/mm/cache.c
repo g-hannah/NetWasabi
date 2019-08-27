@@ -131,7 +131,7 @@ wr_cache_obj_used(wr_cache_t *cachep, void *obj)
 	 */
 	bm += (offset >> 3);
 
-	return (*bm & (128 >> (offset & 7)));
+	return (*bm & (128 >> (offset & 7))) ? 1 : 0;
 }
 
 /**
