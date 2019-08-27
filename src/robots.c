@@ -1,3 +1,4 @@
+#include <assert.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -48,20 +49,26 @@ do {\
 	}\
 } while(0)
 
+static inline void __blacklist_token(const char *token)
+{
+	return;
+}
+
 #define ADD_RULE(l) \
 do {\
 	char *__p = (l);\
 	char *__q = (l);\
 	size_t len = strlen(l);\
+	char *__e = ((l) + len);\
 	static char tmp[256];\
 	if (strstr((l), "Disallow"))\
 	{\
-		__p = memchr(__q, ' ', (len - __q));\
+		__p = memchr(__q, ' ', (__e - __q));\
 		if (__p)\
 		{\
 			++__p;\
 			__q = __p;\
-			__p = memchr(__q, '\n', (len - __q));\
+			__p = memchr(__q, '\n', (__e - __q));\
 			strncpy(tmp, __q, (__p - __q));\
 			tmp[__p - __q] = 0;\
 		}\
