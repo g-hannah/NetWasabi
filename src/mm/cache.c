@@ -8,7 +8,7 @@
 
 /**
  * __wr_cache_next_free_idx - get index of next free object
- * @cachep: pointer to our &wr_cache_t
+ * @cachep: pointer to the metadata cache structure
  */
 static inline int __wr_cache_next_free_idx(wr_cache_t *cachep)
 {
@@ -55,7 +55,7 @@ static inline int __wr_cache_next_free_idx(wr_cache_t *cachep)
 
 /**
  * __wr_cache_mark_used - mark an object as used
- * @c: pointer to wr_cache_t
+ * @c: pointer to the metadata cache structure
  * @i: the index of the object in the cache
  */
 #define __wr_cache_mark_used(c, i)	\
@@ -66,7 +66,7 @@ do {\
 
 /**
  * __wr_cache_mark_unused - mark an object as unused
- * @c: pointer to wr_cache_t
+ * @c: pointer to the metadata cache structure
  * @i: the index of the object in the cache
  */
 #define __wr_cache_mark_unused(c, i)	\
@@ -75,6 +75,73 @@ do {\
 	(*bm &= (unsigned char) ~(128 >> ((i) & 7)));					\
 } while(0)
 
+/**
+ * wr_cache_nr_used - return the number of objects used
+ * @cachep: pointer to the metadata cache structure
+ */
+inline int wr_cache_nr_used(wr_cache_t *cachep)
+{
+	return (cachep->capacity - cachep->nr_free);
+}
+
+/**
+ * wr_cache_capacity - return capacity of the cache
+ * @cachep: pointer to the metadata cache structure
+ */
+inline int wr_cache_capacity(wr_cache_t *cachep)
+{
+	return cachep->capacity;
+}
+
+/**
+ * wr_cache_obj_used - determine if an object is active or not.
+ * @cachep: pointer to the metadata cache structure
+ * @obj pointer to the queried cache object
+ */
+inline int
+wr_cache_obj_used(wr_cache_t *cachep, void *obj)
+{
+	off_t offset;
+	int capacity;
+	size_t objsize = cachep->objsize;
+	wr_cache_t *ptr = cachep;
+
+	capacity = cachep->capacity;
+	offset = (((char *)obj - (char *)ptr->cache) / objsize);
+
+	/*
+	 * Then the obj belongs to another cache in the linked list.
+	 */
+	if (offset > (off_t)capacity)
+	{
+		while (offset > (off_t)capacity)
+		{
+			ptr = ptr->next;
+			offset = ((char *)obj - (char *)ptr->cache);
+		}
+	}
+
+	unsigned char *bm = ptr->free_bitmap;
+
+	/*
+	 * If the object is the, say, 10th object,
+	 * then bit 9 represents it, so go up
+	 * 9/8 bytes = 1 byte; then move up the
+	 * remaining bit.
+	 */
+	bm += (offset >> 3);
+
+	return (*bm & (128 >> (offset & 7)));
+}
+
+/**
+ * wr_cache_create - create a new cache
+ * @name: name of the cache for statistics
+ * @size: size of the type of object that will be stored in the cache
+ * @alignment: minimum alignment of the cache objects
+ * @ctor: pointer to a constructor function called on each object
+ * @dtor: pointer to a destructor function called on each dealloc()
+ */
 wr_cache_t *
 wr_cache_create(char *name,
 		size_t size,
@@ -100,6 +167,7 @@ wr_cache_create(char *name,
 	}
 
 	cachep->capacity = capacity;
+	cachep->nr_free = capacity;
 	cachep->next = NULL;
 	cachep->ctor = ctor;
 	cachep->dtor = dtor;
@@ -121,13 +189,17 @@ wr_cache_create(char *name,
 	return cachep;
 }
 
+/**
+ * wr_cache_destroy - destroy a cache
+ * @cachep: pointer to the metadata cache structure
+ */
 void
 wr_cache_destroy(wr_cache_t *cachep)
 {
 	assert(cachep);
 
 	int	i;
-	int	capacity;
+	int capacity = wr_cache_capacity(cachep);
 	void *cur_obj = NULL;
 	size_t objsize = cachep->objsize;
 	wr_cache_t *ptr = cachep;
@@ -135,27 +207,32 @@ wr_cache_destroy(wr_cache_t *cachep)
 
 	while (ptr)
 	{
-		capacity = ptr->capacity;
+		capacity = wr_cache_capacity(ptr);
+
 		for (i = 0; i < capacity; ++i)
 		{
 			cur_obj = (void *)((char *)ptr->cache + (objsize * i));
 
 			if (ptr->dtor)
 				ptr->dtor(cur_obj);
-
-			free(ptr->free_bitmap);
-
-			tmp = ptr->next;
-
-			free(ptr->cache);
-			free(ptr);
-			ptr = tmp;
 		}
+
+		tmp = ptr->next;
+
+		free(ptr->cache);
+		free(ptr->free_bitmap);
+		free(ptr);
+
+		ptr = tmp;
 	}
 
 	return;
 }
 
+/**
+ * wr_cache_alloc - allocate an object from a cache
+ * @cachep: pointer to the metadata cache structure
+ */
 void *
 wr_cache_alloc(wr_cache_t *cachep)
 {
@@ -189,6 +266,8 @@ wr_cache_alloc(wr_cache_t *cachep)
 				cachep->dtor);
 
 		slot = ptr->next->cache;
+		--(ptr->next->nr_free);
+		__wr_cache_mark_used(ptr, (int)0);
 
 		return slot;
 	}
@@ -200,11 +279,17 @@ wr_cache_alloc(wr_cache_t *cachep)
 
 	cache = ptr->cache;
 	slot = (void *)((char *)cache + (objsize * idx));
+	--(ptr->nr_free);
 	__wr_cache_mark_used(ptr, idx);
 
 	return slot;
 }
 
+/**
+ * wr_cache_dealloc - return an object to the cache
+ * @cachep: pointer to the metadata cache structure
+ * @slot: the object to be returned
+ */
 void
 wr_cache_dealloc(wr_cache_t *cachep, void *slot)
 {
