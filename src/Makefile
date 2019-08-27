@@ -10,7 +10,8 @@ PRIMARY_DEPENDENCIES = \
 	$(INCLUDE_DIR)/http.h
 
 PRIMARY_SOURCE = \
-	main.c
+	main.c \
+	robots.c
 
 PRIMARY_OBJS := $(PRIMARY_SOURCE:.c=.o)
 
