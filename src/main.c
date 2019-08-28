@@ -22,15 +22,10 @@ main(int argc, char *argv[])
 	//if (get_opts(argc, argv) < 0)
 		//goto fail;
 
-	int rv;
 	buf_t buffer;
 
-	rv = parse_robots(&buffer);
-	rv += 10;
-	int c = rv - 2;
-	rv = c++;
-	rv = --c;
-	rv -= 10;
+	if (parse_robots(&buffer) < 0)
+		goto fail;
 
 #if 0
 	wr_cache_t *http_link_cache = wr_cache_create("http_link_cache",
@@ -73,13 +68,11 @@ main(int argc, char *argv[])
 	}
 #endif
 
-	exit(rv);
+	exit(EXIT_SUCCESS);
 
-#if 0
 	fail:
 	fprintf(stderr, "%s\n", strerror(errno));
 	exit(EXIT_FAILURE);
-#endif
 }
 
 static void
