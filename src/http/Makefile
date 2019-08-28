@@ -7,6 +7,7 @@ INCLUDE_DIR := ../../include
 HTTP_DEPENDENCIES = \
 	$(INCLUDE_DIR)/buffer.h \
 	$(INCLUDE_DIR)/cache.h \
+	$(INCLUDE_DIR)/connection.h \
 	$(INCLUDE_DIR)/http.h \
 	$(INCLUDE_DIR)/malloc.h
 
