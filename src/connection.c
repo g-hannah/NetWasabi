@@ -9,11 +9,35 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <unistd.h>
 #include "buffer.h"
 #include "cache.h"
 #include "connection.h"
 #include "http.h"
+#include "malloc.h"
 #include "webreaper.h"
+
+void
+conn_init(connection_t *conn)
+{
+	assert(conn);
+
+	clear_struct(conn);
+	conn->host = wr_calloc(HTTP_URL_MAX+1, 1);
+
+	return;
+}
+
+void
+conn_destroy(connection_t *conn)
+{
+	assert(conn);
+
+	free(conn->host);
+	clear_struct(conn);
+
+	return;
+}
 
 inline int conn_socket(connection_t *conn)
 {
@@ -45,25 +69,22 @@ __init_openssl(void)
 /**
  * open_connection - set up a connection with the target site
  * @conn: &connection_t that is initialised in this function
- * @hostname: the domain name of the site
  * @use_tls: 1 to use HTTPS; 0 to use HTTP
  */
 int
-open_connection(connection_t *conn, const char *hostname, int use_tls)
+open_connection(connection_t *conn, int use_tls)
 {
 	assert(conn);
-	assert(hostname);
 
 	struct sockaddr_in sock4;
 	struct addrinfo *ainf = NULL;
 	struct addrinfo *aip = NULL;
 
-	clear_struct(conn);
 	buf_init(&conn->read_buf, HTTP_DEFAULT_READ_BUF_SIZE);
 	buf_init(&conn->write_buf, HTTP_DEFAULT_WRITE_BUF_SIZE);
 	clear_struct(&sock4);
 
-	if (getaddrinfo(hostname, NULL, NULL, &ainf) < 0)
+	if (getaddrinfo(conn->host, NULL, NULL, &ainf) < 0)
 	{
 		fprintf(stderr, "open_connection: getaddrinfo error (%s)\n", gai_strerror(errno));
 		goto fail;
@@ -97,6 +118,8 @@ open_connection(connection_t *conn, const char *hostname, int use_tls)
 		goto fail_release_ainf;
 	}
 
+	printf("connected to %s @ %s\n", conn->host, inet_ntoa(sock4.sin_addr));
+
 	if (use_tls)
 	{
 		__init_openssl();
@@ -117,4 +140,25 @@ open_connection(connection_t *conn, const char *hostname, int use_tls)
 
 	fail:
 	return -1;
+}
+
+void
+close_connection(connection_t *conn)
+{
+	assert(conn);
+
+	shutdown(conn->sock, SHUT_RDWR);
+	close(conn->sock);
+	conn->sock = -1;
+
+	if (conn_using_tls(conn))
+	{
+		SSL_CTX_free(conn->ssl_ctx);
+		SSL_free(conn->ssl);
+	}
+
+	buf_destroy(&conn->read_buf);
+	buf_destroy(&conn->write_buf);
+
+	return;
 }
