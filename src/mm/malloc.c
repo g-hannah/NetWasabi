@@ -54,7 +54,7 @@ wr_realloc(void *old_ptr, size_t size)
 }
 
 char *
-wr_strdup(char *str)
+wr_strdup(const char *str)
 {
 	char *dup_str = strdup(str);
 
