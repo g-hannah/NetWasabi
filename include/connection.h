@@ -14,6 +14,7 @@ typedef struct connection_t
 	SSL_CTX *ssl_ctx;
 } connection_t;
 
+int open_connection(connection_t *, const char *, int) __nonnull((1,2)) __wur;
 int conn_using_tls(connection_t *) __nonnull((1)) __wur;
 int conn_socket(connection_t *) __nonnull((1)) __wur;
 SSL *conn_tls(connection_t *) __nonnull((1)) __wur;
