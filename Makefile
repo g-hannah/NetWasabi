@@ -12,7 +12,9 @@ TOP_DIR := src
 
 PRIMARY_OBJS := \
 	$(TOP_DIR)/main.o \
-	$(TOP_DIR)/robots.o
+	$(TOP_DIR)/connection.o \
+	$(TOP_DIR)/robots.o \
+	$(TOP_DIR)/webreaper.o
 
 MM_OBJS := \
 	$(MM_DIR)/buffer.o \
