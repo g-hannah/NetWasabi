@@ -25,6 +25,12 @@
 #define HTTP_GET		"GET"
 #define HTTP_HEAD		"HEAD"
 
+#define HTTP_DEFAULT_READ_BUF_SIZE	32768
+#define HTTP_DEFAULT_WRITE_BUF_SIZE	4096
+
+#define HTTP_PORT_NR	80
+#define HTTPS_PORT_NR 443
+
 typedef struct http_link_t
 {
 	int http_status;
