@@ -30,6 +30,8 @@ void buf_clear(buf_t *) __nonnull((1));
 int buf_integrity(buf_t *) __nonnull((1)) __wur;
 ssize_t buf_read_fd(int, buf_t *, size_t) __nonnull((2)) __wur;
 ssize_t buf_read_socket(int, buf_t *) __nonnull((2)) __wur;
+ssize_t buf_read_tls(SSL *, buf_t *) __nonnull((1,2)) __wur;
+ssize_t buf_write_fd(int, buf_t *) __nonnull((2)) __wur;
 ssize_t buf_write_socket(int, buf_t *) __nonnull((2)) __wur;
 ssize_t buf_write_tls(SSL *, buf_t *) __nonnull((1,2)) __wur;
 int toggle_buffer_size(buf_t *, size_t) __nonnull((1)) __wur;
