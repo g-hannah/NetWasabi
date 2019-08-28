@@ -27,7 +27,7 @@ HTTP_OBJS := \
 
 ALL_OBJS := $(MM_OBJS) $(HTTP_OBJS) $(PRIMARY_OBJS)
 
-LIBS=-lssl
+LIBS=-lcrypto -lssl
 
 webreaper: $(ALL_OBJS)
 ifeq ($(DEBUG),1)
