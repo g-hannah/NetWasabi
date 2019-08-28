@@ -1,6 +1,7 @@
 #include <assert.h>
 #include <errno.h>
 #include <fcntl.h>
+#include <limits.h>
 #include <openssl/ssl.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -260,6 +261,110 @@ buf_read_socket(int sock, buf_t *buf)
 }
 
 ssize_t
+buf_read_tls(SSL *ssl, buf_t *buf)
+{
+	assert(ssl);
+	assert(buf);
+
+	size_t slack = buf_slack(buf);
+	ssize_t n;
+	ssize_t total = 0;
+	int ssl_error = 0;
+	int read_socket = 0;
+	int slept_for = 0;
+	struct timeval timeout = {0};
+	fd_set rdfds;
+
+	read_socket = SSL_get_rfd(ssl);
+	fcntl(read_socket, F_SETFL, O_NONBLOCK);
+
+	while (1)
+	{
+		n = SSL_read(ssl, buf->buf_tail, slack);
+
+		if (n < 0)
+		{
+			if (errno == EINTR)
+				continue;
+			else
+			{
+				ssl_error = SSL_get_error(ssl, n);
+
+				switch(ssl_error)
+				{
+					case SSL_ERROR_NONE:
+						continue;
+					case SSL_ERROR_WANT_READ:
+						FD_ZERO(&rdfds);
+						FD_SET(read_socket, &rdfds);
+						timeout.tv_sec = 1;
+						slept_for = select(read_socket+1, &rdfds, NULL, NULL, &timeout);
+
+						if (slept_for < 0)
+						{
+							fprintf(stderr, "buf_read_tls: select error (%s)\n", strerror(errno));
+							goto fail;
+						}
+						else
+						if (!slept_for)
+							goto out;
+						else
+							continue;
+				}
+			}
+		}
+
+		total += n;
+		slack -= n;
+		__buf_pull_tail(buf, (size_t)n);
+
+		if (!slack)
+		{
+			buf_extend(buf, HTTP_DEFAULT_READ_BUF_SIZE);
+			slack = buf_slack(buf);
+		}
+			
+
+	} /* while (1) */
+
+	out:
+	return total;
+
+	fail:
+	return -1;
+	
+}
+
+ssize_t
+buf_write_fd(int fd, buf_t *buf)
+{
+	assert(buf);
+
+	size_t towrite = buf->data_len;
+	ssize_t n;
+	ssize_t total = 0;
+
+	while (towrite > 0)
+	{
+		n = write(fd, buf->buf_head, towrite);
+
+		if (n < 0)
+			goto fail;
+
+		total += n;
+
+		__buf_pull_head(buf, (size_t)n);
+	}
+
+	__buf_reset_head(buf);
+
+	return total;
+
+	fail:
+	return -1;
+}
+
+ssize_t
 buf_write_socket(int sock, buf_t *buf)
 {
 	assert(buf);
@@ -298,13 +403,13 @@ buf_write_tls(SSL *ssl, buf_t *buf)
 	ssize_t total = 0;
 	int ssl_error;
 	int write_sock;
-	int time_slept = 0;
+	int slept_for = 0;
 	struct timeval timeout = {0};
 	fd_set wrfds;
 
 	write_sock = SSL_get_wfd(ssl);
 	fcntl(write_sock, F_SETFL, O_NONBLOCK);
-	
+
 	while (towrite > 0)
 	{
 		n = SSL_write(ssl, buf->buf_head, towrite);
@@ -328,14 +433,14 @@ buf_write_tls(SSL *ssl, buf_t *buf)
 						FD_ZERO(&wrfds);
 						FD_SET(write_sock, &wrfds);
 						timeout.tv_sec = 1;
-						time_slept = select(write_sock+1, NULL, &wrfds, NULL, &timeout);
-						if (time_slept < 0)
+						slept_for = select(write_sock+1, NULL, &wrfds, NULL, &timeout);
+						if (slept_for < 0)
 						{
 							fprintf(stderr, "buf_write_tls: select error (%s)\n", strerror(errno));
 							goto fail;
 						}
 						else
-						if (time_slept == 0)
+						if (slept_for == 0)
 						{
 							goto out;
 						}
@@ -353,9 +458,8 @@ buf_write_tls(SSL *ssl, buf_t *buf)
 
 	} /* while (towrite > 0) */
 
-	__buf_reset_head(buf);
-
 	out:
+	__buf_reset_head(buf);
 	return total;
 
 	fail:
