@@ -23,5 +23,7 @@
 	(type *)((char *)__mptr - offsetof(type, member)); \
 })
 #endif
+
+extern char **forbidden_tokens;
 	
 #endif /* !defined WEBREAPER_H */
