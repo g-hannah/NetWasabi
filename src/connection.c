@@ -1,7 +1,9 @@
 #include <arpa/inet.h>
+#include <assert.h>
 #include <errno.h>
 #include <netdb.h>
-#include <net/inet.h>
+#include <netinet/in.h>
+#include <openssl/conf.h>
 #include <openssl/err.h>
 #include <openssl/ssl.h>
 #include <stdio.h>
@@ -107,7 +109,6 @@ open_connection(connection_t *conn, const char *hostname, int use_tls)
 		conn->using_tls = 1;
 	}
 
-	out:
 	freeaddrinfo(ainf);
 	return 0;
 
