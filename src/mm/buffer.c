@@ -320,7 +320,7 @@ buf_read_tls(SSL *ssl, buf_t *buf)
 
 		if (!slack)
 		{
-			buf_extend(buf, HTTP_DEFAULT_READ_BUF_SIZE);
+			buf_extend(buf, buf->buf_size);
 			slack = buf_slack(buf);
 		}
 			
