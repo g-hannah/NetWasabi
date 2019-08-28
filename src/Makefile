@@ -7,12 +7,17 @@ INCLUDE_DIR := ../include
 PRIMARY_DEPENDENCIES = \
 	$(INCLUDE_DIR)/buffer.h \
 	$(INCLUDE_DIR)/cache.h \
+	$(INCLUDE_DIR)/connection.h \
 	$(INCLUDE_DIR)/http.h \
-	$(INCLUDE_DIR)/robots.h
+	$(INCLUDE_DIR)/malloc.h \
+	$(INCLUDE_DIR)/robots.h \
+	$(INCLUDE_DIR)/webreaper.h
 
 PRIMARY_SOURCE = \
 	main.c \
-	robots.c
+	connection.c \
+	robots.c \
+	webreaper.c
 
 PRIMARY_OBJS := $(PRIMARY_SOURCE:.c=.o)
 
