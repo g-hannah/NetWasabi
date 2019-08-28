@@ -13,7 +13,6 @@
 #include "http.h"
 #include "webreaper.h"
 
-
 inline int conn_socket(connection_t *conn)
 {
 	return conn->sock;
