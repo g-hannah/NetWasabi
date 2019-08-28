@@ -1,11 +1,11 @@
 #ifndef HTTP_H
 #define HTTP_H 1
 
-#include <openssl/ssl.h>
 #include <stdint.h>
 #include <time.h>
 #include "buffer.h"
 #include "cache.h"
+#include "connection.h"
 
 #define HTTP_OK 200u
 #define HTTP_MOVED_PERMANENTLY 301u
@@ -45,17 +45,6 @@ typedef struct http_state_t
 	int nr_cookies; /* number cookies we have set */
 	char *base_page; /* website specified by user */
 } http_state_t;
-
-
-typedef struct connection_t
-{
-	int sock;
-	int using_tls;
-	SSL *ssl;
-	SSL_CTX *ssl_ctx;
-	buf_t read_buf;
-	buf_t write_buf;
-} connection_t;
 
 int connection_using_tls(connection_t *) __nonnull((1)) __wur;
 int connection_socket(connection_t *) __nonnull((1)) __wur;

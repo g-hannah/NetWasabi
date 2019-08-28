@@ -4,24 +4,11 @@
 #include <stdlib.h>
 #include "buffer.h"
 #include "cache.h"
+#include "connection.h"
 #include "http.h"
 #include "malloc.h"
 #include "webreaper.h"
 
-inline int connection_socket(connection_t *conn)
-{
-	return conn->sock;
-}
-
-inline SSL *connection_tls(connection_t *conn)
-{
-	return conn->ssl;
-}
-
-inline int connection_using_tls(connection_t *conn)
-{
-	return conn->using_tls;
-}
 
 int wr_cache_http_link_ctor(void *http_link)
 {
