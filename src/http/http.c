@@ -61,10 +61,34 @@ http_send_request(connection_t *conn, const char *http_verb, const char *target)
 
 	buf_append(buf, tmp_buf);
 
-	if (connection_using_tls(conn))
-		buf_write_tls(connection_tls(conn), buf);
+	if (conn_using_tls(conn))
+	{
+		if (buf_write_tls(conn_tls(conn), buf) == -1)
+			goto fail;
+	}
 	else
-		buf_write_socket(connection_socket(conn), buf);
+	{
+		if (buf_write_socket(conn_socket(conn), buf) == -1)
+			goto fail;
+	}
+
+	return 0;
+
+	fail:
+	return -1;
+}
+
+int
+http_recv_response(connection_t *conn)
+{
+	assert(conn);
+
+	if (conn_using_tls(conn))
+		buf_read_tls(conn->ssl, &conn->read_buf);
+	else
+		buf_read_socket(conn->sock, &conn->read_buf);
+
+	printf("%s", conn->read_buf.buf_head);
 
 	return 0;
 }
