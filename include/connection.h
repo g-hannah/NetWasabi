@@ -10,11 +10,12 @@ typedef struct connection_t
 	SSL *ssl;
 	buf_t read_buf;
 	buf_t write_buf;
+	int using_tls;
 	SSL_CTX *ssl_ctx;
 } connection_t;
 
-int connection_using_tls(connection_t *) __nonnull((1)) __wur;
-int connection_socket(connection_t *) __nonnull((1)) __wur;
-SSL *connection_tls(connection_t *) __nonnull((1)) __wur;
+int conn_using_tls(connection_t *) __nonnull((1)) __wur;
+int conn_socket(connection_t *) __nonnull((1)) __wur;
+SSL *conn_tls(connection_t *) __nonnull((1)) __wur;
 
 #endif /* !defined CONNECTION_H */
