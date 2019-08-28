@@ -9,7 +9,6 @@
 #include "malloc.h"
 #include "webreaper.h"
 
-
 int wr_cache_http_link_ctor(void *http_link)
 {
 	http_link_t *hl = (http_link_t *)http_link;
@@ -39,6 +38,8 @@ void wr_cache_http_link_dtor(void *http_link)
 	return;
 }
 
+#define USER_AGENT "Mozilla/5.0 (X11; Ubuntu; Linux x86_64; rv:67.0) Gecko/20100101 Firefox/67.0"
+
 int
 http_send_request(connection_t *conn, const char *http_verb, const char *target)
 {
@@ -55,9 +56,13 @@ http_send_request(connection_t *conn, const char *http_verb, const char *target)
 	sprintf(tmp_buf,
 			"%s /%s HTTP/1.1\r\n"
 			"Accept: text/html\r\n"
-			"User-Agent: WebReaper/0.0.1 (Linux x86_64)\r\n"
+			"Connection: keep-alive\r\n"
+			"User-Agent: %s\r\n"
+			"Host: %s\r\n"
 			"\r\n",
-			http_verb, target);
+			http_verb, target,
+			USER_AGENT,
+			conn->host);
 
 	buf_append(buf, tmp_buf);
 
@@ -240,4 +245,67 @@ http_response_header(buf_t *buf)
 		return -1;
 
 	return (q - p);
+}
+
+char *
+http_parse_host(char *url, char *host)
+{
+	char *p = url;
+	char *q;
+	size_t url_len = strlen(url);
+	char *endp = (url + url_len);
+
+	if (!strncmp("http", url, 4))
+	{
+		p = memchr(url, '/', url_len);
+		p += 2;
+
+		q = memchr(p, '/', endp - p);
+		if (q)
+			--q;
+		else
+			q = endp;
+
+		strncpy(host, p, (q - p));
+		host[q - p] = 0;
+	}
+	else
+	{
+		q = memchr(p, '/', endp - p);
+		if (q)
+			--q;
+		else
+			q = endp;
+
+		strncpy(host, p, q - p);
+		host[q - p] = 0;
+	}
+
+	return host;
+}
+
+char *
+http_parse_page(char *url, char *page)
+{
+	char *q;
+	size_t url_len = strlen(url);
+	char *endp = (url + url_len);
+
+	q = endp;
+
+	while (*q != 0x2f && q > (url + 1))
+		--q;
+
+	if (q == url)
+		return NULL;
+	else
+	if (q == endp)
+		return NULL;
+
+	++q;
+
+	strncpy(page, q, (endp - q));
+	page[endp - q] = 0;
+
+	return page;
 }
