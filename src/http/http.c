@@ -49,18 +49,32 @@ http_send_request(connection_t *conn, const char *http_verb, const char *target)
 
 	static char tmp_buf[4096];
 	buf_t *buf = &conn->write_buf;
+	buf_t tbuf;
 
-	memset(tmp_buf, 0, 4096);
 	buf_clear(buf);
 
+	buf_init(&tbuf, HTTP_URL_MAX);
+
+	if (strncmp("http", conn->host, 4))
+	{
+		buf_append(&tbuf, "http://");
+		buf_append(&tbuf, conn->host);
+	}
+	else
+		buf_append(&tbuf, conn->host);
+
+	if (*(tbuf.buf_tail - 1) == '/')
+		buf_snip(&tbuf, 1);
+
+	/*
+	 * GET http://newgrounds.com/robots.txt HTTP/1.1
+	 */
 	sprintf(tmp_buf,
-			"%s /%s HTTP/1.1\r\n"
-			"Accept: text/html\r\n"
-			"Connection: keep-alive\r\n"
+			"%s %s/%s HTTP/1.1\r\n"
 			"User-Agent: %s\r\n"
 			"Host: %s\r\n"
 			"\r\n",
-			http_verb, target,
+			http_verb, tbuf.buf_head, target,
 			USER_AGENT,
 			conn->host);
 
@@ -77,9 +91,11 @@ http_send_request(connection_t *conn, const char *http_verb, const char *target)
 			goto fail;
 	}
 
+	buf_destroy(&tbuf);
 	return 0;
 
 	fail:
+	buf_destroy(&tbuf);
 	return -1;
 }
 
@@ -261,9 +277,8 @@ http_parse_host(char *url, char *host)
 		p += 2;
 
 		q = memchr(p, '/', endp - p);
-		if (q)
-			--q;
-		else
+
+		if (!q)
 			q = endp;
 
 		strncpy(host, p, (q - p));
@@ -272,9 +287,8 @@ http_parse_host(char *url, char *host)
 	else
 	{
 		q = memchr(p, '/', endp - p);
-		if (q)
-			--q;
-		else
+
+		if (!q)
 			q = endp;
 
 		strncpy(host, p, q - p);
