@@ -61,6 +61,7 @@ static inline void
 __init_openssl(void)
 {
 	SSL_library_init();
+	SSL_load_error_strings();
 	OPENSSL_config(NULL);
 	OpenSSL_add_all_algorithms();
 	ERR_load_crypto_strings();
@@ -123,7 +124,7 @@ open_connection(connection_t *conn, int use_tls)
 	if (use_tls)
 	{
 		__init_openssl();
-		conn->ssl_ctx = SSL_CTX_new(TLSv1_client_method());
+		conn->ssl_ctx = SSL_CTX_new(TLSv1_2_client_method());
 		assert(conn->ssl_ctx);
 		conn->ssl = SSL_new(conn->ssl_ctx);
 		assert(conn->ssl);
