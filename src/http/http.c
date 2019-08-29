@@ -22,7 +22,7 @@ wr_cache_http_cookie_ctor(void *hh)
 
 	ch->name = wr_calloc(HTTP_HNAME_MAX+1, 1);
 	ch->value = wr_calloc(HTTP_COOKIE_MAX+1, 1);
-	ch->nsize = HTTP_NAME_MAX+1;
+	ch->nsize = HTTP_HNAME_MAX+1;
 	ch->vsize = HTTP_COOKIE_MAX+1;
 
 	if (!ch->name || !ch->value)
