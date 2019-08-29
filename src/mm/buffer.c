@@ -2,6 +2,7 @@
 #include <errno.h>
 #include <fcntl.h>
 #include <limits.h>
+#include <openssl/err.h>
 #include <openssl/ssl.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -144,6 +145,15 @@ buf_append(buf_t *buf, char *str)
 	return 0;
 }
 
+void
+buf_snip(buf_t *buf, size_t how_much)
+{
+	__buf_push_tail(buf, how_much);
+	memset(buf->buf_tail, 0, how_much);
+
+	return;
+}
+
 int
 buf_init(buf_t *buf, size_t bufsize)
 {
@@ -244,8 +254,10 @@ buf_read_socket(int sock, buf_t *buf)
 				goto fail;
 		}
 
+		printf("%.*s\n", (int)(buf->buf_tail - buf->buf_head), buf->buf_head);
 		__buf_pull_tail(buf, (size_t)n);
 		remaining -= n;
+		total += n;
 
 		if (remaining <= 1024)
 		{
@@ -371,6 +383,7 @@ buf_write_socket(int sock, buf_t *buf)
 
 	size_t towrite = buf->data_len;
 	ssize_t n = 0;
+	ssize_t total = 0;
 
 	while (towrite > 0)
 	{
@@ -385,7 +398,11 @@ buf_write_socket(int sock, buf_t *buf)
 
 		__buf_pull_head(buf, (size_t)n);
 		towrite -= n;
+		total += n;
 	}
+
+	__buf_reset_head(buf);
+	return total;
 
 	fail:
 	fprintf(stderr, "buf_write_socket: %s\n", strerror(errno));
@@ -401,54 +418,49 @@ buf_write_tls(SSL *ssl, buf_t *buf)
 	size_t towrite = buf->data_len;
 	ssize_t n = 0;
 	ssize_t total = 0;
-	int ssl_error;
-	int write_sock;
-	int slept_for = 0;
-	struct timeval timeout = {0};
-	fd_set wrfds;
 
-	write_sock = SSL_get_wfd(ssl);
-	fcntl(write_sock, F_SETFL, O_NONBLOCK);
-
+	printf("writing to tls bio\n");
+	printf("write socket is on fd %d\n", SSL_get_wfd(ssl));
 	while (towrite > 0)
 	{
 		n = SSL_write(ssl, buf->buf_head, towrite);
-		if (n <= 5 && n > 0)
-		{
-			break;
-		}
-		else
 		if (n < 0)
 		{
 			if (errno == EINTR)
 				continue;
 			else
 			{
-				ssl_error = SSL_get_error(ssl, n);
+				ERR_print_errors_fp(stderr);
+				int ssl_error = SSL_get_error(ssl, n);
+				static char ssl_error_buf[512];
+
 				switch(ssl_error)
 				{
 					case SSL_ERROR_NONE:
-						continue;
+						printf("SSL_ERROR_NONE\n");
+						break;
+					case SSL_ERROR_ZERO_RETURN:
+						printf("SSL_ERROR_ZERO_RETURN\n");
+						break;
 					case SSL_ERROR_WANT_WRITE:
-						FD_ZERO(&wrfds);
-						FD_SET(write_sock, &wrfds);
-						timeout.tv_sec = 1;
-						slept_for = select(write_sock+1, NULL, &wrfds, NULL, &timeout);
-						if (slept_for < 0)
-						{
-							fprintf(stderr, "buf_write_tls: select error (%s)\n", strerror(errno));
-							goto fail;
-						}
-						else
-						if (slept_for == 0)
-						{
-							goto out;
-						}
-						else
-						{
-							continue;
-						}
+						printf("SSL_ERROR_WANT_WRITE\n");
+						break;
+					case SSL_ERROR_WANT_X509_LOOKUP:
+						printf("SSL_ERROR_WANT_X509_LOOKUP\n");
+						break;
+					case SSL_ERROR_SYSCALL:
+						printf("SSL_ERROR_SYSCALL\n");
+						break;
+					case SSL_ERROR_SSL:
+						printf("SSL_ERROR_SSL\n");
+						break;
+					default:
+						printf("unknown tls error...\n");
 				}
+
+				ERR_error_string(SSL_get_error(ssl, n), ssl_error_buf);
+				fprintf(stderr, "buf_write_tls: SSL_write error (%s)\n", ssl_error_buf);
+				goto fail;
 			}
 		}
 
@@ -458,7 +470,6 @@ buf_write_tls(SSL *ssl, buf_t *buf)
 
 	} /* while (towrite > 0) */
 
-	out:
 	__buf_reset_head(buf);
 	return total;
 
