@@ -9,20 +9,63 @@
 #include "malloc.h"
 #include "webreaper.h"
 
-int wr_cache_http_link_ctor(void *http_link)
+/**
+ * wr_cache_http_cookie_ctor - initialise object for the cookie cache
+ * @hh: pointer to the object in the cache
+ *  -- called in wr_cache_create()
+ */
+int
+wr_cache_http_cookie_ctor(void *hh)
 {
-	http_link_t *hl = (http_link_t *)http_link;
-	clear_struct(hl);
-	if (!(hl->url = calloc(HTTP_URL_MAX, 1)))
-	{
-		fprintf(stderr, "wr_cache_http_link_ctor: calloc error (%s)\n", strerror(errno));
+	http_header_t *ch = (http_header_t *)hh;
+	clear_struct(ch);
+
+	ch->name = wr_calloc(HTTP_HNAME_MAX+1, 1);
+	ch->value = wr_calloc(HTTP_COOKIE_MAX+1, 1);
+
+	if (!ch->name || !ch->value)
 		return -1;
-	}
-	memset(hl->url, 0, HTTP_URL_MAX);
+
 	return 0;
 }
 
-void wr_cache_http_link_dtor(void *http_link)
+/**
+ * wr_cache_http_cookie_dtor - return object back to initialised state in cache
+ * @hh: pointer to object in cache
+ * -- called in wr_cache_dealloc()
+ */
+void
+wr_cache_http_cookie_dtor(void *hh)
+{
+	assert(hh);
+
+	http_header_t *ch = (http_header_t *)hh;
+
+	memset(ch->name, 0, ch->nlen);
+	memset(ch->value, 0, ch->vlen);
+
+	ch->nlen = ch->vlen = 0;
+
+	return 0;
+}
+
+int
+wr_cache_http_link_ctor(void *http_link)
+{
+	http_link_t *hl = (http_link_t *)http_link;
+	clear_struct(hl);
+
+	hl->url = wr_calloc(HTTP_URL_MAX+1, 1);
+
+	if (!hl->url)
+		return -1;
+
+	memset(hl->url, 0, HTTP_URL_MAX+1);
+	return 0;
+}
+
+void
+wr_cache_http_link_dtor(void *http_link)
 {
 	assert(http_link);
 
@@ -328,59 +371,86 @@ http_parse_page(char *url, char *page)
 	return page;
 }
 
+int
+http_check_header(buf_t *buf, const char *name)
+{
+	assert(buf);
+	assert(name);
+
+	if (strstr(buf, name))
+		return 1;
+	else
+		return 0;
+}
+
 /**
  * http_get_header - find and return a line in an HTTP header
  * @buf: the buffer containing the HTTP header
  * @name: the name of the header (e.g., "Set-Cookie")
  */
 char *
-http_get_header(buf_t *buf, const char *name)
+http_get_header(buf_t *buf, const char *name, http_header_t *hh, off_t whence, off_t *ret_off)
 {
 	assert(buf);
 	assert(name);
+	assert(hh);
+	assert(ret_off);
 
-	buf_t tbuf;
+	off_t whence = whence;
+	size_t nlen;
+	size_t vlen;
+	char *check_from = buf->buf_head + whence;
 	char *tail = buf->buf_tail;
-	char *p = buf->buf_head;
-	char *savep;
-	static char header_return[4096];
+	char *p;
+	char *q;
+	char *hend;
 
-	buf_init(&tbuf, 4096);
+	p = strstr(check_from, name);
 
-	savep = p;
+	*ret_off = (off_t)(p - buf->buf_head);
 
-	/*
-	 * we might have multiple Set-Cookie: headers.
-	 */
-	while (1)
+	if (!p)
+		return NULL;
+
+	hend = strstr(check_from, HTTP_EOH_SENTINEL);
+	if (!hend)
 	{
-		p = strstr(savep, name);
-
-		if (!p)
-			break;
-
-		savep = p;
-
-		p = memchr(savep, 0x0d, (tail - savep));
-
-		if (!p)
-			break;
-
-		buf_append_ex(&tbuf, savep, (p - savep));
-
-		p += 2;
-
-		savep = p;
+		fprintf(stderr,
+				"http_get_header: failed to find end of header sentinel\n");
+		errno = EPROTO;
+		goto out_clear_ret;
 	}
 
-	assert(tbuf.data_len < 4096);
+	q = memchr(p, ':', (tail - p));
+	if (!q)
+		return NULL;
 
-	strncpy(header_return, tbuf.buf_head, tbuf.data_len);
-	header_return[tbuf.data_len] = 0;
+	strncpy(hh->name, p, (q - p));
+	hh->name[q - p] = 0;
+	hh->nlen = (q - p);
 
-	buf_destroy(&tbuf);
+	p = (q + 2);
+	if (*(p-1) != 0x20)
+		--p;
 
-	return header_return;
+	q = memchr(p, 0x0d, (tail - p));
+	if (!q)
+		goto out_clear_ret;
+
+	strncpy(hh->value, p, (q - p));
+	hh->value[q - p] = 0;
+	hh->vlen = (q - p);
+
+	return hh->value;
+
+	out_clear_ret:
+	memset(hh->name, 0, hh->nsize);
+	memset(hh->value, 0, hh->vsize);
+	hh->nlen = 0;
+	hh->vlen = 0;
+
+	fail:
+	return NULL;
 }
 
 int
@@ -409,4 +479,21 @@ http_append_header(buf_t *buf, const char *header)
 	strncpy(p, header, header_len);
 
 	return 0;
+}
+
+int
+http_state_add_cookies(http_state_t *state, char *cookies)
+{
+	assert(state);
+
+	int i;
+	int nr_cookies = state->nr_cookies;
+
+	if (nr_cookies)
+	{
+		for (i = 0; i < nr_cookies; ++i)
+			free(state->cookies[i]);
+
+		free(state->cookies);
+	}
 }
