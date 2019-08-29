@@ -25,6 +25,8 @@
 #define HTTP_GET		"GET"
 #define HTTP_HEAD		"HEAD"
 
+#define HTTP_EOH_SENTINEL "\r\n\r\n"
+
 #define HTTP_DEFAULT_READ_BUF_SIZE	32768
 #define HTTP_DEFAULT_WRITE_BUF_SIZE	4096
 
@@ -56,8 +58,13 @@ typedef struct http_state_t
 	char *base_page; /* website specified by user */
 } http_state_t;
 
-int http_send_request(connection_t *, const char *, const char *) __nonnull((1,2,3)) __wur;
+int http_build_request_header(connection_t *, const char *, const char *) __nonnull((1,2,3)) __wur;
+int http_send_request(connection_t *) __nonnull((1)) __wur;
 int http_recv_response(connection_t *) __nonnull((1)) __wur;
+int http_append_header(buf_t *, const char *) __nonnull((1,2)) __wur;
+int http_status_code_int(buf_t *) __nonnull((1)) __wur;
+const char *http_status_code_string(int) __wur;
+char *http_get_header(buf_t *, const char *) __nonnull((1,2)) __wur;
 char *http_parse_host(char *, char *) __nonnull((1,2)) __wur;
 char *http_parse_page(char *, char *) __nonnull((1,2)) __wur;
 int http_parse_links(wr_cache_t *, buf_t *) __nonnull((1,2)) __wur;
