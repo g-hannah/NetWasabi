@@ -8,10 +8,21 @@
 #include "buffer.h"
 #include "cache.h"
 #include "http.h"
+#include "malloc.h"
 #include "robots.h"
 #include "webreaper.h"
 
-//static int get_opts(int, char *[]) __nonnull((2)) __wur;
+static int get_opts(int, char *[]) __nonnull((2)) __wur;
+
+static void
+__noret usage(int exit_status)
+{
+	fprintf(stderr,
+		"webreaper <url> [options]\n\n"
+		"--help/-h  display this information\n");
+
+	exit(exit_status);
+}
 
 /*
  * ./webreaper <url> [options]
@@ -19,13 +30,37 @@
 int
 main(int argc, char *argv[])
 {
-	//if (get_opts(argc, argv) < 0)
-		//goto fail;
+	if (argc < 2)
+		usage(EXIT_FAILURE);
 
-	buf_t buffer;
-
-	if (parse_robots(&buffer) < 0)
+	if (get_opts(argc, argv) < 0)
 		goto fail;
+
+	http_state_t http_state;
+
+	clear_struct(&http_state);
+	http_state.base_page = wr_strdup(argv[1]);
+
+	connection_t conn;
+
+	static char *__robots = "robots.txt";
+
+	conn_init(&conn);
+	http_parse_host(http_state.base_page, conn.host);
+	printf("host=%s\n", conn.host);
+	if (open_connection(&conn, 0) < 0)
+		goto fail;
+	if (http_send_request(&conn, HTTP_GET, __robots) < 0)
+		goto fail;
+	printf("sent request:\n\n%s", conn.write_buf.data);
+	printf("waiting for response...\n");
+	if (http_recv_response(&conn) < 0)
+		goto fail;
+
+	close_connection(&conn);
+	conn_destroy(&conn);
+
+	free(http_state.base_page);
 
 #if 0
 	wr_cache_t *http_link_cache = wr_cache_create("http_link_cache",
@@ -73,13 +108,6 @@ main(int argc, char *argv[])
 	fail:
 	fprintf(stderr, "%s\n", strerror(errno));
 	exit(EXIT_FAILURE);
-}
-
-static void
-__noret usage(int exit_status)
-{
-	printf("webreaper <url> [options]\n");
-	exit(exit_status);
 }
 
 int
