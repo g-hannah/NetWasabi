@@ -83,10 +83,29 @@ buf_collapse(buf_t *buf, off_t offset, size_t range)
 	to = (end - range);
 	memset(to, 0, range);
 
-	buf->buf_tail -= range;
+	__buf_push_tail(buf, range);
 
 	if (buf->buf_tail < buf->buf_head)
 		buf->buf_tail = buf->buf_head;
+
+	return;
+}
+
+void
+buf_shift(buf_t *buf, off_t offset, size_t range)
+{
+	assert(buf);
+
+	char *from = buf->buf_head + offset;
+	char *to = from + range;
+
+	if (range > buf_slack(buf))
+		buf_extend(buf, range);
+
+	memmove(to, from, buf->buf_tail - from);
+	memset(from, 0, range);
+
+	__buf_pull_tail(buf, range);
 
 	return;
 }
@@ -141,6 +160,24 @@ buf_append(buf_t *buf, char *str)
 	strcat(buf->buf_tail, str);
 	
 	__buf_pull_tail(buf, len);
+
+	return 0;
+}
+
+int
+buf_append_ex(buf_t *buf, char *str, size_t bytes)
+{
+	if (strlen(str) < bytes)
+		return -1;
+
+	size_t new_size = (buf->buf_size + bytes);
+
+	if (new_size > buf_slack(buf))
+		buf_extend(buf, bytes);
+
+	strncpy(buf->buf_tail, str, bytes);
+
+	__buf_pull_tail(buf, bytes);
 
 	return 0;
 }
@@ -254,7 +291,6 @@ buf_read_socket(int sock, buf_t *buf)
 				goto fail;
 		}
 
-		printf("%.*s\n", (int)(buf->buf_tail - buf->buf_head), buf->buf_head);
 		__buf_pull_tail(buf, (size_t)n);
 		remaining -= n;
 		total += n;
