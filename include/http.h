@@ -47,12 +47,15 @@ typedef struct http_link_t
 #define http_nr_links(h) ((h)->nr_links)
 #define http_nr_requests(h) ((h)->nr_requests)
 
+/*
+ * TODO:
+ * Implement RING linked list (like in Apache)
+ */
 typedef struct http_state_t
 {
 	int nr_requests; /* total number page requests we've sent */
 	int nr_links; /* total number links we've reaped */
 	http_link_t *head;
-	http_link_t *tail;
 	char **http_cookies; /* cookies we must set in outgoing http headers */
 	int nr_cookies; /* number cookies we have set */
 	char *base_page; /* website specified by user */
