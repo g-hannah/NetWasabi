@@ -19,7 +19,7 @@ reap(const char *hostname)
 {
 	connection_t conn;
 	
-	if (open_connection(&conn, hostname, 1) < 0)
+	if (open_connection(&conn, 1) < 0)
 		goto fail;
 
 	http_send_request(&conn, HTTP_HEAD, hostname);
