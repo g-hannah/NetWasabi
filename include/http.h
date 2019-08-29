@@ -67,8 +67,10 @@ typedef struct http_header_t
 {
 	char *name;
 	char *value;
-	size_t nlen;
-	size_t vlen;
+	size_t nlen; /* Length of data for name */
+	size_t vlen; /* Length of data for value */
+	size_t nsize; /* Amount of memory allocated for name */
+	size_t vsize; /* Amount of memory allocated for value */
 } http_header_t;
 
 int http_build_request_header(connection_t *, const char *, const char *) __nonnull((1,2,3)) __wur;
