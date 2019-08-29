@@ -41,17 +41,15 @@ void wr_cache_http_link_dtor(void *http_link)
 #define USER_AGENT "Mozilla/5.0 (X11; Ubuntu; Linux x86_64; rv:67.0) Gecko/20100101 Firefox/67.0"
 
 int
-http_send_request(connection_t *conn, const char *http_verb, const char *target)
+http_build_request_header(connection_t *conn, const char *http_verb, const char *target)
 {
 	assert(conn);
 	assert(http_verb);
 	assert(target);
 
-	static char tmp_buf[4096];
 	buf_t *buf = &conn->write_buf;
 	buf_t tbuf;
-
-	buf_clear(buf);
+	static char header_buf[4096];
 
 	buf_init(&tbuf, HTTP_URL_MAX);
 
@@ -66,19 +64,29 @@ http_send_request(connection_t *conn, const char *http_verb, const char *target)
 	if (*(tbuf.buf_tail - 1) == '/')
 		buf_snip(&tbuf, 1);
 
-	/*
-	 * GET http://newgrounds.com/robots.txt HTTP/1.1
-	 */
-	sprintf(tmp_buf,
+	sprintf(header_buf,
 			"%s %s/%s HTTP/1.1\r\n"
+			"Accept: */*\r\n"
 			"User-Agent: %s\r\n"
 			"Host: %s\r\n"
 			"\r\n",
 			http_verb, tbuf.buf_head, target,
 			USER_AGENT,
-			conn->host);
+			tbuf.buf_head);
 
-	buf_append(buf, tmp_buf);
+	buf_append(buf, header_buf);
+
+	buf_destroy(&tbuf);
+
+	return 0;
+}
+
+int
+http_send_request(connection_t *conn)
+{
+	assert(conn);
+
+	buf_t *buf = &conn->write_buf;
 
 	if (conn_using_tls(conn))
 	{
@@ -91,11 +99,9 @@ http_send_request(connection_t *conn, const char *http_verb, const char *target)
 			goto fail;
 	}
 
-	buf_destroy(&tbuf);
 	return 0;
 
 	fail:
-	buf_destroy(&tbuf);
 	return -1;
 }
 
@@ -108,8 +114,6 @@ http_recv_response(connection_t *conn)
 		buf_read_tls(conn->ssl, &conn->read_buf);
 	else
 		buf_read_socket(conn->sock, &conn->read_buf);
-
-	printf("%s", conn->read_buf.buf_head);
 
 	return 0;
 }
@@ -255,7 +259,7 @@ http_response_header(buf_t *buf)
 	if (!buf_integrity(buf))
 		return -1;
 
-	q = strstr(p, "\r\n\r\n");
+	q = strstr(p, HTTP_EOH_SENTINEL);
 
 	if (!q)
 		return -1;
@@ -322,4 +326,87 @@ http_parse_page(char *url, char *page)
 	page[endp - q] = 0;
 
 	return page;
+}
+
+/**
+ * http_get_header - find and return a line in an HTTP header
+ * @buf: the buffer containing the HTTP header
+ * @name: the name of the header (e.g., "Set-Cookie")
+ */
+char *
+http_get_header(buf_t *buf, const char *name)
+{
+	assert(buf);
+	assert(name);
+
+	buf_t tbuf;
+	char *tail = buf->buf_tail;
+	char *p = buf->buf_head;
+	char *savep;
+	static char header_return[4096];
+
+	buf_init(&tbuf, 4096);
+
+	savep = p;
+
+	/*
+	 * we might have multiple Set-Cookie: headers.
+	 */
+	while (1)
+	{
+		p = strstr(savep, name);
+
+		if (!p)
+			break;
+
+		savep = p;
+
+		p = memchr(savep, 0x0d, (tail - savep));
+
+		if (!p)
+			break;
+
+		buf_append_ex(&tbuf, savep, (p - savep));
+
+		p += 2;
+
+		savep = p;
+	}
+
+	assert(tbuf.data_len < 4096);
+
+	strncpy(header_return, tbuf.buf_head, tbuf.data_len);
+	header_return[tbuf.data_len] = 0;
+
+	buf_destroy(&tbuf);
+
+	return header_return;
+}
+
+int
+http_append_header(buf_t *buf, const char *header)
+{
+	assert(buf);
+	assert(header);
+
+	char *p;
+	char *head = buf->buf_head;
+	size_t header_len = strlen(header);
+
+	p = strstr(head, HTTP_EOH_SENTINEL);
+
+	if (!p)
+	{
+		fprintf(stderr,
+				"http_append_header: failed to find end of header sentinel\n");
+		errno = EPROTO;
+		return -1;
+	}
+
+	p += 2;
+
+	buf_shift(buf, (off_t)(p - head), header_len);
+	strncpy(p, header, header_len);
+
+	return 0;
 }
