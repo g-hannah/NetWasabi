@@ -163,3 +163,32 @@ close_connection(connection_t *conn)
 
 	return;
 }
+
+int
+conn_switch_to_tls(connection_t *conn)
+{
+	close_connection(conn);
+
+	buf_t tbuf;
+
+	buf_init(&tbuf, HTTP_URL_MAX);
+	buf_append(&tbuf, conn->host);
+	char *p = strstr(tbuf.buf_head, "http");
+
+	if (!p)
+		goto fail;
+
+	p += 4;
+	buf_shift(&tbuf, (off_t)(p - tbuf.buf_head), (size_t)1);
+	strncpy(p, "s", 1);
+
+	buf_destroy(&tbuf);
+
+	if (open_connection(conn, target, 1) < 0)
+		goto fail;
+
+	return 0;
+
+	fail:
+	return -1;
+}
