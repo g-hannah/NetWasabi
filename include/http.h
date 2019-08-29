@@ -58,6 +58,8 @@ typedef struct http_state_t
 
 int http_send_request(connection_t *, const char *, const char *) __nonnull((1,2,3)) __wur;
 int http_recv_response(connection_t *) __nonnull((1)) __wur;
+char *http_parse_host(char *, char *) __nonnull((1,2)) __wur;
+char *http_parse_page(char *, char *) __nonnull((1,2)) __wur;
 int http_parse_links(wr_cache_t *, buf_t *) __nonnull((1,2)) __wur;
 int wr_cache_http_link_ctor(void *) __nonnull((1)) __wur;
 void wr_cache_http_link_dtor(void *) __nonnull((1));
