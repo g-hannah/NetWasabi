@@ -373,13 +373,22 @@ http_parse_page(char *url, char *page)
 	return page;
 }
 
+/**
+ * http_check_header - check existence of header
+ * @buf: buffer containing header
+ * @name: name of the header
+ * @off: the offset from within the header to start search
+ * @ret_off: offset where header found returned here
+ */
 int
-http_check_header(buf_t *buf, const char *name)
+http_check_header(buf_t *buf, const char *name, off_t off, off_t *ret_off)
 {
 	assert(buf);
 	assert(name);
 
-	if (strstr(buf, name))
+	char *check_from = buf->buf_head + off;
+
+	if (strstr(check_from, name))
 		return 1;
 	else
 		return 0;
@@ -391,12 +400,11 @@ http_check_header(buf_t *buf, const char *name)
  * @name: the name of the header (e.g., "Set-Cookie")
  */
 char *
-http_get_header(buf_t *buf, const char *name, http_header_t *hh, off_t whence, off_t *ret_off)
+http_fetch_header(buf_t *buf, const char *name, http_header_t *hh, off_t whence)
 {
 	assert(buf);
 	assert(name);
 	assert(hh);
-	assert(ret_off);
 
 	off_t whence = whence;
 	size_t nlen;
@@ -408,8 +416,6 @@ http_get_header(buf_t *buf, const char *name, http_header_t *hh, off_t whence, o
 	char *hend;
 
 	p = strstr(check_from, name);
-
-	*ret_off = (off_t)(p - buf->buf_head);
 
 	if (!p)
 		return NULL;
@@ -456,14 +462,13 @@ http_get_header(buf_t *buf, const char *name, http_header_t *hh, off_t whence, o
 }
 
 int
-http_append_header(buf_t *buf, const char *header)
+http_append_header(buf_t *buf, http_header_t *hh)
 {
 	assert(buf);
 	assert(header);
 
 	char *p;
 	char *head = buf->buf_head;
-	size_t header_len = strlen(header);
 
 	p = strstr(head, HTTP_EOH_SENTINEL);
 
@@ -477,8 +482,9 @@ http_append_header(buf_t *buf, const char *header)
 
 	p += 2;
 
-	buf_shift(buf, (off_t)(p - head), header_len);
-	strncpy(p, header, header_len);
+	size_t hlen = (hh->nlen + 2 + hh->vlen);
+	buf_shift(buf, (off_t)(p - head), hlen);
+	snprintf(p, hlen, "%s: %s", hh->name, hh->value);
 
 	return 0;
 }
