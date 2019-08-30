@@ -86,5 +86,7 @@ char *http_parse_page(char *, char *) __nonnull((1,2)) __wur;
 int http_parse_links(wr_cache_t *, buf_t *) __nonnull((1,2)) __wur;
 int wr_cache_http_link_ctor(void *) __nonnull((1)) __wur;
 void wr_cache_http_link_dtor(void *) __nonnull((1));
+int wr_cache_http_cookie_ctor(void *) __nonnull((1)) __wur;
+void wr_cache_http_cookie_dtor(void *) __nonnull((1));
 
 #endif /* !defined HTTP_H */
