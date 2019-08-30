@@ -76,11 +76,11 @@ typedef struct http_header_t
 int http_build_request_header(connection_t *, const char *, const char *) __nonnull((1,2,3)) __wur;
 int http_send_request(connection_t *) __nonnull((1)) __wur;
 int http_recv_response(connection_t *) __nonnull((1)) __wur;
-int http_append_header(buf_t *, const char *) __nonnull((1,2)) __wur;
+int http_append_header(buf_t *, http_header_t *) __nonnull((1,2)) __wur;
 int http_status_code_int(buf_t *) __nonnull((1)) __wur;
 const char *http_status_code_string(int) __wur;
-int http_check_header(buf_t *, const char *) __nonnull((1,2)) __wur;
-char *http_get_header(buf_t *, const char *, http_header_t *, off_t, off_t *) __nonnull((1,2,3,5)) __wur;
+int http_check_header(buf_t *, const char *, off_t, off_t *) __nonnull((1,2,4)) __wur;
+char *http_fetch_header(buf_t *, const char *, http_header_t *, off_t) __nonnull((1,2,3)) __wur;
 char *http_parse_host(char *, char *) __nonnull((1,2)) __wur;
 char *http_parse_page(char *, char *) __nonnull((1,2)) __wur;
 int http_parse_links(wr_cache_t *, buf_t *) __nonnull((1,2)) __wur;
