@@ -47,8 +47,6 @@ wr_cache_http_cookie_dtor(void *hh)
 	memset(ch->value, 0, ch->vlen);
 
 	ch->nlen = ch->vlen = 0;
-
-	return 0;
 }
 
 int
@@ -406,9 +404,6 @@ http_fetch_header(buf_t *buf, const char *name, http_header_t *hh, off_t whence)
 	assert(name);
 	assert(hh);
 
-	off_t whence = whence;
-	size_t nlen;
-	size_t vlen;
 	char *check_from = buf->buf_head + whence;
 	char *tail = buf->buf_tail;
 	char *p;
@@ -457,7 +452,7 @@ http_fetch_header(buf_t *buf, const char *name, http_header_t *hh, off_t whence)
 	hh->nlen = 0;
 	hh->vlen = 0;
 
-	fail:
+	//fail:
 	return NULL;
 }
 
@@ -465,7 +460,7 @@ int
 http_append_header(buf_t *buf, http_header_t *hh)
 {
 	assert(buf);
-	assert(header);
+	assert(hh);
 
 	char *p;
 	char *head = buf->buf_head;
@@ -489,6 +484,7 @@ http_append_header(buf_t *buf, http_header_t *hh)
 	return 0;
 }
 
+#if 0
 int
 http_state_add_cookies(http_state_t *state, char *cookies)
 {
@@ -505,3 +501,4 @@ http_state_add_cookies(http_state_t *state, char *cookies)
 		free(state->cookies);
 	}
 }
+#endif
