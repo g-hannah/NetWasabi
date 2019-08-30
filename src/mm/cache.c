@@ -13,21 +13,21 @@
 static inline int __wr_cache_next_free_idx(wr_cache_t *cachep)
 {
 	unsigned char *bm = cachep->free_bitmap;
-	unsigned char bit = 128;
+	unsigned char bit = 1;
 	int idx = 0;
 	int	cache_nr = 0;
 	wr_cache_t *ptr = cachep;
 
 	while (bm && (*bm & bit))
 	{
-		bit >>= 1;
+		bit <<= 1;
 
 		++idx;
 
 		if (!bit)
 		{
 			++bm;
-			bit = 128;
+			bit = 1;
 		}
 
 		if (!bm)
@@ -36,7 +36,7 @@ static inline int __wr_cache_next_free_idx(wr_cache_t *cachep)
 			{
 				ptr = ptr->next;
 				bm = ptr->free_bitmap;
-				bit = 128;
+				bit = 1;
 				++cache_nr;
 			}
 		}
@@ -61,7 +61,7 @@ static inline int __wr_cache_next_free_idx(wr_cache_t *cachep)
 #define __wr_cache_mark_used(c, i)	\
 do {\
 	unsigned char *bm = ((c)->free_bitmap + ((i) >> 3));	\
-	(*bm |= (unsigned char)(128 >> ((i) & 7)));						\
+	(*bm |= (unsigned char)(1 << ((i) & 7)));							\
 } while(0)
 
 /**
@@ -72,7 +72,7 @@ do {\
 #define __wr_cache_mark_unused(c, i)	\
 do {\
 	unsigned char *bm = ((c)->free_bitmap + ((i) >> 3));	\
-	(*bm &= (unsigned char) ~(128 >> ((i) & 7)));					\
+	(*bm &= (unsigned char) ~(1 << ((i) & 7)));						\
 } while(0)
 
 /**
@@ -131,7 +131,7 @@ wr_cache_obj_used(wr_cache_t *cachep, void *obj)
 	 */
 	bm += (offset >> 3);
 
-	return (*bm & (128 >> (offset & 7))) ? 1 : 0;
+	return (*bm & (1 << (offset & 7))) ? 1 : 0;
 }
 
 /**
