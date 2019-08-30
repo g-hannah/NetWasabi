@@ -184,13 +184,17 @@ conn_switch_to_tls(connection_t *conn)
 	buf_shift(&tbuf, (off_t)(p - tbuf.buf_head), (size_t)1);
 	strncpy(p, "s", 1);
 
+	strncpy(conn->host, tbuf.buf_head, tbuf.data_len);
+	conn->host[tbuf.data_len] = 0;
+
 	buf_destroy(&tbuf);
 
-	if (open_connection(conn, target, 1) < 0)
+	if (open_connection(conn, 1) < 0)
 		goto fail;
 
 	return 0;
 
 	fail:
+	buf_destroy(&tbuf);
 	return -1;
 }
