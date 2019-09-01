@@ -1,6 +1,7 @@
 #ifndef WEBREAPER_H
 #define WEBREAPER_H 1
 
+#include <stdint.h>
 #include <string.h>
 
 #define clear_struct(s) memset((s), 0, sizeof(*(s)))
@@ -24,6 +25,14 @@
 })
 #endif
 
+#define OPT_USE_TLS	0x1
+
+extern uint32_t runtime_options;
+
+#define option_set(o) ((o) & runtime_options)
+#define set_option(o) (runtime_options |= (o))
+#define unset_option(o) (runtime_options &= ~(o))
+
 extern char **forbidden_tokens;
-	
+
 #endif /* !defined WEBREAPER_H */
