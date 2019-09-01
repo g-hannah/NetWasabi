@@ -23,11 +23,13 @@
 #define HTTP_COOKIE_MAX 256 /* Surely this is more than enough */
 #define HTTP_HNAME_MAX 64 /* Header name */
 
-/* Hypertext Transmission Protocol Verbs */
 #define HTTP_GET		"GET"
 #define HTTP_HEAD		"HEAD"
 
-#define HTTP_EOH_SENTINEL "\r\n\r\n"
+#define HTTP_VERSION				"1.1"
+#define HTTP_USER_AGENT			"Mozilla/5.0 (X11; Ubuntu; Linux x86_64; rv:68.0) Gecko/20100101 Firefox/68.0"
+#define HTTP_ACCEPT					"text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8"
+#define HTTP_EOH_SENTINEL		"\r\n\r\n"
 
 #define HTTP_DEFAULT_READ_BUF_SIZE	32768
 #define HTTP_DEFAULT_WRITE_BUF_SIZE	4096
@@ -35,16 +37,16 @@
 #define HTTP_PORT_NR	80
 #define HTTPS_PORT_NR 443
 
+
+
 typedef struct http_link_t
 {
-	int http_status;
+	int status_code;
 	char *url;
 	time_t time_reaped;
 	int used;
 } http_link_t;
 
-#define http_inc_cookies(h) (++(h)->nr_cookies)
-#define http_dec_cookies(h) (--(h)->nr_cookies)
 #define http_nr_cookies(h) ((h)->nr_cookies)
 #define http_nr_links(h) ((h)->nr_links)
 #define http_nr_requests(h) ((h)->nr_requests)
@@ -58,8 +60,6 @@ typedef struct http_state_t
 	int nr_requests; /* total number page requests we've sent */
 	int nr_links; /* total number links we've reaped */
 	http_link_t *head;
-	char **http_cookies; /* cookies we must set in outgoing http headers */
-	int nr_cookies; /* number cookies we have set */
 	char *base_page; /* website specified by user */
 } http_state_t;
 
