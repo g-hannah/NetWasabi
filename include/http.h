@@ -38,8 +38,6 @@
 #define HTTP_PORT_NR	80
 #define HTTPS_PORT_NR 443
 
-
-
 typedef struct http_link_t
 {
 	int status_code;
@@ -79,6 +77,7 @@ int http_send_request(connection_t *) __nonnull((1)) __wur;
 int http_recv_response(connection_t *) __nonnull((1)) __wur;
 int http_append_header(buf_t *, http_header_t *) __nonnull((1,2)) __wur;
 int http_status_code_int(buf_t *) __nonnull((1)) __wur;
+ssize_t http_response_header_len(buf_t *) __nonnull((1)) __wur;
 const char *http_status_code_string(int) __wur;
 int http_check_header(buf_t *, const char *, off_t, off_t *) __nonnull((1,2,4)) __wur;
 char *http_fetch_header(buf_t *, const char *, http_header_t *, off_t) __nonnull((1,2,3)) __wur;
