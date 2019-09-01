@@ -330,6 +330,11 @@ buf_read_tls(SSL *ssl, buf_t *buf)
 	{
 		n = SSL_read(ssl, buf->buf_tail, slack);
 
+		if (!n)
+		{
+			break;
+		}
+		else
 		if (n < 0)
 		{
 			if (errno == EINTR)
@@ -361,18 +366,18 @@ buf_read_tls(SSL *ssl, buf_t *buf)
 				}
 			}
 		}
-
-		total += n;
-		slack -= n;
-		__buf_pull_tail(buf, (size_t)n);
-
-		if (!slack)
+		else
 		{
-			buf_extend(buf, buf->buf_size);
-			slack = buf_slack(buf);
-		}
-			
+			total += n;
+			slack -= n;
+			__buf_pull_tail(buf, (size_t)n);
 
+			if (!slack)
+			{
+				buf_extend(buf, buf->buf_size);
+				slack = buf_slack(buf);
+			}
+		}
 	} /* while (1) */
 
 	out:
@@ -455,8 +460,6 @@ buf_write_tls(SSL *ssl, buf_t *buf)
 	ssize_t n = 0;
 	ssize_t total = 0;
 
-	printf("writing to tls bio\n");
-	printf("write socket is on fd %d\n", SSL_get_wfd(ssl));
 	while (towrite > 0)
 	{
 		n = SSL_write(ssl, buf->buf_head, towrite);
@@ -474,24 +477,25 @@ buf_write_tls(SSL *ssl, buf_t *buf)
 				{
 					case SSL_ERROR_NONE:
 						printf("SSL_ERROR_NONE\n");
-						break;
+						goto fail;
 					case SSL_ERROR_ZERO_RETURN:
 						printf("SSL_ERROR_ZERO_RETURN\n");
-						break;
+						goto fail;
 					case SSL_ERROR_WANT_WRITE:
 						printf("SSL_ERROR_WANT_WRITE\n");
-						break;
+						goto fail;
 					case SSL_ERROR_WANT_X509_LOOKUP:
 						printf("SSL_ERROR_WANT_X509_LOOKUP\n");
-						break;
+						goto fail;
 					case SSL_ERROR_SYSCALL:
 						printf("SSL_ERROR_SYSCALL\n");
-						break;
+						goto fail;
 					case SSL_ERROR_SSL:
 						printf("SSL_ERROR_SSL\n");
-						break;
+						goto fail;
 					default:
 						printf("unknown tls error...\n");
+						goto fail;
 				}
 
 				ERR_error_string(SSL_get_error(ssl, n), ssl_error_buf);
