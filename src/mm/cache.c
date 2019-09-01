@@ -306,3 +306,20 @@ wr_cache_dealloc(wr_cache_t *cachep, void *slot)
 	return;
 }
 
+void
+wr_cache_clear_all(wr_cache_t *cachep)
+{
+	void *obj;
+	int i;
+	int capacity = cachep->capacity;
+
+	obj = cachep->cache;
+
+	for (i = 0; i < capacity; ++i)
+	{
+		wr_cache_dealloc(cachep, obj);
+		obj = (void *)((char *)obj + cachep->objsize);
+	}
+
+	return;
+}

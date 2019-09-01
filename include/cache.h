@@ -32,5 +32,6 @@ void wr_cache_dealloc(wr_cache_t *, void *) __nonnull((1,2));
 int wr_cache_obj_used(wr_cache_t *, void *) __nonnull((1,2)) __wur;
 int wr_cache_nr_used(wr_cache_t *) __nonnull((1)) __wur;
 int wr_cache_capacity(wr_cache_t *) __nonnull((1)) __wur;
+void wr_cache_clear_all(wr_cache_t *) __nonnull((1));
 
 #endif /* WR_CACHE_H */
