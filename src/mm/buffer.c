@@ -11,6 +11,7 @@
 #include <sys/stat.h>
 #include <unistd.h>
 #include "buffer.h"
+#include "malloc.h"
 
 static inline void
 __buf_reset_head(buf_t *buf)
@@ -515,4 +516,34 @@ buf_write_tls(SSL *ssl, buf_t *buf)
 
 	fail:
 	return -1;
+}
+
+buf_t *
+buf_dup(buf_t *copy)
+{
+	assert(copy);
+
+	buf_t *new = wr_malloc(sizeof(buf_t));
+
+	new->data = wr_calloc(copy->buf_size, 1);
+	memcpy(new->data, copy->data, copy->buf_size);
+	new->buf_head = (new->data + (copy->buf_head - copy->data));
+	new->buf_tail = (new->data + (copy->buf_tail - copy->data));
+	new->data_len = copy->data_len;
+
+	return new;
+}
+
+void
+buf_copy(buf_t *to, buf_t *from)
+{
+	assert(to);
+	assert(from);
+
+	memcpy(to->data, from->data, from->buf_size);
+	to->buf_head = (to->data + (from->buf_head - from->data));
+	to->buf_tail = (to->data + (from->buf_tail - from->data));
+	to->data_len = from->data_len;
+
+	return;
 }

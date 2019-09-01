@@ -30,6 +30,10 @@ int buf_append(buf_t *, char *) __nonnull((1,2)) __wur;
 int buf_append_ex(buf_t *, char *, size_t) __nonnull((1,2)) __wur;
 void buf_snip(buf_t *, size_t) __nonnull((1));
 void buf_clear(buf_t *) __nonnull((1));
+
+/* return a buf_t object from the heap duplicate of argument */
+buf_t *buf_dup(buf_t *) __nonnull((1)) __wur;
+void buf_copy(buf_t *, buf_t *) __nonnull((1,2)) __wur;
 int buf_integrity(buf_t *) __nonnull((1)) __wur;
 ssize_t buf_read_fd(int, buf_t *, size_t) __nonnull((2)) __wur;
 ssize_t buf_read_socket(int, buf_t *) __nonnull((2)) __wur;
