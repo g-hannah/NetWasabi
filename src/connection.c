@@ -72,10 +72,9 @@ __init_openssl(void)
 /**
  * open_connection - set up a connection with the target site
  * @conn: &connection_t that is initialised in this function
- * @use_tls: 1 to use HTTPS; 0 to use HTTP
  */
 int
-open_connection(connection_t *conn, int use_tls)
+open_connection(connection_t *conn)
 {
 	assert(conn);
 
@@ -105,7 +104,7 @@ open_connection(connection_t *conn, int use_tls)
 	if (!aip)
 		goto fail;
 
-	if (use_tls)
+	if (option_set(OPT_USE_TLS))
 		sock4.sin_port = htons(HTTPS_PORT_NR);
 	else
 		sock4.sin_port = htons(HTTP_PORT_NR);
@@ -126,7 +125,7 @@ open_connection(connection_t *conn, int use_tls)
 
 	printf("connected to %s @ %s\n", conn->host, inet_ntoa(sock4.sin_addr));
 
-	if (use_tls)
+	if (option_set(OPT_USE_TLS))
 	{
 		__init_openssl();
 		conn->ssl_ctx = SSL_CTX_new(TLSv1_2_client_method());
@@ -197,7 +196,9 @@ conn_switch_to_tls(connection_t *conn)
 
 	buf_destroy(&tbuf);
 
-	if (open_connection(conn, 1) < 0)
+	set_option(OPT_USE_TLS);
+
+	if (open_connection(conn) < 0)
 		goto fail;
 
 #ifdef DEBUG
