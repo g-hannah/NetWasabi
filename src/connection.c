@@ -84,6 +84,7 @@ open_connection(connection_t *conn)
 
 	buf_init(&conn->read_buf, HTTP_DEFAULT_READ_BUF_SIZE);
 	buf_init(&conn->write_buf, HTTP_DEFAULT_WRITE_BUF_SIZE);
+
 	clear_struct(&sock4);
 
 	if (getaddrinfo(conn->host, NULL, NULL, &ainf) < 0)
@@ -123,18 +124,14 @@ open_connection(connection_t *conn)
 		goto fail_release_ainf;
 	}
 
-	printf("connected to %s @ %s\n", conn->host, inet_ntoa(sock4.sin_addr));
-
 	if (option_set(OPT_USE_TLS))
 	{
 		__init_openssl();
 		conn->ssl_ctx = SSL_CTX_new(TLSv1_2_client_method());
 		conn->ssl = SSL_new(conn->ssl_ctx);
 
-		printf("%s\n", SSL_state_string_long(conn->ssl));
 		SSL_set_fd(conn->ssl, conn->sock); /* Set the socket for reading/writing */
 		SSL_set_connect_state(conn->ssl); /* Set as client */
-		printf("%s\n", SSL_state_string_long(conn->ssl));
 		conn->using_tls = 1;
 	}
 
@@ -174,27 +171,25 @@ conn_switch_to_tls(connection_t *conn)
 {
 	close_connection(conn);
 
-	buf_t tbuf;
+	size_t host_len = strlen(conn->host);
+	char *p;
+	char *endp = (conn->host + host_len);
 
-	buf_init(&tbuf, HTTP_URL_MAX);
-	buf_append(&tbuf, conn->host);
-	char *p = strstr(tbuf.buf_head, "http");
+	p = conn->host;
 
-	if (!p)
-		goto fail;
+	if (strstr(p, "http"))
+	{
+		p = memchr(conn->host, '/', endp - conn->host);
 
-	p += 4;
-	buf_shift(&tbuf, (off_t)(p - tbuf.buf_head), (size_t)1);
-	strncpy(p, "s", 1);
+		if (*p != '/')
+			goto fail;
 
-	strncpy(conn->host, tbuf.buf_head, tbuf.data_len);
-	conn->host[tbuf.data_len] = 0;
+		p += 2;
+	}
 
 #ifdef DEBUG
 	printf("Switching to TLS (%s)\n", conn->host);
 #endif
-
-	buf_destroy(&tbuf);
 
 	set_option(OPT_USE_TLS);
 
@@ -208,6 +203,5 @@ conn_switch_to_tls(connection_t *conn)
 	return 0;
 
 	fail:
-	buf_destroy(&tbuf);
 	return -1;
 }
