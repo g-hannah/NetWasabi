@@ -1,15 +1,7 @@
-//#include <arpa/inet.h>
 #include <assert.h>
 #include <errno.h>
-//#include <openssl/conf.h>
-//#include <openssl/err.h>
-//#include <openssl/ssl.h>
-//#include <netdb.h>
-//#include <netinet/in.h>
 #include <stdio.h>
 #include <stdlib.h>
-//#include <sys/socket.h>
-//#include <unistd.h>
 #include "buffer.h"
 #include "cache.h"
 #include "connection.h"
@@ -89,8 +81,6 @@ wr_cache_http_link_dtor(void *http_link)
 	return;
 }
 
-#define USER_AGENT "Mozilla/5.0 (X11; Ubuntu; Linux x86_64; rv:67.0) Gecko/20100101 Firefox/67.0"
-
 int
 http_build_request_header(connection_t *conn, const char *http_verb, const char *target)
 {
@@ -103,37 +93,24 @@ http_build_request_header(connection_t *conn, const char *http_verb, const char 
 	static char header_buf[4096];
 
 	buf_init(&tbuf, HTTP_URL_MAX);
-
-	if (strncmp("http", conn->host, 4))
-	{
-		buf_append(&tbuf, "http://");
-	}
-	else
-		buf_append(&tbuf, conn->host);
-
-	if (!strncmp("http:", conn->host, 5) && conn_using_tls(conn))
-	{
-		buf_clear(&tbuf);
-		buf_append(&tbuf, conn->host);
-		buf_shift(&tbuf, (off_t)4, (size_t)1);
-		strncpy(tbuf.buf_head + 4, "s", 1);
-	}
+	buf_append(&tbuf, conn->host);
 
 	if (*(tbuf.buf_tail - 1) == '/')
 		buf_snip(&tbuf, 1);
 
 	sprintf(header_buf,
-			"%s %s/%s HTTP/1.1\r\n"
-			"Accept: */*\r\n"
+			"%s /%s HTTP/%s\r\n"
 			"User-Agent: %s\r\n"
+			"Accept: %s\r\n"
 			"Host: %s\r\n"
-			"\r\n",
-			http_verb, tbuf.buf_head, target,
-			USER_AGENT,
-			tbuf.buf_head);
+			"Connection: keep-alive%s",
+			http_verb, target, HTTP_VERSION,
+			HTTP_USER_AGENT,
+			HTTP_ACCEPT,
+			tbuf.buf_head,
+			HTTP_EOH_SENTINEL);
 
 	buf_append(buf, header_buf);
-
 	buf_destroy(&tbuf);
 
 	return 0;
@@ -251,6 +228,7 @@ http_status_code_string(int code)
 	}
 }
 
+#if 0
 int
 http_set_cookies(buf_t *buf, http_state_t *http_state)
 {
@@ -305,6 +283,7 @@ http_set_cookies(buf_t *buf, http_state_t *http_state)
 
 	return 0;
 }
+#endif
 
 ssize_t
 http_response_header(buf_t *buf)
@@ -329,33 +308,24 @@ char *
 http_parse_host(char *url, char *host)
 {
 	char *p = url;
-	char *q;
+	//char *q;
 	size_t url_len = strlen(url);
 	char *endp = (url + url_len);
 
-	if (!strncmp("http", url, 4))
-	{
-		p = memchr(url, '/', url_len);
-		p += 2;
+	p = url;
 
-		q = memchr(p, '/', endp - p);
-
-		if (!q)
-			q = endp;
-
-		strncpy(host, p, (q - p));
-		host[q - p] = 0;
-	}
+	if (!strncmp("http:", url, strlen("http:")))
+		p += strlen("http://");
 	else
-	{
-		q = memchr(p, '/', endp - p);
+	if (!strncmp("https:", url, strlen("https:")))
+		p += strlen("https://");
 
-		if (!q)
-			q = endp;
+	endp = memchr(p, '/', ((url + url_len) - p));
+	if (!endp)
+		endp = url + url_len;
 
-		strncpy(host, p, q - p);
-		host[q - p] = 0;
-	}
+	strncpy(host, p, endp - p);
+	host[endp - p] = 0;
 
 	return host;
 }
@@ -363,20 +333,36 @@ http_parse_host(char *url, char *host)
 char *
 http_parse_page(char *url, char *page)
 {
+	char *p;
 	char *q;
 	size_t url_len = strlen(url);
 	char *endp = (url + url_len);
 
+	p = url;
 	q = endp;
 
-	while (*q != 0x2f && q > (url + 1))
-		--q;
+	if (*(endp - 1) == '/')
+	{
+		--endp;
+		*endp = 0;
+	}
 
-	if (q == url)
-		return NULL;
+	if (!strncmp("http:", url, 5))
+		p += strlen("http://");
 	else
-	if (q == endp)
-		return NULL;
+	if (!strncmp("https:", url, 6))
+		p += strlen("https://");
+
+	q = memchr(p, '/', (endp - p));
+
+	if (!q)
+	{
+		/*
+		 * Then just use the host.
+		 */
+		http_parse_host(url, page);
+		return page;
+	}
 
 	++q;
 
