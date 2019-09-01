@@ -357,10 +357,8 @@ http_parse_page(char *url, char *page)
 
 	if (!q)
 	{
-		/*
-		 * Then just use the host.
-		 */
-		http_parse_host(url, page);
+		strncpy(page, "/", 1);
+		page[1] = 0;
 		return page;
 	}
 
