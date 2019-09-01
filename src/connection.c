@@ -129,7 +129,7 @@ open_connection(connection_t *conn, int use_tls)
 	if (use_tls)
 	{
 		__init_openssl();
-		conn->ssl_ctx = SSL_CTX_new(TLSv1_client_method());
+		conn->ssl_ctx = SSL_CTX_new(TLSv1_2_client_method());
 		conn->ssl = SSL_new(conn->ssl_ctx);
 
 		printf("%s\n", SSL_state_string_long(conn->ssl));
