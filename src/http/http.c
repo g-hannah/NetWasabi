@@ -98,6 +98,28 @@ http_build_request_header(connection_t *conn, const char *http_verb, const char 
 	if (*(tbuf.buf_tail - 1) == '/')
 		buf_snip(&tbuf, 1);
 
+/*
+ * RFC 7230:
+ *
+ * HTTP-message = start-line
+ *                *( header-field CRLF )
+ *                CRLF
+ *                [ message body ]
+ *
+ * start-line = request-line / status-line
+ *
+ * request-line = method SP request-target SP HTTP-version CRLF
+ *
+ * Reasons that a server returns a 400 Bad Request:
+ *
+ * Illegal whitespace between start-line and the first header-field
+ * Illegal whitespace between field-name and ":"
+ * Usage of deprecated obs-fold rule
+ *
+ * In the case of an invalid request line, a server can either
+ * send a 400 Bad Request or a 301 Moved Permanently with the
+ * correct encoding present in the Location header.
+ */
 	sprintf(header_buf,
 			"%s %s HTTP/%s\r\n"
 			"User-Agent: %s\r\n"
@@ -364,8 +386,6 @@ http_parse_page(char *url, char *page)
 		page[1] = 0;
 		return page;
 	}
-
-	++q;
 
 	strncpy(page, q, (endp - q));
 	page[endp - q] = 0;
