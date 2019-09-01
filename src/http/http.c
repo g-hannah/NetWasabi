@@ -1,7 +1,15 @@
+//#include <arpa/inet.h>
 #include <assert.h>
 #include <errno.h>
+//#include <openssl/conf.h>
+//#include <openssl/err.h>
+//#include <openssl/ssl.h>
+//#include <netdb.h>
+//#include <netinet/in.h>
 #include <stdio.h>
 #include <stdlib.h>
+//#include <sys/socket.h>
+//#include <unistd.h>
 #include "buffer.h"
 #include "cache.h"
 #include "connection.h"
@@ -99,10 +107,17 @@ http_build_request_header(connection_t *conn, const char *http_verb, const char 
 	if (strncmp("http", conn->host, 4))
 	{
 		buf_append(&tbuf, "http://");
-		buf_append(&tbuf, conn->host);
 	}
 	else
 		buf_append(&tbuf, conn->host);
+
+	if (!strncmp("http:", conn->host, 5) && conn_using_tls(conn))
+	{
+		buf_clear(&tbuf);
+		buf_append(&tbuf, conn->host);
+		buf_shift(&tbuf, (off_t)4, (size_t)1);
+		strncpy(tbuf.buf_head + 4, "s", 1);
+	}
 
 	if (*(tbuf.buf_tail - 1) == '/')
 		buf_snip(&tbuf, 1);
