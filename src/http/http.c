@@ -25,8 +25,8 @@ wr_cache_http_cookie_ctor(void *hh)
 	ch->nsize = HTTP_HNAME_MAX+1;
 	ch->vsize = HTTP_COOKIE_MAX+1;
 
-	if (!ch->name || !ch->value)
-		return -1;
+	assert(ch->name);
+	assert(ch->value);
 
 	return 0;
 }
@@ -166,6 +166,8 @@ int
 http_recv_response(connection_t *conn)
 {
 	assert(conn);
+
+	buf_clear(&conn->read_buf);
 
 	if (conn_using_tls(conn))
 		buf_read_tls(conn->ssl, &conn->read_buf);
@@ -311,7 +313,7 @@ http_set_cookies(buf_t *buf, http_state_t *http_state)
 #endif
 
 ssize_t
-http_response_header(buf_t *buf)
+http_response_header_len(buf_t *buf)
 {
 	assert(buf);
 
@@ -325,6 +327,8 @@ http_response_header(buf_t *buf)
 
 	if (!q)
 		return -1;
+
+	q += strlen(HTTP_EOH_SENTINEL);
 
 	return (q - p);
 }
@@ -407,11 +411,17 @@ http_check_header(buf_t *buf, const char *name, off_t off, off_t *ret_off)
 	assert(name);
 
 	char *check_from = buf->buf_head + off;
+	char *p;
 
-	if (strstr(check_from, name))
+	if ((p = strstr(check_from, name)))
+	{
+		*ret_off = (off_t)(p - buf->buf_head);
 		return 1;
+	}
 	else
+	{
 		return 0;
+	}
 }
 
 /**
@@ -425,6 +435,8 @@ http_fetch_header(buf_t *buf, const char *name, http_header_t *hh, off_t whence)
 	assert(buf);
 	assert(name);
 	assert(hh);
+	assert(hh->name);
+	assert(hh->value);
 
 	char *check_from = buf->buf_head + whence;
 	char *tail = buf->buf_tail;
@@ -455,7 +467,7 @@ http_fetch_header(buf_t *buf, const char *name, http_header_t *hh, off_t whence)
 	hh->nlen = (q - p);
 
 	p = (q + 2);
-	if (*(p-1) != 0x20)
+	if (*(p-1) != ' ')
 		--p;
 
 	q = memchr(p, 0x0d, (tail - p));
@@ -499,9 +511,19 @@ http_append_header(buf_t *buf, http_header_t *hh)
 
 	p += 2;
 
-	size_t hlen = (hh->nlen + 2 + hh->vlen);
-	buf_shift(buf, (off_t)(p - head), hlen);
-	snprintf(p, hlen, "%s: %s", hh->name, hh->value);
+	buf_t tmp;
+
+	buf_init(&tmp, HTTP_COOKIE_MAX+strlen("Cookie: "));
+	buf_append(&tmp, hh->name);
+	buf_append(&tmp, ": ");
+	buf_append(&tmp, hh->value);
+	buf_append(&tmp, "\r\n");
+
+	buf_shift(buf, (off_t)(p - head), tmp.data_len);
+
+	strncpy(p, tmp.buf_head, tmp.data_len);
+
+	buf_destroy(&tmp);
 
 	return 0;
 }
