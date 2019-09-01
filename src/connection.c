@@ -105,7 +105,10 @@ open_connection(connection_t *conn, int use_tls)
 	if (!aip)
 		goto fail;
 
-	sock4.sin_port = htons(HTTP_PORT_NR);
+	if (use_tls)
+		sock4.sin_port = htons(HTTPS_PORT_NR);
+	else
+		sock4.sin_port = htons(HTTP_PORT_NR);
 
 	if ((conn->sock = socket(AF_INET, SOCK_STREAM, 0)) < 0)
 	{
@@ -126,12 +129,13 @@ open_connection(connection_t *conn, int use_tls)
 	if (use_tls)
 	{
 		__init_openssl();
-		conn->ssl_ctx = SSL_CTX_new(TLSv1_2_method());
-		assert(conn->ssl_ctx);
+		conn->ssl_ctx = SSL_CTX_new(TLSv1_client_method());
 		conn->ssl = SSL_new(conn->ssl_ctx);
-		assert(conn->ssl);
-		SSL_set_fd(conn->ssl, conn->sock);
-		SSL_set_connect_state(conn->ssl);
+
+		printf("%s\n", SSL_state_string_long(conn->ssl));
+		SSL_set_fd(conn->ssl, conn->sock); /* Set the socket for reading/writing */
+		SSL_set_connect_state(conn->ssl); /* Set as client */
+		printf("%s\n", SSL_state_string_long(conn->ssl));
 		conn->using_tls = 1;
 	}
 
@@ -187,10 +191,18 @@ conn_switch_to_tls(connection_t *conn)
 	strncpy(conn->host, tbuf.buf_head, tbuf.data_len);
 	conn->host[tbuf.data_len] = 0;
 
+#ifdef DEBUG
+	printf("Switching to TLS (%s)\n", conn->host);
+#endif
+
 	buf_destroy(&tbuf);
 
 	if (open_connection(conn, 1) < 0)
 		goto fail;
+
+#ifdef DEBUG
+	printf("Securely connected to host\n");
+#endif
 
 	return 0;
 
