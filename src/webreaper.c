@@ -19,10 +19,9 @@ reap(const char *hostname)
 {
 	connection_t conn;
 	
-	if (open_connection(&conn, 1) < 0)
+	if (open_connection(&conn) < 0)
 		goto fail;
 
-	http_send_request(&conn, HTTP_HEAD, hostname);
 	http_recv_response(&conn);
 
 	return 0;
