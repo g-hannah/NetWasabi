@@ -99,7 +99,7 @@ http_build_request_header(connection_t *conn, const char *http_verb, const char 
 		buf_snip(&tbuf, 1);
 
 	sprintf(header_buf,
-			"%s /%s HTTP/%s\r\n"
+			"%s %s HTTP/%s\r\n"
 			"User-Agent: %s\r\n"
 			"Accept: %s\r\n"
 			"Host: %s\r\n"
@@ -213,6 +213,9 @@ http_status_code_string(int code)
 			break;
 		case HTTP_NOT_FOUND:
 			return "Not found";
+			break;
+		case HTTP_REQUEST_TIMEOUT:
+			return "Request timeout";
 			break;
 		case HTTP_INTERNAL_ERROR:
 			return "Internal server error";
