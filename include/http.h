@@ -72,6 +72,8 @@ typedef struct http_header_t
 	size_t vsize; /* Amount of memory allocated for value */
 } http_header_t;
 
+extern wr_cache_t *http_hcache;
+
 int http_build_request_header(connection_t *, const char *, const char *) __nonnull((1,2,3)) __wur;
 int http_send_request(connection_t *) __nonnull((1)) __wur;
 int http_recv_response(connection_t *) __nonnull((1)) __wur;
