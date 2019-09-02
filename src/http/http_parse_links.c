@@ -41,15 +41,25 @@ http_parse_links(wr_cache_t *cachep, buf_t *buf)
 		if (!p)
 			break;
 
-		if ((p - savep) >= HTTP_URL_MAX)
+		if ((p - savep) >= HTTP_URL_MAX || (p - savep) < 5)
 			continue;
 
-		if (!(hl = wr_cache_alloc(cachep)))
+		if (!(hl = (http_link_t *)wr_cache_alloc(cachep)))
 			return -1;
 
 		strncpy(hl->url, savep, (p - savep));
 		hl->url[p - savep] = 0;
 		hl->time_reaped = time(NULL);
+
+		char *url = hl->url;
+
+		if (!strcmp("#", url)
+			|| !strcmp("/", url))
+		{
+			wr_cache_dealloc(cachep, hl);
+			savep = p;
+			continue;
+		}
 
 		savep = p;
 	}
