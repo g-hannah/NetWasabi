@@ -15,14 +15,17 @@
 static int get_opts(int, char *[]) __nonnull((2)) __wur;
 
 uint32_t runtime_options = 0;
+wr_cache_t *http_hcache;
 
 static void
 __noret usage(int exit_status)
 {
 	fprintf(stderr,
 		"webreaper <url> [options]\n\n"
-		"--tls      use a TLS connection\n"
-		"--help/-h  display this information\n");
+		"-T/--tls            use a TLS connection\n"
+		"-oH/--req-head  	   show the request header (\"out header\")\n"
+		"-iH/--res-head    	 show the response header (\"in header\")\n"
+		"--help/-h           display this information\n");
 
 	exit(exit_status);
 }
@@ -42,7 +45,6 @@ main(int argc, char *argv[])
 	http_state_t http_state;
 	connection_t conn;
 	wr_cache_t *http_lcache; /* link cache */
-	wr_cache_t *http_hcache; /* header cache */
 	http_link_t *lp;
 	http_header_t *hp;
 
@@ -88,8 +90,10 @@ main(int argc, char *argv[])
 		if (http_check_header(&conn.read_buf, "Set-Cookie", off, &off))
 		{
 /*
- * Clear all old cookies and append the
- * new ones in the outgoing HTTP request.
+ * If we receive a header with header-field Set-Cookie,
+ * then we must clear any old ones we were sending because
+ * we have probably ventured into a different domain when
+ * following links we reaped.
  */
 			wr_cache_clear_all(http_hcache);
 
@@ -103,27 +107,24 @@ main(int argc, char *argv[])
 				assert(ch->value);
 				http_fetch_header(&conn.read_buf, "Set-Cookie", ch, off);
 				assert(ch->value[0]);
-				strncpy(ch->name, "Cookie", strlen("Cookie"));
-				ch->name[strlen("Cookie")] = 0;
-				ch->nlen = strlen("Cookie");
 				http_append_header(&conn.write_buf, ch);
 				++off;
 			}
 		}
 
-#ifdef DEBUG
-		printf("%s", conn.write_buf.buf_head);
-#endif
+		if (option_set(OPT_SHOW_REQ_HEADER))
+			printf("%s", conn.write_buf.buf_head);
 
 		if (http_send_request(&conn) < 0)
 			goto fail;
 
+		buf_clear(&conn.read_buf);
+
 		if (http_recv_response(&conn) < 0)
 			goto fail;
 
-#ifdef DEBUG
-		printf("%.*s\n", (int)http_response_header_len(&conn.read_buf), conn.read_buf.buf_head);
-#endif
+		if (option_set(OPT_SHOW_RES_HEADER))
+			printf("%s\n", conn.read_buf.buf_head);
 
 		int status_code = http_status_code_int(&conn.read_buf);
 
@@ -216,12 +217,26 @@ get_opts(int argc, char *argv[])
 		if (i == argc)
 			break;
 
-		if (!strcmp("--help", argv[i]) || !strcmp("-h", argv[i]))
+		if (!strcmp("--help", argv[i])
+			|| !strcmp("-h", argv[i]))
 		{
 			usage(EXIT_SUCCESS);
 		}
 		else
-		if (!strcmp("--tls", argv[i]))
+		if (!strcmp("-oH", argv[i])
+			|| !strcmp("--req-head", argv[i]))
+		{
+			set_option(OPT_SHOW_REQ_HEADER);
+		}
+		else
+		if (!strcmp("-iH", argv[i])
+			|| !strcmp("--res-head", argv[i]))
+		{
+			set_option(OPT_SHOW_RES_HEADER);
+		}
+		else
+		if (!strcmp("-T", argv[i])
+			|| strcmp("--tls", argv[i]))
 		{
 			set_option(OPT_USE_TLS);
 		}
