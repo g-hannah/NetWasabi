@@ -21,7 +21,7 @@
 #define HTTP_GATEWAY_TIMEOUT 504u
 
 #define HTTP_URL_MAX	256
-#define HTTP_COOKIE_MAX 256 /* Surely this is more than enough */
+#define HTTP_COOKIE_MAX 512 /* Surely this is more than enough */
 #define HTTP_HNAME_MAX 64 /* Header name */
 
 #define HTTP_GET		"GET"
