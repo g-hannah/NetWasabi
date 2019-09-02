@@ -168,6 +168,9 @@ http_recv_response(connection_t *conn)
 	assert(conn);
 
 	char *p = NULL;
+	size_t clen;
+	size_t header_len;
+	size_t deduct;
 
 	while (!p)
 	{
@@ -185,13 +188,18 @@ http_recv_response(connection_t *conn)
 	assert(content_len);
 	assert(wr_cache_obj_used(http_hcache, (void *)content_len));
 
-	http_fetch_header(&conn->read_buf, "Content-Length", content_len, (off_t)0);
+	if (http_fetch_header(&conn->read_buf, "Content-Length", content_len, (off_t)0))
+	{
+		clen = strtoul(content_len->value, NULL, 0);
+		header_len = (p - conn->read_buf.buf_head);
+		deduct = (conn->read_buf.data_len - header_len);
 
-	size_t clen = strtoul(content_len->value, NULL, 0);
-	size_t header_len = (p - conn->read_buf.buf_head);
-	size_t deduct = (conn->read_buf.data_len - header_len);
-
-	clen -= deduct;
+		clen -= deduct;
+	}
+	else
+	{
+		clen = 0;
+	}
 
 	if (option_set(OPT_USE_TLS))
 		buf_read_tls(conn->ssl, &conn->read_buf, clen);
