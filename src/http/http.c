@@ -206,6 +206,7 @@ http_recv_response(connection_t *conn)
 	else
 		buf_read_socket(conn->sock, &conn->read_buf, clen);
 
+	assert(conn->read_buf.magic == BUFFER_MAGIC);
 	wr_cache_dealloc(http_hcache, content_len);
 
 	return 0;
