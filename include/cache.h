@@ -3,10 +3,14 @@
 
 #include "webreaper.h"
 
-#define WR_CACHE_SIZE	4096
-#define WR_CACHE_BITMAP_SIZE 512 /* Unlikely, but could have 512 objects of one byte each */
-#define WR_CACHE_NR_SHIFT 24
-#define WR_CACHE_NR_MASK (255 << WR_CACHE_NR_SHIFT)
+/*
+ * 31 ..... 16 15 ..... 0
+ *   cache nr     obj nr
+ */
+#define WR_CACHE_SIZE 16384
+#define WR_CACHE_BITMAP_SIZE (WR_CACHE_SIZE / 8)
+#define WR_CACHE_NR_SHIFT 16
+#define WR_CACHE_NR_MASK (0xffff << WR_CACHE_NR_SHIFT)
 
 typedef int (*wr_cache_ctor_t)(void *);
 typedef void (*wr_cache_dtor_t)(void *);
