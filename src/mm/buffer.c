@@ -272,18 +272,31 @@ buf_read_fd(int fd, buf_t *buf, size_t bytes)
 }
 
 ssize_t
-buf_read_socket(int sock, buf_t *buf)
+buf_read_socket(int sock, buf_t *buf, size_t toread)
 {
 	assert(buf);
 
-	size_t remaining = buf->buf_size;
 	ssize_t n = 0;
 	ssize_t total = 0;
+	size_t slack;
 
 	buf_clear(buf);
 
-	while ((n = recv(sock, buf->buf_tail, remaining, 0)))
+	slack = buf_slack(buf);
+
+	if (!toread)
+		toread = slack;
+
+	while (1)
 	{
+		n = recv(sock, buf->buf_tail, toread, 0);
+		printf("received %ld bytes\n", n);
+
+		if (!n)
+		{
+			break;
+		}
+		else
 		if (n < 0)
 		{
 			if (errno == EINTR)
@@ -291,15 +304,25 @@ buf_read_socket(int sock, buf_t *buf)
 			else
 				goto fail;
 		}
-
-		__buf_pull_tail(buf, (size_t)n);
-		remaining -= n;
-		total += n;
-
-		if (remaining <= 1024)
+		else
 		{
-			remaining += buf->buf_size;
-			buf_extend(buf, buf->buf_size);
+			__buf_pull_tail(buf, (size_t)n);
+			toread -= n;
+			slack -= n;
+			total += n;
+
+			/*
+			 * If we based TOREAD simply on SLACK, and we got here,
+			 * we probably read all we need so we can break.
+			 */
+			if (toread == slack)
+				break;
+
+			if (!slack && toread)
+			{
+				slack += buf->buf_size;
+				buf_extend(buf, buf->buf_size);
+			}
 		}
 	}
 
@@ -310,12 +333,12 @@ buf_read_socket(int sock, buf_t *buf)
 }
 
 ssize_t
-buf_read_tls(SSL *ssl, buf_t *buf)
+buf_read_tls(SSL *ssl, buf_t *buf, size_t toread)
 {
 	assert(ssl);
 	assert(buf);
 
-	size_t slack = buf_slack(buf);
+	size_t slack;
 	ssize_t n;
 	ssize_t total = 0;
 	int ssl_error = 0;
@@ -327,9 +350,16 @@ buf_read_tls(SSL *ssl, buf_t *buf)
 	read_socket = SSL_get_rfd(ssl);
 	fcntl(read_socket, F_SETFL, O_NONBLOCK);
 
+	buf_clear(buf);
+
+	slack = buf_slack(buf);
+
+	if (!toread)
+		toread = slack;
+
 	while (1)
 	{
-		n = SSL_read(ssl, buf->buf_tail, slack);
+		n = SSL_read(ssl, buf->buf_tail, toread);
 
 		if (!n)
 		{
@@ -370,10 +400,14 @@ buf_read_tls(SSL *ssl, buf_t *buf)
 		else
 		{
 			total += n;
+			toread -= n;
 			slack -= n;
 			__buf_pull_tail(buf, (size_t)n);
 
-			if (!slack)
+			if (toread == slack)
+				break;
+
+			if (!slack && toread)
 			{
 				buf_extend(buf, buf->buf_size);
 				slack = buf_slack(buf);
@@ -402,8 +436,15 @@ buf_write_fd(int fd, buf_t *buf)
 	{
 		n = write(fd, buf->buf_head, towrite);
 
+		if (!n)
+		{
+			break;
+		}
+		else
 		if (n < 0)
+		{
 			goto fail;
+		}
 
 		total += n;
 
@@ -430,6 +471,12 @@ buf_write_socket(int sock, buf_t *buf)
 	while (towrite > 0)
 	{
 		n = send(sock, buf->buf_head, towrite, 0);
+
+		if (!n)
+		{
+			break;
+		}
+		else
 		if (n < 0)
 		{
 			if (errno == EINTR)
@@ -464,6 +511,11 @@ buf_write_tls(SSL *ssl, buf_t *buf)
 	while (towrite > 0)
 	{
 		n = SSL_write(ssl, buf->buf_head, towrite);
+		if (!n)
+		{
+			break;
+		}
+		else
 		if (n < 0)
 		{
 			if (errno == EINTR)
