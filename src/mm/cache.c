@@ -36,8 +36,9 @@ static inline int __wr_cache_next_free_idx(wr_cache_t *cachep)
 			if (ptr->next)
 			{
 				ptr = ptr->next;
-				bm = ptr->free_bitmap;
+				idx = 0;
 				bit = 1;
+				bm = ptr->free_bitmap;
 				++cache_nr;
 			}
 			else
@@ -57,8 +58,7 @@ static inline int __wr_cache_next_free_idx(wr_cache_t *cachep)
 		}
 	}
 
-	/* Use the 8 most significant bits to indicate to which cache the slot belongs */
-	assert(cache_nr < 256);
+	assert(cache_nr < (((WR_CACHE_NR_MASK >> WR_CACHE_NR_SHIFT) & ~(WR_CACHE_NR_MASK)) + 1));
 	idx &= ~(WR_CACHE_NR_MASK);
 	idx |= (cache_nr << WR_CACHE_NR_SHIFT);
 
