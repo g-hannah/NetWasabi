@@ -280,8 +280,11 @@ buf_read_socket(int sock, buf_t *buf, size_t toread)
 	ssize_t n = 0;
 	ssize_t total = 0;
 	size_t slack;
+	int sock_flags;
 
-	//buf_clear(buf);
+	sock_flags = fcntl(sock, F_GETFL);
+	if (!(sock_flags & O_NONBLOCK))
+		fcntl(sock, F_SETFL, sock_flags | O_NONBLOCK);
 
 	slack = buf_slack(buf);
 
@@ -300,23 +303,56 @@ buf_read_socket(int sock, buf_t *buf, size_t toread)
 		if (n < 0)
 		{
 			if (errno == EINTR)
+			{
 				continue;
+			}
 			else
+			if (errno == EAGAIN || errno == EWOULDBLOCK)
+			{
+				break;
+			}
+			else
+			{
 				goto fail;
+			}
 		}
 		else
 		{
+			printf("\n@@ %lu bytes @@\n", n);
+			printf("%s", buf->buf_tail);
+
 			__buf_pull_tail(buf, (size_t)n);
 			toread -= n;
 			slack -= n;
 			total += n;
 
+		/*
+		 * If caller specifies specific amount for TOREAD,
+		 * then TOREAD (likely) != SLACK. So in the following
+		 * case, we have finished.
+		 */
 			if (toread != slack && !toread)
 				break;
 
+		/*
+		 * We've run out of space in the buffer, so extend it.
+		 */
 			if (!slack && toread)
 			{
 				slack += buf->buf_size;
+				buf_extend(buf, buf->buf_size);
+			}
+
+		/*
+		 * In this case, we (probably) did TOREAD = SLACK because
+		 * the caller did not specify a specific amount of bytes
+		 * to read. Extend the buffer by ->BUF_SIZE and add that
+		 * to both SLACK and TOREAD.
+		 */
+			else
+			if (slack == toread && !slack)
+			{
+				slack = (toread += buf->buf_size);
 				buf_extend(buf, buf->buf_size);
 			}
 		}
@@ -343,11 +379,13 @@ buf_read_tls(SSL *ssl, buf_t *buf, size_t toread)
 	int slept_for = 0;
 	struct timeval timeout = {0};
 	fd_set rdfds;
+	int sock_flags;
 
 	read_socket = SSL_get_rfd(ssl);
-	fcntl(read_socket, F_SETFL, O_NONBLOCK);
 
-	//buf_clear(buf);
+	sock_flags = fcntl(read_socket, F_GETFL);
+	if (!(sock_flags & O_NONBLOCK))
+		fcntl(read_socket, F_SETFL, sock_flags | O_NONBLOCK);
 
 	slack = buf_slack(buf);
 
@@ -366,7 +404,9 @@ buf_read_tls(SSL *ssl, buf_t *buf, size_t toread)
 		if (n < 0)
 		{
 			if (errno == EINTR)
+			{
 				continue;
+			}
 			else
 			{
 				ssl_error = SSL_get_error(ssl, n);
@@ -391,6 +431,8 @@ buf_read_tls(SSL *ssl, buf_t *buf, size_t toread)
 							goto out;
 						else
 							continue;
+					default:
+						goto fail;
 				}
 			}
 		}
@@ -401,6 +443,11 @@ buf_read_tls(SSL *ssl, buf_t *buf, size_t toread)
 			slack -= n;
 			total += n;
 
+#define HTML_END_SENTINEL "</html"
+
+			if (strstr(buf->buf_head, HTML_END_SENTINEL))
+				break;
+
 			if (toread != slack && !toread)
 				break;
 
@@ -408,6 +455,12 @@ buf_read_tls(SSL *ssl, buf_t *buf, size_t toread)
 			{
 				buf_extend(buf, buf->buf_size);
 				slack = buf_slack(buf);
+			}
+			else
+			if (toread == slack && !slack)
+			{
+				slack = (toread += buf->buf_size);
+				buf_extend(buf, buf->buf_size);
 			}
 		}
 	} /* while (1) */
