@@ -318,9 +318,6 @@ buf_read_socket(int sock, buf_t *buf, size_t toread)
 		}
 		else
 		{
-			printf("\n@@ %lu bytes @@\n", n);
-			printf("%s", buf->buf_tail);
-
 			__buf_pull_tail(buf, (size_t)n);
 			toread -= n;
 			slack -= n;
@@ -442,11 +439,6 @@ buf_read_tls(SSL *ssl, buf_t *buf, size_t toread)
 			toread -= n;
 			slack -= n;
 			total += n;
-
-#define HTML_END_SENTINEL "</html"
-
-			if (strstr(buf->buf_head, HTML_END_SENTINEL))
-				break;
 
 			if (toread != slack && !toread)
 				break;
