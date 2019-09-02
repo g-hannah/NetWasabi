@@ -16,6 +16,7 @@ static inline int __wr_cache_next_free_idx(wr_cache_t *cachep)
 	unsigned char bit = 1;
 	int idx = 0;
 	int	cache_nr = 0;
+	int capacity = cachep->capacity;
 	wr_cache_t *ptr = cachep;
 
 	while (bm && (*bm & bit))
@@ -30,13 +31,27 @@ static inline int __wr_cache_next_free_idx(wr_cache_t *cachep)
 			bit = 1;
 		}
 
-		if (!bm)
+		if (idx >= capacity)
 		{
 			if (ptr->next)
 			{
 				ptr = ptr->next;
 				bm = ptr->free_bitmap;
 				bit = 1;
+				++cache_nr;
+			}
+			else
+			{
+				ptr->next = wr_cache_create(cachep->name,
+							cachep->objsize,
+							0,
+							cachep->ctor,
+							cachep->dtor);
+
+				ptr = ptr->next;
+				idx = 0;
+				bit = 1;
+				bm = ptr->free_bitmap;
 				++cache_nr;
 			}
 		}
