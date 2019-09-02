@@ -124,7 +124,10 @@ main(int argc, char *argv[])
 			goto fail;
 
 		if (option_set(OPT_SHOW_RES_HEADER))
-			printf("%s\n", conn.read_buf.buf_head);
+		{
+			size_t head_len = http_response_header_len(&conn.read_buf);
+			printf("%.*s\n", (int)head_len, conn.read_buf.buf_head);
+		}
 
 		int status_code = http_status_code_int(&conn.read_buf);
 
