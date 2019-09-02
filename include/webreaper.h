@@ -26,6 +26,8 @@
 #endif
 
 #define OPT_USE_TLS	0x1
+#define OPT_SHOW_REQ_HEADER 0x2
+#define OPT_SHOW_RES_HEADER 0x4
 
 extern uint32_t runtime_options;
 
