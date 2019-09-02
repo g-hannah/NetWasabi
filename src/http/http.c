@@ -170,9 +170,9 @@ http_recv_response(connection_t *conn)
 	buf_clear(&conn->read_buf);
 
 	if (conn_using_tls(conn))
-		buf_read_tls(conn->ssl, &conn->read_buf);
+		buf_read_tls(conn->ssl, &conn->read_buf, 0);
 	else
-		buf_read_socket(conn->sock, &conn->read_buf);
+		buf_read_socket(conn->sock, &conn->read_buf, 0);
 
 	return 0;
 }
