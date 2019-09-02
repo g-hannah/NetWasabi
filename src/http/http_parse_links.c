@@ -8,7 +8,7 @@
 #include "http.h"
 
 int
-http_parse_links(wr_cache_t *cachep, buf_t *buf)
+http_parse_links(wr_cache_t *cachep, buf_t *buf, char *host)
 {
 	assert(cachep);
 	assert(buf);
@@ -47,18 +47,30 @@ http_parse_links(wr_cache_t *cachep, buf_t *buf)
 		if (!(hl = (http_link_t *)wr_cache_alloc(cachep)))
 			return -1;
 
-		strncpy(hl->url, savep, (p - savep));
-		hl->url[p - savep] = 0;
-		hl->time_reaped = time(NULL);
-
-		char *url = hl->url;
-
-		if (!strcmp("#", url)
-			|| !strcmp("/", url))
+		if (*savep == '/')
 		{
-			wr_cache_dealloc(cachep, hl);
-			savep = p;
-			continue;
+			buf_t full_url;
+
+			buf_init(&full_url, HTTP_URL_MAX);
+
+			if (strncmp("http", host, 4))
+				buf_append(&full_url, option_set(OPT_USE_TLS) ? "https://" : "http://");
+
+			buf_append(&full_url, host);
+
+			buf_append_ex(&full_url, savep, (p - savep));
+
+			strncpy(hl->url, full_url.buf_head, full_url.data_len);
+			hl->url[full_url.data_len] = 0;
+			hl->time_reaped = time(NULL);
+
+			buf_destroy(&full_url);
+		}
+		else
+		{
+			strncpy(hl->url, savep, (p - savep));
+			hl->url[p - savep] = 0;
+			hl->time_reaped = time(NULL);
 		}
 
 		savep = p;
