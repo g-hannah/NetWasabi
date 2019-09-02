@@ -20,7 +20,7 @@ http_parse_links(wr_cache_t *cachep, buf_t *buf)
 
 	p = savep = buf->buf_head;
 
-	while (p < tail && (p = strstr(savep, "href")))
+	while (p < tail && (p = strstr(savep, " href")))
 	{
 		if (!p)
 			break;
