@@ -540,6 +540,9 @@ buf_copy(buf_t *to, buf_t *from)
 	assert(to);
 	assert(from);
 
+	if (to->buf_size < from->buf_size)
+		buf_extend(to, (from->buf_size - to->buf_size));
+
 	memcpy(to->data, from->data, from->buf_size);
 	to->buf_head = (to->data + (from->buf_head - from->data));
 	to->buf_tail = (to->data + (from->buf_tail - from->data));
