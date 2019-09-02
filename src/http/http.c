@@ -462,9 +462,17 @@ http_fetch_header(buf_t *buf, const char *name, http_header_t *hh, off_t whence)
 	if (!q)
 		return NULL;
 
-	strncpy(hh->name, p, (q - p));
-	hh->name[q - p] = 0;
-	hh->nlen = (q - p);
+	if (!strncmp("Set-Cookie", p, q - p))
+	{
+		strncpy(hh->name, "Cookie", strlen("Cookie"));
+		hh->nlen = strlen("Cookie");
+	}
+	else
+	{
+		strncpy(hh->name, p, (q - p));
+		hh->name[q - p] = 0;
+		hh->nlen = (q - p);
+	}
 
 	p = (q + 2);
 	if (*(p-1) != ' ')
