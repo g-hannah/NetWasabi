@@ -169,7 +169,7 @@ main(int argc, char *argv[])
 			continue;
 		}
 
-		http_parse_links(http_lcache, &conn.read_buf);
+		http_parse_links(http_lcache, &conn.read_buf, conn.host);
 		http_link_t *lp = (http_link_t *)http_lcache->cache;
 
 		while (wr_cache_obj_used(http_lcache, (void *)lp))
