@@ -143,6 +143,7 @@ buf_clear(buf_t *buf)
 {
 	memset(buf->data, 0, buf->buf_size);
 	buf->buf_head = buf->buf_tail = buf->data;
+	buf->data_len = 0;
 }
 
 int
@@ -280,7 +281,7 @@ buf_read_socket(int sock, buf_t *buf, size_t toread)
 	ssize_t total = 0;
 	size_t slack;
 
-	buf_clear(buf);
+	//buf_clear(buf);
 
 	slack = buf_slack(buf);
 
@@ -290,7 +291,6 @@ buf_read_socket(int sock, buf_t *buf, size_t toread)
 	while (1)
 	{
 		n = recv(sock, buf->buf_tail, toread, 0);
-		printf("received %ld bytes\n", n);
 
 		if (!n)
 		{
@@ -311,11 +311,7 @@ buf_read_socket(int sock, buf_t *buf, size_t toread)
 			slack -= n;
 			total += n;
 
-			/*
-			 * If we based TOREAD simply on SLACK, and we got here,
-			 * we probably read all we need so we can break.
-			 */
-			if (toread == slack)
+			if (toread != slack && !toread)
 				break;
 
 			if (!slack && toread)
@@ -339,7 +335,8 @@ buf_read_tls(SSL *ssl, buf_t *buf, size_t toread)
 	assert(buf);
 
 	size_t slack;
-	ssize_t n;
+	//ssize_t n;
+	int n;
 	ssize_t total = 0;
 	int ssl_error = 0;
 	int read_socket = 0;
@@ -350,7 +347,7 @@ buf_read_tls(SSL *ssl, buf_t *buf, size_t toread)
 	read_socket = SSL_get_rfd(ssl);
 	fcntl(read_socket, F_SETFL, O_NONBLOCK);
 
-	buf_clear(buf);
+	//buf_clear(buf);
 
 	slack = buf_slack(buf);
 
@@ -399,12 +396,12 @@ buf_read_tls(SSL *ssl, buf_t *buf, size_t toread)
 		}
 		else
 		{
-			total += n;
+			__buf_pull_tail(buf, (size_t)n);
 			toread -= n;
 			slack -= n;
-			__buf_pull_tail(buf, (size_t)n);
+			total += n;
 
-			if (toread == slack)
+			if (toread != slack && !toread)
 				break;
 
 			if (!slack && toread)
