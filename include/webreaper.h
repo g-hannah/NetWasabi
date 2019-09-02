@@ -4,6 +4,8 @@
 #include <stdint.h>
 #include <string.h>
 
+#define WEBREAPER_BUILD		"0.0.1"
+
 #define clear_struct(s) memset((s), 0, sizeof(*(s)))
 
 #define likely(x) __builtin_expect(!!(x), 1)
