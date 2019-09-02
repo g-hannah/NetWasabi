@@ -167,12 +167,38 @@ http_recv_response(connection_t *conn)
 {
 	assert(conn);
 
-	buf_clear(&conn->read_buf);
+	char *p = NULL;
 
-	if (conn_using_tls(conn))
-		buf_read_tls(conn->ssl, &conn->read_buf, 0);
+	while (!p)
+	{
+		if (option_set(OPT_USE_TLS))
+			buf_read_tls(conn->ssl, &conn->read_buf, 256);
+		else
+			buf_read_socket(conn->sock, &conn->read_buf, 256);
+
+		p = strstr(conn->read_buf.buf_head, HTTP_EOH_SENTINEL);
+	}
+
+	p += strlen(HTTP_EOH_SENTINEL);
+
+	http_header_t *content_len = (http_header_t *)wr_cache_alloc(http_hcache);
+	assert(content_len);
+	assert(wr_cache_obj_used(http_hcache, (void *)content_len));
+
+	http_fetch_header(&conn->read_buf, "Content-Length", content_len, (off_t)0);
+
+	size_t clen = strtoul(content_len->value, NULL, 0);
+	size_t header_len = (p - conn->read_buf.buf_head);
+	size_t deduct = (conn->read_buf.data_len - header_len);
+
+	clen -= deduct;
+
+	if (option_set(OPT_USE_TLS))
+		buf_read_tls(conn->ssl, &conn->read_buf, clen);
 	else
-		buf_read_socket(conn->sock, &conn->read_buf, 0);
+		buf_read_socket(conn->sock, &conn->read_buf, clen);
+
+	wr_cache_dealloc(http_hcache, content_len);
 
 	return 0;
 }
@@ -534,6 +560,69 @@ http_append_header(buf_t *buf, http_header_t *hh)
 	strncpy(p, tmp.buf_head, tmp.data_len);
 
 	buf_destroy(&tmp);
+
+	return 0;
+}
+
+int
+http_parse_header(buf_t *buf, wr_cache_t *cachep)
+{
+	assert(buf);
+	assert(cachep);
+
+	http_header_t *hp;
+	char *p;
+	char *savep;
+	char *line;
+	char *tail = buf->buf_tail;
+	char *head = buf->buf_head;
+	size_t len;
+
+	p = head;
+
+	while (p < tail)
+	{
+		savep = p;
+
+		line = memchr(savep, 0x0d, tail - savep);
+
+		if (!line)
+			break;
+
+		p = memchr(savep, ':', line - savep);
+
+		if (!p)
+			break;
+
+		hp = (http_header_t *)wr_cache_alloc(cachep);
+		assert(wr_cache_obj_used(cachep, (void *)hp));
+
+		len = (p - savep);
+		strncpy(hp->name, savep, len);
+		hp->name[len] = 0;
+		hp->nlen = len;
+
+		++p;
+
+		while ((*p == ' ' || *p == '\t') && p < tail)
+			++p;
+
+		if (p == tail)
+			break;
+
+		savep = p;
+
+		len = (line - p);
+		strncpy(hp->value, p, len);
+		hp->value[len] = 0;
+		hp->vlen = len;
+
+		while ((*p == 0x0a || *p == 0x0d) && p < tail)
+			++p;
+
+		if (p == tail)
+			break;
+	}
 
 	return 0;
 }
