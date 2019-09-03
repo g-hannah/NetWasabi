@@ -37,6 +37,10 @@ extern uint32_t runtime_options;
 #define set_option(o) (runtime_options |= (o))
 #define unset_option(o) (runtime_options &= ~(o))
 
+/*
+ * For paths that are forbidden as
+ * layed out in the robots.txt file.
+ */
 extern char **forbidden_tokens;
 
 #endif /* !defined WEBREAPER_H */
