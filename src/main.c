@@ -23,6 +23,7 @@ __noret usage(int exit_status)
 	fprintf(stderr,
 		"webreaper <url> [options]\n\n"
 		"-T/--tls            use a TLS connection\n"
+		"-R/--raw            show raw HTML output\n"
 		"-oH/--req-head  	   show the request header (\"out header\")\n"
 		"-iH/--res-head    	 show the response header (\"in header\")\n"
 		"--help/-h           display this information\n");
@@ -123,6 +124,11 @@ main(int argc, char *argv[])
 		if (http_recv_response(&conn) < 0)
 			goto fail;
 
+		if (option_set(OPT_SHOW_RAW))
+		{
+			printf("%s\n", conn.read_buf.buf_head);
+		}
+		else
 		if (option_set(OPT_SHOW_RES_HEADER))
 		{
 			size_t head_len = http_response_header_len(&conn.read_buf);
@@ -174,7 +180,7 @@ main(int argc, char *argv[])
 
 		while (wr_cache_obj_used(http_lcache, (void *)lp))
 		{
-			printf("%s (%ld)\n", lp->url, lp->time_reaped);
+			printf("%s\n", lp->url);
 			++lp;
 		}
 
@@ -224,6 +230,12 @@ get_opts(int argc, char *argv[])
 			|| !strcmp("-h", argv[i]))
 		{
 			usage(EXIT_SUCCESS);
+		}
+		else
+		if (!strcmp("--raw", argv[i])
+			|| !strcmp("-R", argv[i]))
+		{
+			set_option(OPT_SHOW_RAW);
 		}
 		else
 		if (!strcmp("-oH", argv[i])
