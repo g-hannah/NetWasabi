@@ -296,7 +296,7 @@ buf_read_socket(int sock, buf_t *buf, size_t toread)
 
 	while (1)
 	{
-		n = recv(sock, buf->buf_tail, toread, 0);
+		n = recv(sock, buf->buf_tail, slack, 0);
 
 		if (!n)
 		{
@@ -322,37 +322,17 @@ buf_read_socket(int sock, buf_t *buf, size_t toread)
 		else
 		{
 			__buf_pull_tail(buf, (size_t)n);
+
 			toread -= n;
 			slack -= n;
 			total += n;
 
-		/*
-		 * If caller specifies specific amount for TOREAD,
-		 * then TOREAD (likely) != SLACK. So in the following
-		 * case, we have finished.
-		 */
-			if (toread != slack && !toread)
+			if (!toread)
 				break;
-
-		/*
-		 * We've run out of space in the buffer, so extend it.
-		 */
-			if (!slack && toread)
+			else
+			if (!slack)
 			{
 				slack += buf->buf_size;
-				buf_extend(buf, buf->buf_size);
-			}
-
-		/*
-		 * In this case, we (probably) did TOREAD = SLACK because
-		 * the caller did not specify a specific amount of bytes
-		 * to read. Extend the buffer by ->BUF_SIZE and add that
-		 * to both SLACK and TOREAD.
-		 */
-			else
-			if (slack == toread && !slack)
-			{
-				slack = (toread += buf->buf_size);
 				buf_extend(buf, buf->buf_size);
 			}
 		}
@@ -397,7 +377,7 @@ buf_read_tls(SSL *ssl, buf_t *buf, size_t toread)
 
 	while (1)
 	{
-		n = SSL_read(ssl, buf->buf_tail, toread);
+		n = SSL_read(ssl, buf->buf_tail, slack);
 
 		if (!n)
 		{
@@ -447,18 +427,12 @@ buf_read_tls(SSL *ssl, buf_t *buf, size_t toread)
 			slack -= n;
 			total += n;
 
-			if (!toread && slack)
+			if (!toread)
 				break;
-			else
-			if (!slack && toread)
-			{
-				buf_extend(buf, buf->buf_size);
-				slack = buf_slack(buf);
-			}
 			else
 			if (!slack)
 			{
-				slack = (toread += buf->buf_size);
+				slack += buf->buf_size;
 				buf_extend(buf, buf->buf_size);
 			}
 		}
