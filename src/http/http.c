@@ -195,16 +195,28 @@ http_recv_response(connection_t *conn)
 		deduct = (conn->read_buf.data_len - header_len);
 
 		clen -= deduct;
+
+		ssize_t n = 0;
+
+		while (clen)
+		{
+			if (option_set(OPT_USE_TLS))
+				n = buf_read_tls(conn->ssl, &conn->read_buf, clen);
+			else
+				n = buf_read_socket(conn->sock, &conn->read_buf, clen);
+
+			clen -= n;
+		}
 	}
 	else
 	{
 		clen = 0;
-	}
 
-	if (option_set(OPT_USE_TLS))
-		buf_read_tls(conn->ssl, &conn->read_buf, clen);
-	else
-		buf_read_socket(conn->sock, &conn->read_buf, clen);
+		if (option_set(OPT_USE_TLS))
+			buf_read_tls(conn->ssl, &conn->read_buf, clen);
+		else
+			buf_read_socket(conn->sock, &conn->read_buf, clen);
+	}
 
 	assert(conn->read_buf.magic == BUFFER_MAGIC);
 	wr_cache_dealloc(http_hcache, content_len);
