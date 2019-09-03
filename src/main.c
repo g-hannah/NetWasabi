@@ -90,12 +90,13 @@ main(int argc, char *argv[])
 
 		if (http_check_header(&conn.read_buf, "Set-Cookie", off, &off))
 		{
-/*
- * If we receive a header with header-field Set-Cookie,
- * then we must clear any old ones we were sending because
- * we have probably ventured into a different domain when
- * following links we reaped.
- */
+
+		/*
+		 * If we receive a header with header-field Set-Cookie,
+		 * then we must clear any old ones we were sending because
+		 * we have probably ventured into a different domain when
+		 * following links we reaped.
+		 */
 			wr_cache_clear_all(http_hcache);
 
 			off = 0;
@@ -137,11 +138,11 @@ main(int argc, char *argv[])
 
 		int status_code = http_status_code_int(&conn.read_buf);
 
-/*
- * 301 Permanently Moved and 302 Found both give
- * a location header of the link we should request
- * instead.
- */
+	/*
+	 * 301 Permanently Moved and 302 Found both give
+	 * a location header of the link we should request
+	 * instead.
+	 */
 		if (status_code == HTTP_MOVED_PERMANENTLY
 			|| status_code == HTTP_FOUND)
 		{
@@ -170,6 +171,7 @@ main(int argc, char *argv[])
 
 			strncpy(conn.page, location->value, location->vlen);
 			conn.page[location->vlen] = 0;
+
 			wr_cache_dealloc(http_hcache, (void *)location);
 
 			continue;
