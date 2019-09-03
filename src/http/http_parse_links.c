@@ -43,6 +43,9 @@ http_parse_links(wr_cache_t *cachep, buf_t *buf, char *host)
 
 		if ((p - savep) >= HTTP_URL_MAX || (p - savep) < 5)
 			continue;
+		else
+		if (!memchr(savep, '/', (p - savep)))
+			continue;
 
 		if (!(hl = (http_link_t *)wr_cache_alloc(cachep)))
 			return -1;
