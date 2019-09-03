@@ -302,63 +302,6 @@ http_status_code_string(int code)
 	}
 }
 
-#if 0
-int
-http_set_cookies(buf_t *buf, http_state_t *http_state)
-{
-	assert(buf);
-
-	char	*p = buf->data;
-	char	*q = NULL;
-	char	*tail = buf->buf_tail;
-	size_t	cookie_len;
-	char	**cookies = NULL;
-	int nrcookies;
-
-	if (!buf_integrity(buf))
-		return -1;
-
-	while ((q = strstr(p, "Set-Cookie")))
-	{
-		q += strlen("Set-Cookie");
-		p = q;
-		q = memchr(p, 0x0d, (tail - p));
-		if (!q)
-			return -1;
-
-		cookie_len = (q - p);
-
-		cookies = http_state->http_cookies;
-		nrcookies = http_nr_cookies(http_state);
-
-		if (!http_nr_cookies(http_state))
-		{
-			cookies = wr_calloc(1, sizeof(char *));
-			if (!cookies)	
-				return -1;
-
-			cookies[nrcookies] = wr_calloc(cookie_len+1, 1);
-			strncpy(cookies[nrcookies], p, cookie_len);
-			cookies[nrcookies][cookie_len] = 0;
-			http_inc_cookies(http_state);
-		}
-		else
-		{
-			cookies = wr_realloc(cookies, ((nrcookies + 1) * sizeof(char *)));
-			if (!cookies)
-				return -1;
-
-			cookies[nrcookies] = wr_calloc(cookie_len+1, 1);
-			strncpy(cookies[nrcookies], p, cookie_len);
-			cookies[nrcookies][cookie_len] = 0;
-			http_inc_cookies(http_state);
-		}
-	}
-
-	return 0;
-}
-#endif
-
 ssize_t
 http_response_header_len(buf_t *buf)
 {
