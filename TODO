@@ -1,3 +1,1 @@
-Fix bug related to sending data on SSL_write() on TLS connection
-
 Improve cookie storage implementation (current wr_cache_t is overkill)
