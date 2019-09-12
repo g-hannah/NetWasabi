@@ -7,10 +7,10 @@
  * 31 ..... 16 15 ..... 0
  *   cache nr     obj nr
  */
-#define WR_CACHE_SIZE 16384
-#define WR_CACHE_BITMAP_SIZE (WR_CACHE_SIZE / 8)
-#define WR_CACHE_NR_SHIFT 16
-#define WR_CACHE_NR_MASK (0xffff << WR_CACHE_NR_SHIFT)
+#define WR_CACHE_SIZE 4096
+
+#define WR_CACHE_INC_FREE(c) ++((c)->nr_free)
+#define WR_CACHE_DEC_FREE(c) --((c)->nr_free)
 
 typedef int (*wr_cache_ctor_t)(void *);
 typedef void (*wr_cache_dtor_t)(void *);
@@ -22,11 +22,11 @@ typedef struct wr_cache_t
 	int capacity;
 	int nr_free;
 	size_t objsize;
+	size_t cache_size;
+	uint16_t bitmap_size;
 	char *name;
 	wr_cache_ctor_t ctor;
 	wr_cache_dtor_t dtor;
-	struct wr_cache_t *next;
-	//struct list_head *list;
 } wr_cache_t;
 
 wr_cache_t *wr_cache_create(char *, size_t, int, wr_cache_ctor_t, wr_cache_dtor_t);
