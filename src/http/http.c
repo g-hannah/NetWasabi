@@ -172,6 +172,11 @@ http_recv_response(connection_t *conn)
 	size_t header_len;
 	size_t deduct;
 
+	if (option_set(OPT_USE_TLS))
+		buf_read_tls(conn->ssl, &conn->read_buf, 0);
+	else
+		buf_read_socket(conn->sock, &conn->read_buf, 0);
+
 	while (!p)
 	{
 		if (option_set(OPT_USE_TLS))
@@ -196,6 +201,8 @@ http_recv_response(connection_t *conn)
 
 		clen -= deduct;
 
+		printf("Need to receive another %lu bytes\n", clen);
+
 		ssize_t n = 0;
 
 		while (clen)
@@ -205,11 +212,15 @@ http_recv_response(connection_t *conn)
 			else
 				n = buf_read_socket(conn->sock, &conn->read_buf, clen);
 
+			if (n < 0)
+				goto fail;
+
 			clen -= n;
 		}
 	}
 	else
 	{
+		printf("No content len header\n");
 		clen = 0;
 
 		if (option_set(OPT_USE_TLS))
@@ -219,9 +230,11 @@ http_recv_response(connection_t *conn)
 	}
 
 	assert(conn->read_buf.magic == BUFFER_MAGIC);
-	wr_cache_dealloc(http_hcache, content_len);
 
 	return 0;
+
+	fail:
+	return -1;
 }
 
 int
