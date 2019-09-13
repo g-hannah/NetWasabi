@@ -17,12 +17,16 @@ http_parse_links(wr_cache_t *cachep, buf_t *buf, char *host)
 	char					*p = NULL;
 	char					*savep = NULL;
 	char					*tail = buf->buf_tail;
+	int						nr = 0;
+	size_t url_len = 0;
 
-	p = savep = buf->buf_head;
+	savep = buf->buf_head;
 
-	while (p < tail && (p = strstr(savep, " href")))
+	while (1)
 	{
-		if (!p)
+		p = strstr(savep, "href");
+
+		if (!p || p >= tail)
 			break;
 
 		savep = p;
@@ -41,16 +45,18 @@ http_parse_links(wr_cache_t *cachep, buf_t *buf, char *host)
 		if (!p)
 			break;
 
-		if ((p - savep) >= HTTP_URL_MAX || (p - savep) < 5)
+		url_len = (p - savep);
+
+		if (url_len >= (HTTP_URL_MAX + strlen("https://")) || url_len < 5)
+		{
+			savep = p;
 			continue;
-		else
-		if (!memchr(savep, '/', (p - savep)))
-			continue;
+		}
 
 		if (!(hl = (http_link_t *)wr_cache_alloc(cachep)))
 			return -1;
 
-		if (*savep == '/')
+		if (strncmp("http", savep, 4))
 		{
 			buf_t full_url;
 
@@ -71,13 +77,16 @@ http_parse_links(wr_cache_t *cachep, buf_t *buf, char *host)
 		}
 		else
 		{
-			strncpy(hl->url, savep, (p - savep));
-			hl->url[p - savep] = 0;
+			strncpy(hl->url, savep, url_len);
+			hl->url[url_len] = 0;
 			hl->time_reaped = time(NULL);
 		}
 
 		savep = p;
+
+		++nr;
 	}
 
+	printf("Done parsing links\n");
 	return 0;
 }
