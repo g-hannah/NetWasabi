@@ -2,6 +2,8 @@
 #include <ctype.h>
 #include <errno.h>
 #include <fcntl.h>
+#include <setjmp.h>
+#include <signal.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <sys/stat.h>
@@ -25,6 +27,14 @@ static int get_opts(int, char *[]) __nonnull((2)) __wur;
 uint32_t runtime_options = 0;
 wr_cache_t *http_hcache;
 
+/*
+ * Catch SIGINT
+ */
+sigjmp_buf main_env;
+struct sigaction new_act;
+struct sigaction old_sigint;
+struct sigaction old_sigquit;
+
 static void
 __noret usage(int exit_status)
 {
@@ -45,6 +55,15 @@ __normalise_filename(char *filename)
 	char *p = filename;
 	size_t len = strlen(filename);
 	char *end = (filename + len);
+	buf_t tmp;
+
+	clear_struct(&tmp);
+	buf_init(&tmp, len);
+
+	buf_append(&tmp, filename);
+
+	p = tmp.buf_head;
+	end = tmp.buf_tail;
 
 	while (p < end)
 	{
@@ -52,19 +71,26 @@ __normalise_filename(char *filename)
 		|| (*p != 0x5f && !isalpha(*p) && !isdigit(*p)))
 		{
 			*p++ = 0x5f;
+
+			if (*(p-2) == 0x5f)
+			{
+				--p;
+				buf_collapse(&tmp, (off_t)(p - tmp.buf_head), (size_t)1);
+				end = tmp.buf_tail;
+			}
+
 			continue;
 		}
 
 		++p;
 	}
 
-	--end;
-	while (!isalpha(*end) && !isdigit(*end))
-		--end;
+	buf_append(&tmp, ".html");
 
-	++end;
+	strncpy(filename, tmp.buf_head, tmp.data_len);
+	filename[tmp.data_len] = 0;
 
-	*end = 0;
+	buf_destroy(&tmp);
 
 	return;
 }
@@ -74,13 +100,14 @@ __archive_page(connection_t *conn)
 {
 	int fd = -1;
 	buf_t *buf = &conn->read_buf;
-	char *start;
-	char *savep = buf->buf_head;
-	char *tail = buf->buf_tail;
-	char *p;
+	//char *start;
+	//char *savep = buf->buf_head;
+	//char *tail = buf->buf_tail;
+	//char *p;
 	char *filename = wr_strdup(conn->page);
-	size_t range;
+	//size_t range;
 
+#if 0
 /*
  * Remove all javascript.
  */
@@ -110,14 +137,22 @@ __archive_page(connection_t *conn)
 		buf_collapse(buf, (off_t)(start - buf->buf_head), range);
 		savep = start;
 	}
+#endif
 
+	printf("Normalising filename\n");
 	__normalise_filename(filename);
+	printf("Normalised: %s\n", filename);
 
 	fd = open(filename, O_RDWR|O_CREAT|O_TRUNC, S_IRUSR|S_IWUSR);
 	if (fd == -1)
 		goto out_free_name;
 
+	printf("Opened file on fd %d\n", fd);
+
+	printf("Writing to file with buf_write_fd() (towrite=%lu bytes)\n", buf->data_len);
 	buf_write_fd(fd, buf);
+	close(fd);
+	fd = -1;
 
 	free(filename);
 	return 0;
@@ -154,6 +189,7 @@ __check_cookies(connection_t *conn)
 	 */
 	if (http_check_header(&conn->read_buf, "Set-Cookie", (off_t)0, &offset))
 	{
+		printf("Clearing old cookies\n");
 		wr_cache_clear_all(http_hcache);
 		offset = 0;
 
@@ -163,6 +199,7 @@ __check_cookies(connection_t *conn)
 			http_fetch_header(&conn->read_buf, "Set-Cookie", cookie, offset);
 			http_append_header(&conn->write_buf, cookie);
 			++offset;
+			printf("Appended cookie=%s\n", cookie->value);
 		}
 	}
 	else
@@ -171,6 +208,7 @@ __check_cookies(connection_t *conn)
 		int nr_used = wr_cache_nr_used(http_hcache);
 		int i;
 
+		printf("Appending %d saved cookies\n", nr_used);
 		for (i = 0; i < nr_used; ++i)
 		{
 			while (!wr_cache_obj_used(http_hcache, (void *)hp))
@@ -200,15 +238,17 @@ __do_request(connection_t *conn)
 	 */
 	__check_cookies(conn);
 
+	printf("Sending HTTP request\n");
 	if (http_send_request(conn) < 0)
 		goto fail;
 
+	printf("Receiving HTTP response\n");
 	if (http_recv_response(conn) < 0)
 		goto fail;
 
+	printf("Getting status code\n");
 	status_code = http_status_code_int(&conn->read_buf);
 
-	assert(status_code != -1);
 	return status_code;
 
 	fail:
@@ -227,8 +267,12 @@ __handle301(connection_t *conn)
 	location = (http_header_t *)wr_cache_alloc(http_hcache);
 	http_fetch_header(&conn->read_buf, "Location", location, (off_t)0);
 	http_parse_host(location->value, conn->host);
-	http_parse_page(location->value, conn->page);
+	strncpy(conn->page, location->value, location->vlen);
+	conn->page[location->vlen] = 0;
 	wr_cache_dealloc(http_hcache, (void *)location);
+
+	if (!strncmp("https", conn->page, 5))
+		conn_switch_to_tls(conn);
 
 	return 0;
 }
@@ -303,9 +347,7 @@ __switch_host(char *url, connection_t *conn)
 	if (open_connection(conn) < 0)
 		goto fail;
 
-#ifdef DEBUG
 	printf("Connected to new host \"%s\"\n", conn->host);
-#endif
 
 	return 0;
 
@@ -313,6 +355,13 @@ __switch_host(char *url, connection_t *conn)
 	return -1;
 }
 
+/**
+ * __iterate_cached_links - archive the pages in the link cache,
+ *    choose one at random and return that choice. That will be
+ *    our next page from which to parse links.
+ * @cachep: the cache of parsed links
+ * @conn: our struct with connection context
+ */
 static int
 __iterate_cached_links(wr_cache_t *cachep, connection_t *conn)
 {
@@ -322,17 +371,40 @@ __iterate_cached_links(wr_cache_t *cachep, connection_t *conn)
 	char *saved_host = wr_strdup(conn->host);
 	int nr_links = wr_cache_nr_used(cachep);
 	int status_code = 0;
+	int choice;
 	int i;
 	http_link_t *link;
 
+	if (!nr_links && wr_cache_obj_used(cachep, cachep->cache))
+	{
+		fprintf(stderr,
+			"__iterate_cached_links: nr_used==0 && first object used...\n");
+		goto fail;
+	}
+	else
+	if (!nr_links)
+	{
+		printf("no links\n");
+		return -2;
+	}
+
+	printf("Iterating over parsed links (%d)\n", nr_links);
+
+	choice = (rand() % nr_links);
+
 	for (i = 0; i < nr_links; ++i)
 	{
+		if (i == choice)
+			continue;
+
 		sleep(SLEEP_TIME);
 
 		link = ((http_link_t *)cachep->cache + i);
 
 		if (!(__same_domain(link->url, saved_host)))
 		{
+			printf("New domain - switching host (old=%s ; new=%s)\n", saved_host, link->url);
+
 			if (__switch_host(link->url, conn) < 0)
 				goto fail;
 
@@ -341,15 +413,21 @@ __iterate_cached_links(wr_cache_t *cachep, connection_t *conn)
 			saved_host = wr_strdup(conn->host);
 		}
 
+		http_parse_host(link->url, conn->host);
+		http_parse_page(link->url, conn->page);
+
 		resend:
-		printf("Requesting \"%s\"\n", conn->page);
+		printf("Requesting %s from host %s\n", conn->page, conn->host);
 		status_code = __do_request(conn);
 
 		switch(status_code)
 		{
 			case HTTP_OK:
+				printf("200 OK\n");
+				link->time_reaped = time(NULL);
 				break;
 			case HTTP_MOVED_PERMANENTLY:
+				printf("301 Moved Permanently\n");
 				__handle301(conn);
 				buf_clear(&conn->write_buf);
 				goto resend;
@@ -359,12 +437,13 @@ __iterate_cached_links(wr_cache_t *cachep, connection_t *conn)
 				goto out_release_dup_str;
 		}
 
+		printf("Archiving page\n");
 		__archive_page(conn);
 	}
 
 	free(saved_host);
 	saved_host = NULL;
-	return 0;
+	return choice;
 
 	out_release_dup_str:
 	free(saved_host);
@@ -374,42 +453,33 @@ __iterate_cached_links(wr_cache_t *cachep, connection_t *conn)
 	return -1;
 }
 
-static http_link_t *
-__choose_random(wr_cache_t *cachep, http_link_t **link)
+static void
+catch_signal(int signo)
 {
-	assert(cachep);
-	assert(link);
+	if (signo != SIGINT && signo != SIGQUIT)
+		return;
 
-	http_link_t tmp;
+	siglongjmp(main_env, 1);
+}
+
+static void
+__dump_links(wr_cache_t *cachep)
+{
+	http_link_t *lp = NULL;
 	int nr_used = wr_cache_nr_used(cachep);
-	int choice = (rand() % nr_used);
-	size_t objsize = cachep->objsize;
-	size_t url_len;
+	int i;
 
-	clear_struct(&tmp);
-	tmp.url = wr_calloc(HTTP_URL_MAX, 1);
-	
-	*link = (http_link_t *)((char *)cachep->cache + (choice * objsize));
-	url_len = strlen((*link)->url);
-	strncpy(tmp.url, (*link)->url, url_len);
-	tmp.url[url_len] = 0;
+	lp = (http_link_t *)cachep->cache;
+	for (i = 0; i < nr_used; ++i)
+	{
+		while (!wr_cache_obj_used(cachep, (void *)lp))
+			++lp;
 
-	tmp.status_code = (*link)->status_code;
-	tmp.time_reaped = (*link)->time_reaped;
+		printf("link>>%s\n", lp->url);
+		++lp;
+	}
 
-	wr_cache_clear_all(cachep);
-	*link = NULL;
-
-	*link = wr_cache_alloc(cachep);
-	assert(*link);
-	strncpy((*link)->url, tmp.url, url_len);
-	(*link)->url[url_len] = 0;
-	(*link)->status_code = tmp.status_code;
-	(*link)->time_reaped = tmp.time_reaped;
-
-	free(tmp.url);
-
-	return *link;
+	return;
 }
 
 /*
@@ -426,11 +496,33 @@ main(int argc, char *argv[])
 
 	srand(time(NULL));
 
+	clear_struct(&new_act);
+	clear_struct(&old_sigint);
+	clear_struct(&old_sigquit);
+
+	new_act.sa_flags = 0;
+	new_act.sa_handler = catch_signal;
+	sigemptyset(&new_act.sa_mask);
+
+	if (sigaction(SIGINT, &new_act, &old_sigint) < 0)
+	{
+		fprintf(stderr, "main: failed to set SIGINT handler (%s)\n", strerror(errno));
+		goto fail;
+	}
+
+	if (sigaction(SIGQUIT, &new_act, &old_sigquit) < 0)
+	{
+		fprintf(stderr, "main: failed to set SIGQUIT handler (%s)\n", strerror(errno));
+		goto fail;
+	}
+
+
 	connection_t conn;
 	http_state_t http_state;
 	http_link_t *link = NULL;
 	wr_cache_t *http_lcache = NULL;
 	int status_code;
+	int choice = 0;
 
 	clear_struct(&http_state);
 	http_state.base_page = wr_strdup(argv[1]);
@@ -438,6 +530,12 @@ main(int argc, char *argv[])
 	conn_init(&conn);
 	http_parse_host(http_state.base_page, conn.host);
 	http_parse_page(http_state.base_page, conn.page);
+
+	fprintf(stderr,
+		"parsed host: %s\n"
+		"parsed page: %s\n",
+		conn.host,
+		conn.page);
 
 	/*
 	 * Initialises read/write buffers in conn.
@@ -464,6 +562,13 @@ main(int argc, char *argv[])
 							wr_cache_http_cookie_ctor,
 							wr_cache_http_cookie_dtor);
 
+	if (sigsetjmp(main_env, 0) != 0)
+	{
+		fprintf(stderr, "%c%c%c%c%c%c", 0x08, 0x20, 0x08, 0x08, 0x20, 0x08);
+		fprintf(stderr, "Caught signal! Exiting!\n");
+		goto out_disconnect;
+	}
+
 	while (1)
 	{
 		loop_start:
@@ -473,7 +578,7 @@ main(int argc, char *argv[])
 		buf_clear(&conn.read_buf);
 		buf_clear(&conn.write_buf);
 
-		printf("Requesting \"%s\"\n", conn.page);
+		printf("Requesting %s from host %s\n", conn.page, conn.host);
 		status_code = __do_request(&conn);
 
 		switch(status_code)
@@ -481,22 +586,51 @@ main(int argc, char *argv[])
 			case HTTP_OK:
 				break;
 			case HTTP_MOVED_PERMANENTLY:
+				printf("Handling 301 Moved Permanently\n");
 				__handle301(&conn);
 				goto loop_start;
 				break;
+			case HTTP_BAD_REQUEST:
+				printf("%.*s\n", (int)conn.write_buf.data_len, conn.write_buf.buf_head);
 			default:
 				fprintf(stderr, "main: received HTTP status code %d\n", status_code);
 				goto out_disconnect;
 		}
 
+		printf("Archiving page\n");
+
+		printf(
+			"read_buf @ %p\n"
+			"data len = %lu bytes\n",
+			&conn.read_buf,
+			conn.read_buf.data_len);
+
+		__archive_page(&conn);
+
 		/* http_parse_links(wr_cache_t *cachep, buf_t *buf, const char *host); */
+		printf(
+			"read_buf @ %p\n"
+			"data len = %lu bytes\n",
+			&conn.read_buf,
+			conn.read_buf.data_len);
+
+		printf("Parsing links from page (%.*s...)\n", (int)20, conn.read_buf.buf_head);
 		http_parse_links(http_lcache, &conn.read_buf, conn.host);
 
-		__iterate_cached_links(http_lcache, &conn);
-		__choose_random(http_lcache, &link);
+		__dump_links(http_lcache);
+
+		choice = __iterate_cached_links(http_lcache, &conn);
+		printf("choice=%d\n", choice);
+
+		if (choice < 0)
+			goto out_disconnect;
+
+		link = (http_link_t *)((char *)http_lcache->cache + (choice * http_lcache->objsize));
 
 		http_parse_host(link->url, conn.host);
 		http_parse_page(link->url, conn.page);
+
+		wr_cache_clear_all(http_lcache);
 	}
 
 	/*
@@ -505,7 +639,15 @@ main(int argc, char *argv[])
 	close_connection(&conn);
 	conn_destroy(&conn);
 
+	wr_cache_clear_all(http_lcache);
+	wr_cache_clear_all(http_hcache);
+	wr_cache_destroy(http_lcache);
+	wr_cache_destroy(http_hcache);
+
 	free(http_state.base_page);
+
+	sigaction(SIGINT, &old_sigint, NULL);
+	sigaction(SIGQUIT, &old_sigquit, NULL);
 
 	exit(EXIT_SUCCESS);
 
@@ -513,8 +655,15 @@ main(int argc, char *argv[])
 	close_connection(&conn);
 	conn_destroy(&conn);
 
+	wr_cache_clear_all(http_lcache);
+	wr_cache_clear_all(http_hcache);
+	wr_cache_destroy(http_lcache);
+	wr_cache_destroy(http_hcache);
+
 	fail:
-	fprintf(stderr, "%s\n", strerror(errno));
+	sigaction(SIGINT, &old_sigint, NULL);
+	sigaction(SIGQUIT, &old_sigquit, NULL);
+
 	exit(EXIT_FAILURE);
 }
 
