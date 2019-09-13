@@ -43,17 +43,8 @@ typedef struct http_link_t
 	int status_code;
 	char *url;
 	time_t time_reaped;
-	int used;
 } http_link_t;
 
-#define http_nr_cookies(h) ((h)->nr_cookies)
-#define http_nr_links(h) ((h)->nr_links)
-#define http_nr_requests(h) ((h)->nr_requests)
-
-/*
- * TODO:
- * Implement RING linked list (like in Apache)
- */
 typedef struct http_state_t
 {
 	int nr_requests; /* total number page requests we've sent */
