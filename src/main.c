@@ -1,4 +1,5 @@
 #include <assert.h>
+#include <ctype.h>
 #include <errno.h>
 #include <fcntl.h>
 #include <stdio.h>
@@ -39,9 +40,92 @@ __noret usage(int exit_status)
 }
 
 static void
+__normalise_filename(char *filename)
+{
+	char *p = filename;
+	size_t len = strlen(filename);
+	char *end = (filename + len);
+
+	while (p < end)
+	{
+		if (*p == 0x20
+		|| (*p != 0x5f && !isalpha(*p) && !isdigit(*p)))
+		{
+			*p++ = 0x5f;
+			continue;
+		}
+
+		++p;
+	}
+
+	--end;
+	while (!isalpha(*end) && !isdigit(*end))
+		--end;
+
+	++end;
+
+	*end = 0;
+
+	return;
+}
+
+static int
 __archive_page(connection_t *conn)
 {
-	return;
+	int fd = -1;
+	buf_t *buf = &conn->read_buf;
+	char *start;
+	char *savep = buf->buf_head;
+	char *tail = buf->buf_tail;
+	char *p;
+	char *filename = wr_strdup(conn->page);
+	size_t range;
+
+/*
+ * Remove all javascript.
+ */
+	while (1)
+	{
+		start = strstr(savep, "<script");
+
+		if (!start || start >= tail)
+			break;
+
+		p = strstr(start, "</script");
+
+		if (!p)
+			break;
+	
+		savep = p;
+
+		p = memchr(savep, 0x3e, (tail - savep));
+
+		if (!p)
+			break;
+
+		++p;
+
+		range = (p - start);
+
+		buf_collapse(buf, (off_t)(start - buf->buf_head), range);
+		savep = start;
+	}
+
+	__normalise_filename(filename);
+
+	fd = open(filename, O_RDWR|O_CREAT|O_TRUNC, S_IRUSR|S_IWUSR);
+	if (fd == -1)
+		goto out_free_name;
+
+	buf_write_fd(fd, buf);
+
+	free(filename);
+	return 0;
+
+	out_free_name:
+	free(filename);
+
+	return -1;
 }
 
 /**
