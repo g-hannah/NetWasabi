@@ -13,8 +13,6 @@
 #include "buffer.h"
 #include "malloc.h"
 
-#define BUF_NULL_TERMINATE(b) (*((b)->buf_tail) = 0)
-
 static inline void
 __buf_reset_head(buf_t *buf)
 {
