@@ -16,6 +16,7 @@ PRIMARY_DEPENDENCIES = \
 PRIMARY_SOURCE = \
 	main.c \
 	connection.c \
+	parse_links.c \
 	robots.c \
 	webreaper.c
 
