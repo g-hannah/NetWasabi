@@ -12,8 +12,7 @@ HTTP_DEPENDENCIES = \
 	$(INCLUDE_DIR)/malloc.h
 
 HTTP_SOURCE = \
-	http.c \
-	http_parse_links.c
+	http.c
 
 HTTP_OBJS := $(HTTP_SOURCE:.c=.o)
 
