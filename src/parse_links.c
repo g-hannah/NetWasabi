@@ -14,7 +14,7 @@ do {\
 	for (i = 0; i < (NUM); ++i)\
 		(PTR)[i] = (TYPE *)NULL;\
 	for (i = 0; i < (NUM); ++i)\
-		(PTR)[i] = calloc(ALEN, sizeof(TYPE));\
+		(PTR)[i] = calloc(ALEN+1, sizeof(TYPE));\
 } while (0)
 
 #define MATRIX_DESTROY(PTR, NUM) \
@@ -33,29 +33,30 @@ do { \
 		
 
 static void
-__remove_dups(char **links, size_t *cur_size)
+__remove_dups(char **links, int nr)
 {
 	int i;
 	int j;
-	size_t size = *cur_size;
+	int k;
 	size_t len;
 
-	for (i = 0; i < size; ++i)
+	for (i = 0; i < (nr-1); ++i)
 	{
-		for (j = (size - 1); j > i; --j)
-		{
-			len = strlen(links[i]);
+		len = strlen(links[i]);
 
+		for (j = (nr - 1); j > i; --j)
+		{
 			if (len && !strcmp(links[i], links[j]))
 			{
 				printf("removing dup %s\n", links[j]);
-				memset(links[j], 0, HTTP_URL_MAX);
-				--size;
+
+				for (k = j; k < (nr - 1); ++k)
+					strncpy(links[k], links[k+1], strlen(links[k+1]));
+
+				memset(links[k], 0, HTTP_URL_MAX);
 			}
 		}
 	}
-
-	*cur_size = size;
 
 	return;
 }
@@ -75,14 +76,10 @@ http_parse_links(wr_cache_t *cachep, buf_t *buf, char *host)
 	int						nr = 0;
 	size_t url_len = 0;
 	size_t max_len = (HTTP_URL_MAX - strlen("https://"));
-	size_t host_len = strlen(host);
 	size_t old_size = 0;
 	size_t cur_size = 256;
 	size_t aidx = 0;
-	buf_t url;
 	int i;
-
-	buf_init(&url, HTTP_URL_MAX);
 
 	MATRIX_INIT(url_links, cur_size, HTTP_URL_MAX, char);
 
@@ -90,8 +87,6 @@ http_parse_links(wr_cache_t *cachep, buf_t *buf, char *host)
 
 	while (1)
 	{
-		buf_clear(&url);
-
 		p = strstr(savep, "href=\"");
 
 		if (!p || p >= tail)
@@ -101,12 +96,24 @@ http_parse_links(wr_cache_t *cachep, buf_t *buf, char *host)
 
 		p += strlen("href=\"");
 
+		if (*p != '/')
+		{
+			savep = p;
+			continue;
+		}
+
 		savep = p;
 
 		p = memchr(savep, 0x22, (tail - savep));
 
 		if (!p)
 			break;
+
+		if (memchr(savep, '?', (p - savep)))
+		{
+			savep = ++p;
+			continue;
+		}
 
 		url_len = (p - savep);
 
@@ -116,30 +123,22 @@ http_parse_links(wr_cache_t *cachep, buf_t *buf, char *host)
 			continue;
 		}
 
-		buf_append_ex(&url, savep, url_len);
-		printf("parsed url %s\n", url.buf_head);
+		assert(url_len < HTTP_URL_MAX);
+		strncpy(url_links[aidx], savep, url_len);
+		url_links[aidx][url_len] = 0;
 
-		if (*(url.buf_head) == '/')
-		{
-			buf_shift(&url, (off_t)0, (strlen("http://") + host_len + 1));
-			strncpy(url.buf_head, "http://", strlen("http://"));
-			strncpy(url.buf_head + strlen("http://"), host, host_len);
-			strncpy(url.buf_head + strlen("http://") + host_len, "/", 1);
-		}
-
-		BUF_NULL_TERMINATE(&url);
-
-		strncpy(url_links[aidx], url.buf_head, url.data_len);
-		url_links[aidx][url.data_len] = 0;
+		printf("parsed url %s\n", url_links[aidx]);
 
 		++aidx;
 
 		if (aidx >= cur_size)
 		{
+			printf("extending url_links matrix\n");
 			old_size = cur_size;
 			cur_size *= 2;
 
-			url_links = realloc(url_links, cur_size);
+			url_links = realloc(url_links, (cur_size * sizeof(char *)));
+
 			if (!url_links)
 				goto out_free_links;
 
@@ -155,17 +154,18 @@ http_parse_links(wr_cache_t *cachep, buf_t *buf, char *host)
 		++nr;
 	}
 
-	buf_destroy(&url);
+	__remove_dups(url_links, nr);
 
-	__remove_dups(url_links, &cur_size);
-
-	for (i = 0; i < cur_size; ++i)
+	for (i = 0; i < nr; ++i)
 	{
+		printf("allocating link #%d\n", i);
 		hl = (http_link_t *)wr_cache_alloc(cachep);
+
 		if (!hl)
 			goto out_free_links;
 
 		url_len = strlen(url_links[i]);
+		assert(url_len < HTTP_URL_MAX);
 		strncpy(hl->url, url_links[i], url_len);
 		hl->url[url_len] = 0;
 	}
