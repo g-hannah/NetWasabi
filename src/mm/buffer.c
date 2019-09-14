@@ -311,15 +311,19 @@ buf_read_socket(int sock, buf_t *buf, size_t toread)
 			else
 			if (n < 0)
 			{
-				if (errno == EINTR
-				|| errno == EAGAIN
-				|| errno == EWOULDBLOCK)
+				if (errno == EINTR)
 				{
 					continue;
 				}
 				else
+				if (errno == EAGAIN || errno == EWOULDBLOCK)
+				{
+					goto out;
+				}
+				else
 				{
 					fprintf(stderr, "buf_read_socket: %s\n", strerror(errno));
+					goto fail;
 				}
 			}
 			else
@@ -355,11 +359,14 @@ buf_read_socket(int sock, buf_t *buf, size_t toread)
 			else
 			if (n < 0)
 			{
-				if (errno == EINTR
-				|| errno == EAGAIN
-				|| errno == EWOULDBLOCK)
+				if (errno == EINTR)
 				{
 					continue;
+				}
+				else
+				if (errno == EAGAIN || errno == EWOULDBLOCK)
+				{
+					goto out;
 				}
 				else
 				{
@@ -383,6 +390,7 @@ buf_read_socket(int sock, buf_t *buf, size_t toread)
 		}
 	}
 
+	out:
 	BUF_NULL_TERMINATE(buf);
 	return total;
 
@@ -407,7 +415,6 @@ buf_read_tls(SSL *ssl, buf_t *buf, size_t toread)
 	struct timeval timeout = {0};
 	fd_set rdfds;
 	int sock_flags;
-	int keep_reading = 0;
 
 	read_socket = SSL_get_rfd(ssl);
 
@@ -417,78 +424,143 @@ buf_read_tls(SSL *ssl, buf_t *buf, size_t toread)
 
 	slack = buf_slack(buf);
 
-	if (toread == 0)
-		keep_reading = 1;
-
 	if (toread > buf->buf_size)
 		buf_extend(buf, (toread - buf->buf_size));
 
-	while (1)
+	if (toread)
 	{
-		n = SSL_read(ssl, buf->buf_tail, slack);
+		while (1)
+		{
+			n = SSL_read(ssl, buf->buf_tail, toread);
 
-		if (n == 0)
-		{
-			break;
-		}
-		else
-		if (n < 0)
-		{
-			if (errno == EINTR)
+			if (!n)
 			{
-				continue;
+				break;
+			}
+			else
+			if (n < 0)
+			{
+				if (errno == EINTR)
+				{
+					continue;
+				}
+				else
+				{
+					ssl_error = SSL_get_error(ssl, n);
+
+					switch(ssl_error)
+					{
+						case SSL_ERROR_NONE:
+							continue;
+						case SSL_ERROR_WANT_READ:
+							FD_ZERO(&rdfds);
+							FD_SET(read_socket, &rdfds);
+							timeout.tv_sec = 1;
+							slept_for = select(read_socket+1, &rdfds, NULL, NULL, &timeout);
+
+							if (slept_for < 0)
+							{
+								fprintf(stderr, "buf_read_tls: SSL_read error\n");
+								goto fail;
+							}
+							else
+							if (!slept_for)
+							{
+								goto out;
+							}
+							else
+							{
+								continue;
+							}
+							break;
+						default:
+							goto fail;
+					}
+				}
 			}
 			else
 			{
-				ssl_error = SSL_get_error(ssl, n);
+				__buf_pull_tail(buf, (size_t)n);
 
-				switch(ssl_error)
+				toread -= n;
+				total += n;
+				slack -= n;
+
+				if (!slack)
 				{
-					case SSL_ERROR_NONE:
-						continue;
-					case SSL_ERROR_WANT_READ:
-						FD_ZERO(&rdfds);
-						FD_SET(read_socket, &rdfds);
-						timeout.tv_sec = 1;
-						slept_for = select(read_socket+1, &rdfds, NULL, NULL, &timeout);
-
-						if (slept_for < 0)
-						{
-							fprintf(stderr, "buf_read_tls: select error (%s)\n", strerror(errno));
-							goto fail;
-						}
-						else
-						if (!slept_for)
-							goto out;
-						else
-							continue;
-					default:
-						goto fail;
+					buf_extend(buf, buf->buf_size);
+					slack = buf_slack(buf);
 				}
 			}
-		}
-		else
+		} // while (1)
+
+		goto out;
+	}
+	else // !toread
+	{
+		while (1)
 		{
-			__buf_pull_tail(buf, (size_t)n);
+			n = SSL_read(ssl, buf->buf_tail, slack);
 
-			slack -= n;
-			total += n;
-
-			if (!keep_reading)
+			if (n == 0)
 			{
-				toread -= n;
-
-				if (!toread)
-					break;
+				break;
 			}
-
-			if (!slack)
+			else
+			if (n < 0)
 			{
-				slack += buf->buf_size;
-				buf_extend(buf, buf->buf_size);
+				if (errno == EINTR)
+				{
+					continue;
+				}
+				else
+				{
+					ssl_error = SSL_get_error(ssl, n);
+
+					switch(ssl_error)
+					{
+						case SSL_ERROR_NONE:
+							continue;
+						case SSL_ERROR_WANT_READ:
+							FD_ZERO(&rdfds);
+							FD_SET(read_socket, &rdfds);
+							timeout.tv_sec = 1;
+							slept_for = select(read_socket+1, &rdfds, NULL, NULL, &timeout);
+
+							if (slept_for < 0)
+							{
+								fprintf(stderr, "buf_read_tls: select error (%s)\n", strerror(errno));
+								goto fail;
+							}
+							else
+							if (!slept_for)
+							{
+								goto out;
+							}
+							else
+							{
+								continue;
+							}
+						default:
+							goto fail;
+					}
+				}
 			}
-		}
-	} /* while (1) */
+			else
+			{
+				__buf_pull_tail(buf, (size_t)n);
+
+				slack -= n;
+				total += n;
+
+				if (!slack)
+				{
+					buf_extend(buf, buf->buf_size);
+					slack = buf_slack(buf);
+				}
+			}
+		} /* while (1) */
+	}
 
 	out:
 
