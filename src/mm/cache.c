@@ -239,6 +239,7 @@ wr_cache_alloc(wr_cache_t *cachep)
 	{
 		slot = (void *)((char *)cache + (idx * objsize));
 		__wr_cache_mark_used(cachep, idx);
+		WR_CACHE_DEC_FREE(cachep);
 		return slot;
 	}
 	else
@@ -280,6 +281,7 @@ wr_cache_alloc(wr_cache_t *cachep)
 
 		idx = __wr_cache_next_free_idx(cachep);
 		slot = (void *)((char *)cachep->cache + (idx * objsize));
+		WR_CACHE_DEC_FREE(cachep);
 		return slot;
 	}
 
@@ -303,6 +305,7 @@ wr_cache_dealloc(wr_cache_t *cachep, void *slot)
 	obj_off = (off_t)(((char *)slot - (char *)cachep->cache) / objsize);
 
 	__wr_cache_mark_unused(cachep, obj_off);
+	WR_CACHE_INC_FREE(cachep);
 
 	return;
 }
