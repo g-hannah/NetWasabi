@@ -13,6 +13,7 @@ TOP_DIR := src
 PRIMARY_OBJS := \
 	$(TOP_DIR)/main.o \
 	$(TOP_DIR)/connection.o \
+	$(TOP_DIR)/parse_links.o \
 	$(TOP_DIR)/robots.o \
 	$(TOP_DIR)/webreaper.o
 
@@ -22,8 +23,7 @@ MM_OBJS := \
 	$(MM_DIR)/malloc.o
 
 HTTP_OBJS := \
-	$(HTTP_DIR)/http.o \
-	$(HTTP_DIR)/http_parse_links.o
+	$(HTTP_DIR)/http.o
 
 ALL_OBJS := $(MM_OBJS) $(HTTP_OBJS) $(PRIMARY_OBJS)
 
