@@ -270,7 +270,7 @@ wr_cache_alloc(wr_cache_t *cachep)
 
 		if (cachep->ctor)
 		{
-			slot = (void *)((char *)cache + (objsize * added_capacity));
+			slot = (void *)((char *)cache + (objsize * old_capacity));
 
 			for (i = 0; (size_t)i < added_capacity; ++i)
 			{
