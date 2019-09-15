@@ -6,6 +6,7 @@
 #include "buffer.h"
 #include "cache.h"
 #include "http.h"
+#include "webreaper.h"
 
 #define MATRIX_INIT(PTR, NUM, ALEN, TYPE) \
 do {\
@@ -64,7 +65,7 @@ __remove_dups(char **links, int nr)
 static char **url_links = NULL;
 
 int
-http_parse_links(wr_cache_t *cachep, buf_t *buf, char *host)
+parse_links(wr_cache_t *cachep, buf_t *buf, char *host)
 {
 	assert(cachep);
 	assert(buf);
