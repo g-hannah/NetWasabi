@@ -169,30 +169,154 @@ http_send_request(connection_t *conn)
 	return -1;
 }
 
-static size_t
-__http_get_chunk_len(char *ptr)
+#define SKIP_CRNL(____PTR) do { while ((*____PTR) == 0x0a || (*____PTR) == 0x0d) { ++(____PTR); }; } while (0)
+
+#define HTTP_SMALL_READ_BLOCK 256
+
+static char *
+__http_read_until_eoh(connection_t *conn)
 {
-	char *end = NULL;
-	size_t len;
-	static char tmp[16];
+	assert(conn);
 
-	end = memchr(ptr, 0x0d, 16);
+	ssize_t n;
+	char *p = NULL;
+	buf_t *buf = &conn->read_buf;
 
-	printf("end @ %p\n", end);
+	while (!p)
+	{
+		if (option_set(OPT_USE_TLS))
+			n = buf_read_tls(conn->ssl, buf, HTTP_SMALL_READ_BLOCK);
+		else
+			n = buf_read_socket(conn->sock, buf, HTTP_SMALL_READ_BLOCK);
 
-	if (!end)
-		return 0;
+		if (!n)
+			continue;
+		else
+		if (n < 0)
+			return NULL;
+		else
+			p = strstr(buf->buf_head, HTTP_EOH_SENTINEL);
+	}
 
-	strncpy(tmp, ptr, (end - ptr));
-	tmp[end - ptr] = 0;
+	return p;
+}
 
-	printf("%s\n", tmp);
+static size_t
+__http_do_chunked_recv(connection_t *conn)
+{
+	assert(conn);
 
-	len = strtoul(tmp, NULL, 16);
+#define HTTP_MAX_CHUNK_STR 16
 
-	printf("len=%lu\n", len);
+	char *p;
+	char *e;
+	char *t;
+	buf_t *buf = &conn->read_buf;
+	size_t chunk_size;
+	size_t save_size;
+	size_t overread;
+	ssize_t bytes_read;
+	static char tmp[HTTP_MAX_CHUNK_STR];
 
-	return len;
+	p = strstr(buf->buf_head, HTTP_EOH_SENTINEL);
+
+	if (!p)
+	{
+		fprintf(stderr, "__http_do_chunked_recv: failed to find end of header sentinel\n");
+		return -1;
+	}
+
+	assert(strncmp(HTTP_EOH_SENTINEL, p, 4) == 0);
+
+	p += strlen(HTTP_EOH_SENTINEL);
+
+	t = p;
+
+	SKIP_CRNL(p);
+
+	if (p - t)
+	{
+		buf_collapse(buf, (off_t)(t - buf->buf_head), (p - t));
+		p = t;
+	}
+
+	while (1)
+	{
+		e = memchr(p, 0x0d, HTTP_MAX_CHUNK_STR);
+
+		if (!e)
+			break;
+
+		strncpy(tmp, p, (e - p));
+		tmp[e - p] = 0;
+
+		printf("chunk size: %s\n", tmp);
+
+		chunk_size = strtoul(tmp, NULL, 16);
+
+		if (!chunk_size)
+			break;
+
+		printf("(decimal = %lu)\n", chunk_size);
+
+		save_size = chunk_size;
+
+		e += 2;
+
+		buf_collapse(buf, (off_t)(p - buf->buf_head), (e - p));
+		e = p;
+
+		overread = (buf->buf_tail - e);
+
+		printf("over-read by %lu bytes\n", overread);
+
+		if (overread >= chunk_size)
+		{
+			p = (e + save_size);
+			SKIP_CRNL(p);
+			continue;
+		}
+		else
+		{
+			chunk_size -= overread;
+		}
+
+		printf("to read = %lu bytes\n", chunk_size);
+
+		while (chunk_size)
+		{
+			if (option_set(OPT_USE_TLS))
+				bytes_read = buf_read_tls(conn->ssl, buf, chunk_size);
+			else
+				bytes_read = buf_read_socket(conn->sock, buf, chunk_size);
+
+			if (bytes_read < 0)
+				return -1;
+			else
+			if (!bytes_read)
+				continue;
+			else
+				chunk_size -= bytes_read;
+		}
+
+		p = (e + save_size);
+
+		printf("jumped %lu bytes past 'e'\n", save_size);
+
+		printf("%.*s\n", (int)4, p);
+
+		t = p;
+
+		SKIP_CRNL(p);
+
+		if (p - t)
+		{
+			buf_collapse(buf, (off_t)(t - buf->buf_head), (p - t));
+			p = t;
+		}
+	}
+
+	return 0;
 }
 
 /**
@@ -205,17 +329,12 @@ http_recv_response(connection_t *conn)
 	assert(conn);
 
 	char *p = NULL;
-	char *e = NULL;
 	size_t clen;
-	size_t header_len;
-	size_t deduct;
+	size_t overread;
 	ssize_t bytes;
-	size_t chunk_len;
-	size_t prev_save;
-	size_t over_read;
 	http_header_t *content_len = NULL;
 	http_header_t *transfer_enc = NULL;
-	struct http_vars vars = {0};
+	buf_t *buf = &conn->read_buf;
 
 	printf("in http_recv_response\n");
 
@@ -225,159 +344,45 @@ http_recv_response(connection_t *conn)
 	if (!content_len || !transfer_enc)
 		goto fail;
 
-	while (!p)
+	p = __http_read_until_eoh(conn);
+
+	if (!p)
 	{
-		if (option_set(OPT_USE_TLS))
-			bytes = buf_read_tls(conn->ssl, &conn->read_buf, 256);
-		else
-			bytes = buf_read_socket(conn->sock, &conn->read_buf, 256);
-
-		p = strstr(conn->read_buf.buf_head, HTTP_EOH_SENTINEL);
-
-		bytes = 0;
+		fprintf(stderr, "http_recv_response: failed to find end of header sentinel\n");
+		goto out_dealloc;
 	}
 
 	p += strlen(HTTP_EOH_SENTINEL);
 
-	vars.header_len = (p - conn->read_buf.buf_head);
-
-	printf("got http header (len=%lu bytes)\n", vars.header_len);
-
 	if (http_fetch_header(&conn->read_buf, "Transfer-Encoding", transfer_enc, (off_t)0))
-		if (!strncmp("chunked", transfer_enc->value, strlen("chunked")))
-			vars.is_chunked = 1;
+		if (!strncmp("chunked", transfer_enc->value, transfer_enc->vlen))
+			__http_do_chunked_recv(conn);
 
-	if (http_fetch_header(&conn->read_buf, "Content-Length", content_len, (off_t)0))
-		vars.content_len = strtoul(content_len->value, NULL, 0);
-
-	if (vars.is_chunked)
+	if (http_fetch_header(buf, "Content-Length", content_len, (off_t)0))
 	{
-		printf("transfer encoding=chunked\n");
+		clen = strtoul(content_len->value, NULL, 0);
 
-		p = strstr(conn->read_buf.buf_head, HTTP_EOH_SENTINEL);
+		overread = (buf->buf_tail - p);
 
-		if (!p)
+		if (overread < clen)
 		{
-			fprintf(stderr, "http_recv_response: failed to find end of header sentinel\n");
-			goto out_dealloc;
-		}
+			clen -= overread;
 
-		p += strlen(HTTP_EOH_SENTINEL);
-
-		while (1)
-		{
-			chunk_len = __http_get_chunk_len(p);
-
-			prev_save = chunk_len;
-
-			printf("chunk_len=%lu bytes\n", chunk_len);
-
-			if (!chunk_len)
-				break;
-
-			e = memchr(p, 0x0d, 16);
-
-			if (!e)
-				break;
-
-			e += 2;
-
-			printf("collapsing buffer by %lu bytes\n", (e - p));
-			buf_collapse(&conn->read_buf, (off_t)(p - conn->read_buf.buf_head), (e - p));
-
-			e = p;
-
-			over_read = (conn->read_buf.buf_tail - e);
-
-			printf("over-read %lu bytes\n", over_read);
-
-			if (over_read >= chunk_len)
-			{
-				p = (e + chunk_len);
-				continue;
-			}
-			else
-			{
-				chunk_len -= over_read;
-			}
-
-			printf("amount to read=%lu bytes\n", chunk_len);
-
-			while (chunk_len)
+			while (clen)
 			{
 				if (option_set(OPT_USE_TLS))
-					bytes = buf_read_tls(conn->ssl, &conn->read_buf, chunk_len);
+					bytes = buf_read_tls(conn->ssl, buf, clen);
 				else
-					bytes = buf_read_socket(conn->sock, &conn->read_buf, chunk_len);
+					bytes = buf_read_socket(conn->sock, buf, clen);
 
-				if (bytes < 0)
-				{
-					goto out_dealloc;
-				}
-				else
-				if (!bytes)
-				{
-					if (chunk_len)
-					{
-						printf("still to read %lu bytes\n", chunk_len);
-						continue;
-					}
-					else
-						break;
-				}
-				else
-				{
-					chunk_len -= bytes;
-					printf("%lu remaining\n", chunk_len);
-				}
-			}
-
-			p = (e + prev_save);
-
-			while (1)
-			{
-				if (option_set(OPT_USE_TLS))
-					bytes = buf_read_tls(conn->ssl, &conn->read_buf, 16);
-				else
-					bytes = buf_read_socket(conn->sock, &conn->read_buf, 16);
-
-				if (!bytes)
-					continue;
-				else
 				if (bytes < 0)
 					goto out_dealloc;
 				else
-					break;
-
-				while (*p == 0x0a || *p == 0x0d)
-					++p;
+				if (!bytes)
+					continue;	
+				else
+					clen -= bytes;
 			}
-
-			printf("%.*s\n", (int)4, p);
-		}
-	}
-	else
-	if (vars.content_len)
-	{
-		clen = vars.content_len;
-		header_len = (p - conn->read_buf.buf_head);
-		deduct = (conn->read_buf.data_len - header_len);
-
-		clen -= deduct;
-
-		printf("Need to receive another %lu bytes\n", clen);
-
-		while (clen)
-		{
-			if (option_set(OPT_USE_TLS))
-				bytes = buf_read_tls(conn->ssl, &conn->read_buf, clen);
-			else
-				bytes = buf_read_socket(conn->sock, &conn->read_buf, clen);
-
-			if (bytes < 0)
-				goto out_dealloc;
-
-			clen -= bytes;
 		}
 	}
 	else
