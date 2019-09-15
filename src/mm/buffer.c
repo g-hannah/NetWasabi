@@ -596,6 +596,7 @@ buf_write_fd(int fd, buf_t *buf)
 			goto fail;
 		}
 
+		towrite -= n;
 		total += n;
 		p += n;
 	}
