@@ -305,6 +305,22 @@ __http_do_chunked_recv(connection_t *conn)
 
 		printf("%.*s\n", (int)4, p);
 
+		while (1)
+		{
+			if (option_set(OPT_USE_TLS))
+				bytes_read = buf_read_tls(conn->ssl, buf, HTTP_MAX_CHUNK_STR);
+			else
+				bytes_read = buf_read_socket(conn->sock, buf, HTTP_MAX_CHUNK_STR);
+
+			if (bytes_read < 0)
+				return -1;
+			else
+			if (!bytes_read)
+				continue;
+			else
+				break;
+		}
+
 		t = p;
 
 		SKIP_CRNL(p);
@@ -355,9 +371,11 @@ http_recv_response(connection_t *conn)
 	p += strlen(HTTP_EOH_SENTINEL);
 
 	if (http_fetch_header(&conn->read_buf, "Transfer-Encoding", transfer_enc, (off_t)0))
+	{
 		if (!strncmp("chunked", transfer_enc->value, transfer_enc->vlen))
 			__http_do_chunked_recv(conn);
-
+	}
+	else
 	if (http_fetch_header(buf, "Content-Length", content_len, (off_t)0))
 	{
 		clen = strtoul(content_len->value, NULL, 0);
