@@ -34,7 +34,7 @@ ifeq ($(DEBUG),1)
 	@echo Compiling debug v$(BUILD)
 	cd $(MM_DIR); make DEBUG=1
 	cd $(HTTP_DIR); make DEBUG=1
-	cd $(TOP_DIR); make DEGBUG=1
+	cd $(TOP_DIR); make DEBUG=1
 else
 	@echo Compiling v$(BUILD)
 	cd $(MM_DIR); make
