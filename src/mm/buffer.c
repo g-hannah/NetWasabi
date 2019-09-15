@@ -300,6 +300,13 @@ buf_read_socket(int sock, buf_t *buf, size_t toread)
 
 	if (toread)
 	{
+
+		if (toread > slack)
+		{
+			buf_extend(buf, ((toread - slack)+1));
+			slack = buf_slack(buf);
+		}
+
 		while (1)
 		{
 			n = recv(sock, buf->buf_tail, toread, 0);
@@ -429,6 +436,12 @@ buf_read_tls(SSL *ssl, buf_t *buf, size_t toread)
 
 	if (toread)
 	{
+		if (toread > slack)
+		{
+			buf_extend(buf, ((toread - slack)+1));
+			slack = buf_slack(buf);
+		}
+
 		while (1)
 		{
 			n = SSL_read(ssl, buf->buf_tail, toread);
