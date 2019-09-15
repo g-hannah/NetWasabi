@@ -254,10 +254,14 @@ __http_do_chunked_recv(connection_t *conn)
 
 		chunk_size = strtoul(tmp, NULL, 16);
 
-		if (!chunk_size)
-			break;
-
 		printf("(decimal = %lu)\n", chunk_size);
+
+		if (!chunk_size)
+		{
+			--p;
+			buf_collapse(buf, (off_t)(p - buf->buf_head), (buf->buf_tail - p));
+			break;
+		}
 
 		save_size = chunk_size;
 
@@ -273,7 +277,17 @@ __http_do_chunked_recv(connection_t *conn)
 		if (overread >= chunk_size)
 		{
 			p = (e + save_size);
+
+			t = p;
+
 			SKIP_CRNL(p);
+
+			if (p - t)
+			{
+				buf_collapse(buf, (off_t)(t - buf->buf_head), (p - t));
+				p = t;
+			}
+
 			continue;
 		}
 		else
@@ -300,10 +314,6 @@ __http_do_chunked_recv(connection_t *conn)
 		}
 
 		p = (e + save_size);
-
-		printf("jumped %lu bytes past 'e'\n", save_size);
-
-		printf("%.*s\n", (int)4, p);
 
 		while (1)
 		{
