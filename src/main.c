@@ -62,6 +62,16 @@ __normalise_filename(char *filename)
 
 	buf_append(&tmp, filename);
 
+	if (!strncmp("http", tmp.buf_head, 4))
+	{
+		if (!strncmp("https", tmp.buf_head, 5))
+			p = (tmp.buf_head + strlen("https://"));
+		else
+			p = (tmp.buf_head + strlen("http://"));
+
+		buf_collapse(&tmp, (off_t)0, (p - tmp.buf_head));
+	}
+
 	p = tmp.buf_head;
 	end = tmp.buf_tail;
 
@@ -105,39 +115,16 @@ __archive_page(connection_t *conn)
 	//char *tail = buf->buf_tail;
 	//char *p;
 	char *filename = wr_strdup(conn->page);
+	char *p;
 	//size_t range;
 
-#if 0
-/*
- * Remove all javascript.
- */
-	while (1)
+	p = strstr(buf->buf_head, HTTP_EOH_SENTINEL);
+
+	if (p)
 	{
-		start = strstr(savep, "<script");
-
-		if (!start || start >= tail)
-			break;
-
-		p = strstr(start, "</script");
-
-		if (!p)
-			break;
-	
-		savep = p;
-
-		p = memchr(savep, 0x3e, (tail - savep));
-
-		if (!p)
-			break;
-
-		++p;
-
-		range = (p - start);
-
-		buf_collapse(buf, (off_t)(start - buf->buf_head), range);
-		savep = start;
+		p += strlen(HTTP_EOH_SENTINEL);
+		buf_collapse(buf, (off_t)0, (p - buf->buf_head));
 	}
-#endif
 
 	printf("Normalising filename\n");
 	__normalise_filename(filename);
@@ -175,11 +162,6 @@ __check_cookies(connection_t *conn)
 	off_t offset = 0;
 	http_header_t *cookie = NULL;
 	http_header_t *hp = NULL;
-	int have_cookies = 0;
-
-	hp = (http_header_t *)http_hcache->cache;
-	if (wr_cache_obj_used(http_hcache, (void *)hp))
-		have_cookies = 1;
 
 	/*
 	 * If there is a Set-Cookie header, then clear all
@@ -203,10 +185,14 @@ __check_cookies(connection_t *conn)
 		}
 	}
 	else
-	if (have_cookies)
 	{
 		int nr_used = wr_cache_nr_used(http_hcache);
 		int i;
+
+		if (!nr_used)
+			return;
+
+		hp = (http_header_t *)http_hcache->cache;
 
 		printf("Appending %d saved cookies\n", nr_used);
 		for (i = 0; i < nr_used; ++i)
@@ -214,12 +200,16 @@ __check_cookies(connection_t *conn)
 			while (!wr_cache_obj_used(http_hcache, (void *)hp))
 				++hp;
 
+			if (strncmp("Cookie", hp->name, hp->nlen))
+			{
+				++hp;
+				continue;
+			}
+
 			http_append_header(&conn->write_buf, hp);
 			++hp;
 		}
 	}
-	else
-		return;
 
 	return;
 }
@@ -427,8 +417,8 @@ __iterate_cached_links(wr_cache_t *cachep, connection_t *conn)
 				link->time_reaped = time(NULL);
 				break;
 			case HTTP_MOVED_PERMANENTLY:
-				printf("301 Moved Permanently\n");
-				__handle301(conn);
+			case HTTP_FOUND:
+				__handle301(conn); /* can also handle 302 since both give Location header */
 				buf_clear(&conn->write_buf);
 				goto resend;
 				break;
@@ -482,6 +472,24 @@ __dump_links(wr_cache_t *cachep)
 	return;
 }
 
+static void
+__check_directory(void)
+{
+	char *home = getenv("HOME");
+	buf_t tmp;
+
+	buf_init(&tmp, pathconf("/", _PC_PATH_MAX));
+	buf_append(&tmp, home);
+	buf_append(&tmp, "/WR_Reaped");
+
+	if (access(tmp.buf_head, F_OK) != 0)
+		mkdir(tmp.buf_head, S_IRUSR|S_IWUSR|S_IXUSR);
+
+	buf_destroy(&tmp);
+
+	return;
+}
+
 /*
  * ./webreaper <url> [options]
  */
@@ -516,6 +524,7 @@ main(int argc, char *argv[])
 		goto fail;
 	}
 
+	__check_directory();
 
 	connection_t conn;
 	http_state_t http_state;
@@ -586,38 +595,29 @@ main(int argc, char *argv[])
 			case HTTP_OK:
 				break;
 			case HTTP_MOVED_PERMANENTLY:
-				printf("Handling 301 Moved Permanently\n");
+			case HTTP_FOUND:
 				__handle301(&conn);
 				goto loop_start;
 				break;
 			case HTTP_BAD_REQUEST:
-				printf("%.*s\n", (int)conn.write_buf.data_len, conn.write_buf.buf_head);
+				printf("400 Bad Request\n\n%.*s\n", (int)conn.write_buf.data_len, conn.write_buf.buf_head);
+				goto out_disconnect;
 			default:
 				fprintf(stderr, "main: received HTTP status code %d\n", status_code);
 				goto out_disconnect;
 		}
 
 		printf("Archiving page\n");
-
-		printf(
-			"read_buf @ %p\n"
-			"data len = %lu bytes\n",
-			&conn.read_buf,
-			conn.read_buf.data_len);
-
 		__archive_page(&conn);
 
 		/* http_parse_links(wr_cache_t *cachep, buf_t *buf, const char *host); */
-		printf(
-			"read_buf @ %p\n"
-			"data len = %lu bytes\n",
-			&conn.read_buf,
-			conn.read_buf.data_len);
 
-		printf("Parsing links from page (%.*s...)\n", (int)20, conn.read_buf.buf_head);
-		http_parse_links(http_lcache, &conn.read_buf, conn.host);
+		printf("Parsing links\n");
+		parse_links(http_lcache, &conn.read_buf, conn.host);
 
 		__dump_links(http_lcache);
+
+		break;
 
 		choice = __iterate_cached_links(http_lcache, &conn);
 		printf("choice=%d\n", choice);
