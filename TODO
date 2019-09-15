@@ -1,1 +1,3 @@
 Improve cookie storage implementation (current wr_cache_t is overkill)
+
+Fix bug in __http_do_chunked_recv (stopping prematurely when more chunks to come)
