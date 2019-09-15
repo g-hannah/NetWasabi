@@ -9,6 +9,13 @@
 #include "malloc.h"
 #include "webreaper.h"
 
+struct http_vars
+{
+	size_t header_len;
+	size_t content_len;
+	int is_chunked;
+};
+
 /**
  * wr_cache_http_cookie_ctor - initialise object for the cookie cache
  * @hh: pointer to the object in the cache
@@ -162,40 +169,197 @@ http_send_request(connection_t *conn)
 	return -1;
 }
 
+static size_t
+__http_get_chunk_len(char *ptr)
+{
+	char *end = NULL;
+	size_t len;
+	static char tmp[16];
+
+	end = memchr(ptr, 0x0d, 16);
+
+	printf("end @ %p\n", end);
+
+	if (!end)
+		return 0;
+
+	strncpy(tmp, ptr, (end - ptr));
+	tmp[end - ptr] = 0;
+
+	printf("%s\n", tmp);
+
+	len = strtoul(tmp, NULL, 16);
+
+	printf("len=%lu\n", len);
+
+	return len;
+}
+
+/**
+ * http_recv_response - receive HTTP response.
+ * @conn: connection context
+ */
 int
 http_recv_response(connection_t *conn)
 {
 	assert(conn);
 
 	char *p = NULL;
+	char *e = NULL;
 	size_t clen;
 	size_t header_len;
 	size_t deduct;
+	ssize_t bytes;
+	size_t chunk_len;
+	size_t prev_save;
+	size_t over_read;
+	http_header_t *content_len = NULL;
+	http_header_t *transfer_enc = NULL;
+	struct http_vars vars = {0};
 
-	if (option_set(OPT_USE_TLS))
-		buf_read_tls(conn->ssl, &conn->read_buf, 0);
-	else
-		buf_read_socket(conn->sock, &conn->read_buf, 0);
+	printf("in http_recv_response\n");
+
+	content_len = (http_header_t *)wr_cache_alloc(http_hcache);
+	transfer_enc = (http_header_t *)wr_cache_alloc(http_hcache);
+
+	if (!content_len || !transfer_enc)
+		goto fail;
 
 	while (!p)
 	{
 		if (option_set(OPT_USE_TLS))
-			buf_read_tls(conn->ssl, &conn->read_buf, 256);
+			bytes = buf_read_tls(conn->ssl, &conn->read_buf, 256);
 		else
-			buf_read_socket(conn->sock, &conn->read_buf, 256);
+			bytes = buf_read_socket(conn->sock, &conn->read_buf, 256);
 
 		p = strstr(conn->read_buf.buf_head, HTTP_EOH_SENTINEL);
+
+		bytes = 0;
 	}
 
 	p += strlen(HTTP_EOH_SENTINEL);
 
-	http_header_t *content_len = (http_header_t *)wr_cache_alloc(http_hcache);
-	assert(content_len);
-	assert(wr_cache_obj_used(http_hcache, (void *)content_len));
+	vars.header_len = (p - conn->read_buf.buf_head);
+
+	printf("got http header (len=%lu bytes)\n", vars.header_len);
+
+	if (http_fetch_header(&conn->read_buf, "Transfer-Encoding", transfer_enc, (off_t)0))
+		if (!strncmp("chunked", transfer_enc->value, strlen("chunked")))
+			vars.is_chunked = 1;
 
 	if (http_fetch_header(&conn->read_buf, "Content-Length", content_len, (off_t)0))
+		vars.content_len = strtoul(content_len->value, NULL, 0);
+
+	if (vars.is_chunked)
 	{
-		clen = strtoul(content_len->value, NULL, 0);
+		printf("transfer encoding=chunked\n");
+
+		p = strstr(conn->read_buf.buf_head, HTTP_EOH_SENTINEL);
+
+		if (!p)
+		{
+			fprintf(stderr, "http_recv_response: failed to find end of header sentinel\n");
+			goto out_dealloc;
+		}
+
+		p += strlen(HTTP_EOH_SENTINEL);
+
+		while (1)
+		{
+			chunk_len = __http_get_chunk_len(p);
+
+			prev_save = chunk_len;
+
+			printf("chunk_len=%lu bytes\n", chunk_len);
+
+			if (!chunk_len)
+				break;
+
+			e = memchr(p, 0x0d, 16);
+
+			if (!e)
+				break;
+
+			e += 2;
+
+			printf("collapsing buffer by %lu bytes\n", (e - p));
+			buf_collapse(&conn->read_buf, (off_t)(p - conn->read_buf.buf_head), (e - p));
+
+			e = p;
+
+			over_read = (conn->read_buf.buf_tail - e);
+
+			printf("over-read %lu bytes\n", over_read);
+
+			if (over_read >= chunk_len)
+			{
+				p = (e + chunk_len);
+				continue;
+			}
+			else
+			{
+				chunk_len -= over_read;
+			}
+
+			printf("amount to read=%lu bytes\n", chunk_len);
+
+			while (chunk_len)
+			{
+				if (option_set(OPT_USE_TLS))
+					bytes = buf_read_tls(conn->ssl, &conn->read_buf, chunk_len);
+				else
+					bytes = buf_read_socket(conn->sock, &conn->read_buf, chunk_len);
+
+				if (bytes < 0)
+				{
+					goto out_dealloc;
+				}
+				else
+				if (!bytes)
+				{
+					if (chunk_len)
+					{
+						printf("still to read %lu bytes\n", chunk_len);
+						continue;
+					}
+					else
+						break;
+				}
+				else
+				{
+					chunk_len -= bytes;
+					printf("%lu remaining\n", chunk_len);
+				}
+			}
+
+			p = (e + prev_save);
+
+			while (1)
+			{
+				if (option_set(OPT_USE_TLS))
+					bytes = buf_read_tls(conn->ssl, &conn->read_buf, 16);
+				else
+					bytes = buf_read_socket(conn->sock, &conn->read_buf, 16);
+
+				if (!bytes)
+					continue;
+				else
+				if (bytes < 0)
+					goto out_dealloc;
+				else
+					break;
+
+				while (*p == 0x0a || *p == 0x0d)
+					++p;
+			}
+
+			printf("%.*s\n", (int)4, p);
+		}
+	}
+	else
+	if (vars.content_len)
+	{
+		clen = vars.content_len;
 		header_len = (p - conn->read_buf.buf_head);
 		deduct = (conn->read_buf.data_len - header_len);
 
@@ -203,19 +367,17 @@ http_recv_response(connection_t *conn)
 
 		printf("Need to receive another %lu bytes\n", clen);
 
-		ssize_t n = 0;
-
 		while (clen)
 		{
 			if (option_set(OPT_USE_TLS))
-				n = buf_read_tls(conn->ssl, &conn->read_buf, clen);
+				bytes = buf_read_tls(conn->ssl, &conn->read_buf, clen);
 			else
-				n = buf_read_socket(conn->sock, &conn->read_buf, clen);
+				bytes = buf_read_socket(conn->sock, &conn->read_buf, clen);
 
-			if (n < 0)
-				goto fail;
+			if (bytes < 0)
+				goto out_dealloc;
 
-			clen -= n;
+			clen -= bytes;
 		}
 	}
 	else
@@ -223,15 +385,39 @@ http_recv_response(connection_t *conn)
 		printf("No content len header\n");
 		clen = 0;
 
+		read_again:
+
+		bytes = 0;
+		p = NULL;
+
 		if (option_set(OPT_USE_TLS))
-			buf_read_tls(conn->ssl, &conn->read_buf, clen);
+			bytes = buf_read_tls(conn->ssl, &conn->read_buf, clen);
 		else
-			buf_read_socket(conn->sock, &conn->read_buf, clen);
+			bytes = buf_read_socket(conn->sock, &conn->read_buf, clen);
+
+		printf("read %ld bytes\n", bytes);
+
+		if (bytes < 0)
+			goto out_dealloc;
+
+		p = strstr(conn->read_buf.buf_head, "</body");
+
+		if (!p)
+		{
+			printf("no </body tag (read total of %lu bytes)\n", conn->read_buf.data_len);
+			goto read_again;
+		}
 	}
 
 	assert(conn->read_buf.magic == BUFFER_MAGIC);
+	wr_cache_dealloc(http_hcache, (void *)content_len);
+	wr_cache_dealloc(http_hcache, (void *)transfer_enc);
 
 	return 0;
+
+	out_dealloc:
+	wr_cache_dealloc(http_hcache, (void *)content_len);
+	wr_cache_dealloc(http_hcache, (void *)transfer_enc);
 
 	fail:
 	return -1;
