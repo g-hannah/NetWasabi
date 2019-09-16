@@ -7,6 +7,9 @@
 #define WEBREAPER_BUILD		"0.0.1"
 #define WEBREAPER_DIR			"WR_Reaped"
 
+#define COL_ORANGE	"\x1b[38;5;208m"
+#define COL_END			"\x1b[m"
+
 #define clear_struct(s) memset((s), 0, sizeof(*(s)))
 
 #define likely(x) __builtin_expect(!!(x), 1)
