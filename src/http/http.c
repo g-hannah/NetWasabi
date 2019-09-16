@@ -1,7 +1,10 @@
 #include <assert.h>
 #include <errno.h>
+#include <fcntl.h>
 #include <stdio.h>
 #include <stdlib.h>
+#include <sys/stat.h>
+#include <unistd.h>
 #include "buffer.h"
 #include "cache.h"
 #include "connection.h"
@@ -201,20 +204,45 @@ __http_read_until_eoh(connection_t *conn)
 	return p;
 }
 
+#if 0
+static void
+__dump_buf(buf_t *buf)
+{
+	assert(buf);
+
+	int fd = -1;
+
+	fd = open("./DUMPED_BUF.LOG", O_RDWR|O_CREAT|O_TRUNC, S_IRUSR|S_IWUSR);
+	
+	if (fd != -1)
+	{
+		buf_write_fd(fd, buf);
+		sync();
+		close(fd);
+		fd = -1;
+	}
+
+	return;
+}
+#endif
+
 static size_t
 __http_do_chunked_recv(connection_t *conn)
 {
 	assert(conn);
 
-#define HTTP_MAX_CHUNK_STR 16
+#define HTTP_MAX_CHUNK_STR 20
 
 	char *p;
 	char *e;
 	char *t;
+	char *chunk_start;
+	off_t chunk_offset;
 	buf_t *buf = &conn->read_buf;
 	size_t chunk_size;
 	size_t save_size;
 	size_t overread;
+	size_t total;
 	ssize_t bytes_read;
 	static char tmp[HTTP_MAX_CHUNK_STR];
 
@@ -226,12 +254,9 @@ __http_do_chunked_recv(connection_t *conn)
 		return -1;
 	}
 
-	assert(strncmp(HTTP_EOH_SENTINEL, p, 4) == 0);
-
 	p += strlen(HTTP_EOH_SENTINEL);
 
 	t = p;
-
 	SKIP_CRNL(p);
 
 	if (p - t)
@@ -245,16 +270,15 @@ __http_do_chunked_recv(connection_t *conn)
 		e = memchr(p, 0x0d, HTTP_MAX_CHUNK_STR);
 
 		if (!e)
-			break;
+		{
+			fprintf(stderr, "__http_do_chunked_recv: failed to find next carriage return\n");
+			return -1;
+		}
 
 		strncpy(tmp, p, (e - p));
 		tmp[e - p] = 0;
 
-		printf("chunk size: %s\n", tmp);
-
 		chunk_size = strtoul(tmp, NULL, 16);
-
-		printf("(decimal = %lu)\n", chunk_size);
 
 		if (!chunk_size)
 		{
@@ -265,21 +289,19 @@ __http_do_chunked_recv(connection_t *conn)
 
 		save_size = chunk_size;
 
-		e += 2;
-
+		SKIP_CRNL(e);
 		buf_collapse(buf, (off_t)(p - buf->buf_head), (e - p));
 		e = p;
 
-		overread = (buf->buf_tail - e);
+		chunk_start = e;
 
-		printf("over-read by %lu bytes\n", overread);
+		overread = (buf->buf_tail - e);
 
 		if (overread >= chunk_size)
 		{
 			p = (e + save_size);
 
 			t = p;
-
 			SKIP_CRNL(p);
 
 			if (p - t)
@@ -295,10 +317,21 @@ __http_do_chunked_recv(connection_t *conn)
 			chunk_size -= overread;
 		}
 
-		printf("to read = %lu bytes\n", chunk_size);
+		total = 0;
 
-		while (chunk_size)
+/*
+ * Our buffer data could be copied to a new location
+ * on the heap with a realloc in buf_extend(). So
+ * save the offset of chunk_start from start of buffer.
+ * Restore pointer after receiving data.
+ */
+		chunk_offset = (chunk_start - buf->buf_head);
+
+		while (1)
 		{
+			if (total >= chunk_size)
+				break;
+
 			if (option_set(OPT_USE_TLS))
 				bytes_read = buf_read_tls(conn->ssl, buf, chunk_size);
 			else
@@ -310,11 +343,12 @@ __http_do_chunked_recv(connection_t *conn)
 			if (!bytes_read)
 				continue;
 			else
-				chunk_size -= bytes_read;
+				total += bytes_read;
 		}
 
-		p = (e + save_size);
-
+		/*
+		 * Read some extra data to get next chunk size.
+		 */
 		while (1)
 		{
 			if (option_set(OPT_USE_TLS))
@@ -331,8 +365,11 @@ __http_do_chunked_recv(connection_t *conn)
 				break;
 		}
 
-		t = p;
+		chunk_start = (buf->buf_head + chunk_offset);
 
+		p = (chunk_start + save_size);
+
+		t = p;
 		SKIP_CRNL(p);
 
 		if (p - t)
@@ -362,8 +399,6 @@ http_recv_response(connection_t *conn)
 	http_header_t *transfer_enc = NULL;
 	buf_t *buf = &conn->read_buf;
 
-	printf("in http_recv_response\n");
-
 	content_len = (http_header_t *)wr_cache_alloc(http_hcache);
 	transfer_enc = (http_header_t *)wr_cache_alloc(http_hcache);
 
@@ -383,7 +418,13 @@ http_recv_response(connection_t *conn)
 	if (http_fetch_header(&conn->read_buf, "Transfer-Encoding", transfer_enc, (off_t)0))
 	{
 		if (!strncmp("chunked", transfer_enc->value, transfer_enc->vlen))
-			__http_do_chunked_recv(conn);
+		{
+#ifdef DEBUG
+			printf("Transfer-Encoding = chunked\n");
+#endif
+			if (__http_do_chunked_recv(conn) == -1)
+				goto out_dealloc;
+		}
 	}
 	else
 	if (http_fetch_header(buf, "Content-Length", content_len, (off_t)0))
@@ -415,7 +456,6 @@ http_recv_response(connection_t *conn)
 	}
 	else
 	{
-		printf("No content len header\n");
 		clen = 0;
 
 		read_again:
@@ -428,8 +468,6 @@ http_recv_response(connection_t *conn)
 		else
 			bytes = buf_read_socket(conn->sock, &conn->read_buf, clen);
 
-		printf("read %ld bytes\n", bytes);
-
 		if (bytes < 0)
 			goto out_dealloc;
 
@@ -437,7 +475,6 @@ http_recv_response(connection_t *conn)
 
 		if (!p)
 		{
-			printf("no </body tag (read total of %lu bytes)\n", conn->read_buf.data_len);
 			goto read_again;
 		}
 	}
