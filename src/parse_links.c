@@ -70,6 +70,18 @@ __remove_dups(char **links, int nr)
 
 static char **url_links = NULL;
 
+static char *__ignore_tokens__[] =
+{
+	"favicon.ico",
+	".png",
+	".jpg",
+	".jpeg",
+	".gif",
+	".pdf",
+	".php",
+	NULL
+};
+
 int
 parse_links(wr_cache_t *cachep, buf_t *buf, char *host)
 {
@@ -87,6 +99,7 @@ parse_links(wr_cache_t *cachep, buf_t *buf, char *host)
 	size_t cur_size = 256;
 	size_t aidx = 0;
 	int i;
+	int ignore = 0;
 
 	MATRIX_INIT(url_links, cur_size, HTTP_URL_MAX, char);
 
@@ -94,6 +107,8 @@ parse_links(wr_cache_t *cachep, buf_t *buf, char *host)
 
 	while (1)
 	{
+		ignore = 0;
+
 		p = strstr(savep, "href=\"");
 
 		if (!p || p >= tail)
@@ -134,13 +149,29 @@ parse_links(wr_cache_t *cachep, buf_t *buf, char *host)
 		strncpy(url_links[aidx], savep, url_len);
 		url_links[aidx][url_len] = 0;
 
-		printf("parsed url %s\n", url_links[aidx]);
+		for (i = 0; __ignore_tokens__[i] != NULL; ++i)
+		{
+			if (strstr(url_links[aidx], __ignore_tokens__[i]))
+			{
+				savep = ++p;
+				ignore = 1;
+				break;
+			}
+		}
+
+		if (ignore)
+			continue;
+
+		if (strstr(url_links[aidx], host))
+		{
+			savep = ++p;
+			continue;
+		}
 
 		++aidx;
 
 		if (aidx >= cur_size)
 		{
-			printf("extending url_links matrix\n");
 			old_size = cur_size;
 			cur_size *= 2;
 
@@ -169,7 +200,6 @@ parse_links(wr_cache_t *cachep, buf_t *buf, char *host)
 
 	for (i = 0; i < nr; ++i)
 	{
-		printf("allocating link #%d\n", i);
 		hl = (http_link_t *)wr_cache_alloc(cachep);
 
 		if (!hl)
@@ -179,12 +209,13 @@ parse_links(wr_cache_t *cachep, buf_t *buf, char *host)
 		assert(url_len < HTTP_URL_MAX);
 		strncpy(hl->url, url_links[i], url_len);
 		hl->url[url_len] = 0;
+		hl->nr_requests = 0;
 	}
 
 	MATRIX_DESTROY(url_links, cur_size);
 
-	printf("Done parsing %d links\n", nr);
 	return 0;
+
 
 	out_free_links:
 
