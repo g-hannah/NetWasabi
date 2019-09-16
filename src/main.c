@@ -17,7 +17,7 @@
 #include "robots.h"
 #include "webreaper.h"
 
-#define SLEEP_TIME		5
+#define SLEEP_TIME	2
 
 static int get_opts(int, char *[]) __nonnull((2)) __wur;
 
@@ -47,6 +47,17 @@ __noret usage(int exit_status)
 		"--help/-h           display this information\n");
 
 	exit(exit_status);
+}
+
+static void
+__print_prog_info(void)
+{
+	fprintf(stdout,
+		"WebReaper v%s\n"
+		"Written by Gary Hannah\n\n",
+		WEBREAPER_BUILD);
+
+	return;
 }
 
 static void
@@ -233,15 +244,31 @@ __do_request(connection_t *conn)
 	 */
 	__check_cookies(conn);
 
-	printf("Sending HTTP request\n");
+	if (option_set(OPT_SHOW_REQ_HEADER))
+		printf("%s", conn->write_buf.buf_head);
+
 	if (http_send_request(conn) < 0)
+	{
+		fprintf(stderr, "__do_request: failed to send HTTP request (%s)\n", strerror(errno));
 		goto fail;
+	}
 
-	printf("Receiving HTTP response\n");
+	buf_clear(&conn->read_buf);
+
 	if (http_recv_response(conn) < 0)
+	{
+		fprintf(stderr, "__do_request: failed to receive HTTP response (%s)\n", strerror(errno));
 		goto fail;
+	}
 
-	printf("Getting status code\n");
+	if (option_set(OPT_SHOW_RES_HEADER))
+	{
+		char *p = strstr(conn->read_buf.buf_head, HTTP_EOH_SENTINEL);
+		p += strlen(HTTP_EOH_SENTINEL);
+
+		printf("%.*s", (int)(p - conn->read_buf.buf_head), conn->read_buf.buf_head);
+	}
+
 	status_code = http_status_code_int(&conn->read_buf);
 
 	return status_code;
@@ -261,17 +288,29 @@ __handle301(connection_t *conn)
 
 	location = (http_header_t *)wr_cache_alloc(http_hcache);
 	http_fetch_header(&conn->read_buf, "Location", location, (off_t)0);
+
+#ifdef DEBUG
+	printf("301/302 ===> %s%s%s\n", COL_ORANGE, location->value, COL_END);
+#endif
+
+	memset(conn->host, 0, HTTP_URL_MAX);
 	http_parse_host(location->value, conn->host);
+
 	strncpy(conn->page, location->value, location->vlen);
 	conn->page[location->vlen] = 0;
+
 	wr_cache_dealloc(http_hcache, (void *)location);
 
 	if (!strncmp("https", conn->page, 5))
-		conn_switch_to_tls(conn);
+	{
+		if (!option_set(OPT_USE_TLS))
+			conn_switch_to_tls(conn);
+	}
 
 	return 0;
 }
 
+#if 0
 static int
 __same_domain(char *url, char *current)
 {
@@ -349,6 +388,7 @@ __switch_host(char *url, connection_t *conn)
 	fail:
 	return -1;
 }
+#endif
 
 /**
  * __iterate_cached_links - archive the pages in the link cache,
@@ -363,12 +403,13 @@ __iterate_cached_links(wr_cache_t *cachep, connection_t *conn)
 	assert(cachep);
 	assert(conn);
 
-	char *saved_host = wr_strdup(conn->host);
+	//char *saved_host = wr_strdup(conn->host);
 	int nr_links = wr_cache_nr_used(cachep);
 	int status_code = 0;
 	int choice;
 	int i;
 	http_link_t *link;
+	buf_t tmp;
 
 	if (!nr_links && wr_cache_obj_used(cachep, cachep->cache))
 	{
@@ -383,19 +424,26 @@ __iterate_cached_links(wr_cache_t *cachep, connection_t *conn)
 		return -2;
 	}
 
-	printf("Iterating over parsed links (%d)\n", nr_links);
+	buf_init(&tmp, HTTP_URL_MAX);
 
 	choice = (rand() % nr_links);
+
+	link = (http_link_t *)cachep->cache;
 
 	for (i = 0; i < nr_links; ++i)
 	{
 		if (i == choice)
+		{
+			++link;
 			continue;
+		}
 
 		sleep(SLEEP_TIME);
 
-		link = ((http_link_t *)cachep->cache + i);
+		buf_clear(&conn->write_buf);
+		buf_clear(&tmp);
 
+#if 0
 		if (!(__same_domain(link->url, saved_host)))
 		{
 			printf("New domain - switching host (old=%s ; new=%s)\n", saved_host, link->url);
@@ -407,18 +455,35 @@ __iterate_cached_links(wr_cache_t *cachep, connection_t *conn)
 			saved_host = NULL;
 			saved_host = wr_strdup(conn->host);
 		}
+#endif
 
-		http_parse_host(link->url, conn->host);
-		http_parse_page(link->url, conn->page);
+		if (!strstr(conn->host, "http"))
+			buf_append(&tmp, "https://");
+
+		buf_append(&tmp, conn->host);
+		buf_append(&tmp, link->url);
+		BUF_NULL_TERMINATE(&tmp);
+
+		strncpy(conn->page, tmp.buf_head, tmp.data_len);
+		conn->page[tmp.data_len] = 0;
 
 		resend:
-		printf("Requesting %s from host %s\n", conn->page, conn->host);
+		if (link->nr_requests > 2) /* loop */
+		{
+			++link;
+			printf("Skipping %s%s%s (infinite redirect loop)\n", COL_ORANGE, link->url, COL_END);
+			continue;
+		}
+
+		printf("===> %s%s%s <===\n", COL_ORANGE, conn->page, COL_END);
 		status_code = __do_request(conn);
+
+		link->status_code = status_code;
+		++link->nr_requests;
 
 		switch(status_code)
 		{
 			case HTTP_OK:
-				printf("200 OK\n");
 				link->time_reaped = time(NULL);
 				break;
 			case HTTP_MOVED_PERMANENTLY:
@@ -427,22 +492,30 @@ __iterate_cached_links(wr_cache_t *cachep, connection_t *conn)
 				buf_clear(&conn->write_buf);
 				goto resend;
 				break;
+			case HTTP_BAD_REQUEST:
+			case HTTP_NOT_FOUND:
+				goto next;
 			default:
 				fprintf(stderr, "__iterate_cached_links: received HTTP status code %d\n", status_code);
 				goto out_release_dup_str;
 		}
 
-		printf("Archiving page\n");
+		printf("Archiving %s\n", conn->page);
 		__archive_page(conn);
+
+		next:
+		++link;
 	}
 
-	free(saved_host);
-	saved_host = NULL;
+	//free(saved_host);
+	//saved_host = NULL;
+	buf_destroy(&tmp);
 	return choice;
 
 	out_release_dup_str:
-	free(saved_host);
-	saved_host = NULL;
+	buf_destroy(&tmp);
+	//free(saved_host);
+	//saved_host = NULL;
 
 	fail:
 	return -1;
@@ -503,6 +576,8 @@ main(int argc, char *argv[])
 {
 	if (argc < 2)
 		usage(EXIT_FAILURE);
+
+	__print_prog_info();
 
 	if (get_opts(argc, argv) < 0)
 		goto fail;
@@ -612,19 +687,21 @@ main(int argc, char *argv[])
 				goto out_disconnect;
 		}
 
-		printf("Archiving page\n");
+		printf("Archiving %s\n", conn.page);
 		__archive_page(&conn);
 
 		/* http_parse_links(wr_cache_t *cachep, buf_t *buf, const char *host); */
 
-		printf("Parsing links\n");
+		printf("Extracting links from page\n");
 		parse_links(http_lcache, &conn.read_buf, conn.host);
 
 		__dump_links(http_lcache);
+		putchar(0x0a);
+
+		choice = __iterate_cached_links(http_lcache, &conn);
 
 		break;
 
-		choice = __iterate_cached_links(http_lcache, &conn);
 		printf("choice=%d\n", choice);
 
 		if (choice < 0)
