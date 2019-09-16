@@ -171,22 +171,6 @@ conn_switch_to_tls(connection_t *conn)
 {
 	close_connection(conn);
 
-	size_t host_len = strlen(conn->host);
-	char *p;
-	char *endp = (conn->host + host_len);
-
-	p = conn->host;
-
-	if (strstr(p, "http"))
-	{
-		p = memchr(conn->host, '/', endp - conn->host);
-
-		if (*p != '/')
-			goto fail;
-
-		p += 2;
-	}
-
 #ifdef DEBUG
 	printf("Switching to TLS (%s)\n", conn->host);
 #endif
