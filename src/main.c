@@ -110,13 +110,12 @@ __archive_page(connection_t *conn)
 {
 	int fd = -1;
 	buf_t *buf = &conn->read_buf;
-	//char *start;
-	//char *savep = buf->buf_head;
-	//char *tail = buf->buf_tail;
-	//char *p;
+	buf_t tmp;
 	char *filename = wr_strdup(conn->page);
+	char *home = NULL;
 	char *p;
-	//size_t range;
+
+	buf_init(&tmp, HTTP_URL_MAX);
 
 	p = strstr(buf->buf_head, HTTP_EOH_SENTINEL);
 
@@ -126,26 +125,32 @@ __archive_page(connection_t *conn)
 		buf_collapse(buf, (off_t)0, (p - buf->buf_head));
 	}
 
-	printf("Normalising filename\n");
 	__normalise_filename(filename);
-	printf("Normalised: %s\n", filename);
 
-	fd = open(filename, O_RDWR|O_CREAT|O_TRUNC, S_IRUSR|S_IWUSR);
+	home = getenv("HOME");
+	buf_append(&tmp, home);
+	buf_append(&tmp, "/" WEBREAPER_DIR "/");
+	buf_append(&tmp, filename);
+
+	fd = open(tmp.buf_head, O_RDWR|O_CREAT|O_TRUNC, S_IRUSR|S_IWUSR);
 	if (fd == -1)
-		goto out_free_name;
+		goto out_free;
 
-	printf("Opened file on fd %d\n", fd);
+#ifdef DEBUG
+	printf("Created file %s\n", tmp.buf_head);
+#endif
 
-	printf("Writing to file with buf_write_fd() (towrite=%lu bytes)\n", buf->data_len);
 	buf_write_fd(fd, buf);
 	close(fd);
 	fd = -1;
 
 	free(filename);
+	buf_destroy(&tmp);
 	return 0;
 
-	out_free_name:
+	out_free:
 	free(filename);
+	buf_destroy(&tmp);
 
 	return -1;
 }
