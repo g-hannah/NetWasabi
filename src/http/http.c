@@ -158,12 +158,18 @@ http_send_request(connection_t *conn)
 	if (conn_using_tls(conn))
 	{
 		if (buf_write_tls(conn_tls(conn), buf) == -1)
+		{
+			fprintf(stderr, "http_send_request: failed to write to SSL socket (%s)\n", strerror(errno));
 			goto fail;
+		}
 	}
 	else
 	{
 		if (buf_write_socket(conn_socket(conn), buf) == -1)
+		{
+			fprintf(stderr, "http_send_request: failed to write to socket (%s)\n", strerror(errno));
 			goto fail;
+		}
 	}
 
 	return 0;
@@ -202,7 +208,6 @@ __http_read_until_eoh(connection_t *conn)
 	return p;
 }
 
-#if 0
 static void
 __dump_buf(buf_t *buf)
 {
@@ -222,7 +227,6 @@ __dump_buf(buf_t *buf)
 
 	return;
 }
-#endif
 
 static size_t
 __http_do_chunked_recv(connection_t *conn)
@@ -270,6 +274,7 @@ __http_do_chunked_recv(connection_t *conn)
 		if (!e)
 		{
 			fprintf(stderr, "__http_do_chunked_recv: failed to find next carriage return\n");
+			__dump_buf(buf);
 			return -1;
 		}
 
