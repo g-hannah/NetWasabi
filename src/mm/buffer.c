@@ -643,7 +643,10 @@ buf_write_socket(int sock, buf_t *buf)
 			if (errno == EINTR)
 				continue;
 			else
+			{
+				fprintf(stderr, "buf_write_socket: send error (%s)\n", strerror(errno));
 				goto fail;
+			}
 		}
 
 		__buf_pull_head(buf, (size_t)n);
@@ -693,7 +696,10 @@ buf_write_tls(SSL *ssl, buf_t *buf)
 						continue;
 						break;
 					default:
+					{
+						ERR_print_errors_fp(stderr);
 						goto fail;
+					}
 				}
 			}
 		}
