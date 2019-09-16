@@ -5,6 +5,7 @@
 #include <string.h>
 
 #define WEBREAPER_BUILD		"0.0.1"
+#define WEBREAPER_DIR			"WR_Reaped"
 
 #define clear_struct(s) memset((s), 0, sizeof(*(s)))
 
@@ -26,6 +27,8 @@
 	(type *)((char *)__mptr - offsetof(type, member)); \
 })
 #endif
+
+#define SKIP_CRNL(____p) do { while ((*____p) == 0x0a || (*____p) == 0x0d) { ++(____p); }; } while (0)
 
 #define OPT_USE_TLS	0x1
 #define OPT_SHOW_REQ_HEADER 0x2

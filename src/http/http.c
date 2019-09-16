@@ -172,8 +172,6 @@ http_send_request(connection_t *conn)
 	return -1;
 }
 
-#define SKIP_CRNL(____PTR) do { while ((*____PTR) == 0x0a || (*____PTR) == 0x0d) { ++(____PTR); }; } while (0)
-
 #define HTTP_SMALL_READ_BLOCK 256
 
 static char *
