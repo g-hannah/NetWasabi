@@ -43,6 +43,7 @@ typedef struct http_link_t
 	int status_code;
 	char *url;
 	time_t time_reaped;
+	int nr_requests;
 } http_link_t;
 
 typedef struct http_state_t
