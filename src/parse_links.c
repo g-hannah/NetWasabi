@@ -33,13 +33,15 @@ do { \
 } while (0)
 		
 
-static void
+static int
 __remove_dups(char **links, int nr)
 {
 	int i;
 	int j;
 	int k;
+	int nr_removed = 0;
 	size_t len;
+	size_t copy_len;
 
 	for (i = 0; i < (nr-1); ++i)
 	{
@@ -49,17 +51,21 @@ __remove_dups(char **links, int nr)
 		{
 			if (len && !strcmp(links[i], links[j]))
 			{
-				printf("removing dup %s\n", links[j]);
+				++nr_removed;
 
 				for (k = j; k < (nr - 1); ++k)
-					strncpy(links[k], links[k+1], strlen(links[k+1]));
+				{
+					copy_len = strlen(links[k+1]);
+					strncpy(links[k], links[k+1], copy_len);
+					links[k][copy_len] = 0;
+				}
 
 				memset(links[k], 0, HTTP_URL_MAX);
 			}
 		}
 	}
 
-	return;
+	return nr_removed;
 }
 
 static char **url_links = NULL;
@@ -155,7 +161,11 @@ parse_links(wr_cache_t *cachep, buf_t *buf, char *host)
 		++nr;
 	}
 
-	__remove_dups(url_links, nr);
+	int removed;
+
+	removed = __remove_dups(url_links, nr);
+
+	nr -= removed;
 
 	for (i = 0; i < nr; ++i)
 	{
