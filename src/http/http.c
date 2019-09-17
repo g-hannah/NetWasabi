@@ -25,7 +25,7 @@ struct http_vars
  *  -- called in wr_cache_create()
  */
 int
-wr_cache_http_cookie_ctor(void *hh)
+wr_cache_http_header_ctor(void *hh)
 {
 	http_header_t *ch = (http_header_t *)hh;
 	clear_struct(ch);
@@ -47,7 +47,7 @@ wr_cache_http_cookie_ctor(void *hh)
  * -- called in wr_cache_dealloc()
  */
 void
-wr_cache_http_cookie_dtor(void *hh)
+wr_cache_http_header_dtor(void *hh)
 {
 	assert(hh);
 
@@ -57,6 +57,60 @@ wr_cache_http_cookie_dtor(void *hh)
 	memset(ch->value, 0, ch->vlen);
 
 	ch->nlen = ch->vlen = 0;
+}
+
+#define TIME_STRING_MAX 64
+
+int
+http_cookie_ctor(void *cookie)
+{
+	struct http_cookie_t *c = (struct http_cookie_t *)cookie;
+	clear_struct(c);
+
+	if (!(c->data = wr_calloc(HTTP_COOKIE_MAX+1, 1)))
+		goto fail;
+
+	if (!(c->domain = wr_calloc(HTTP_URL_MAX+1, 1)))
+		goto fail;
+
+	if (!(c->path = wr_calloc(HTTP_URL_MAX+1, 1)))
+		goto fail;
+
+	if (!(c->expires = wr_calloc(TIME_STRING_MAX+1, 1)))
+		goto fail;
+
+	c->data_len = 0;
+	c->domain_len = 0;
+	c->path_len = 0;
+	c->expires_len = 0;
+	c->expires_ts = 0;
+
+	return 0;
+
+	fail:
+	return -1;
+}
+
+void
+http_cookie_dtor(void *cookie)
+{
+	struct http_cookie_t *c = (struct http_cookie_t *)cookie;
+
+	if (c->data)
+		free(c->data);
+
+	if (c->domain)
+		free(c->domain);
+
+	if (c->path)
+		free(c->path);
+
+	if (c->expires)
+		free(c->expires);
+
+	clear_struct(c);
+
+	return;
 }
 
 int
@@ -208,6 +262,7 @@ __http_read_until_eoh(connection_t *conn)
 	return p;
 }
 
+#ifdef DEBUG
 static void
 __dump_buf(buf_t *buf)
 {
@@ -227,6 +282,7 @@ __dump_buf(buf_t *buf)
 
 	return;
 }
+#endif
 
 static size_t
 __http_do_chunked_recv(connection_t *conn)
@@ -274,7 +330,22 @@ __http_do_chunked_recv(connection_t *conn)
 		if (!e)
 		{
 			fprintf(stderr, "__http_do_chunked_recv: failed to find next carriage return\n");
+
+#ifdef DEBUG
+			int i;
+
 			__dump_buf(buf);
+
+			p -= 8;
+
+			for (i = 0; i < 16; ++i)
+				printf("%02hhx ", p[i]);
+
+			putchar(0x0a);
+
+			printf("%.*s\n", (int)16, p);
+#endif
+
 			return -1;
 		}
 
@@ -282,6 +353,10 @@ __http_do_chunked_recv(connection_t *conn)
 		tmp[e - p] = 0;
 
 		chunk_size = strtoul(tmp, NULL, 16);
+
+#ifdef DEBUG
+		fprintf(stderr, "%sCHUNK SIZE=%lu BYTES%s\n", COL_ORANGE, chunk_size, COL_END);
+#endif
 
 		if (!chunk_size)
 		{
