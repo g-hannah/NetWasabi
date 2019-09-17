@@ -21,7 +21,7 @@
 #define HTTP_GATEWAY_TIMEOUT 504u
 
 #define HTTP_URL_MAX	256
-#define HTTP_COOKIE_MAX 512 /* Surely this is more than enough */
+#define HTTP_COOKIE_MAX 1024 /* Surely this is more than enough */
 #define HTTP_HNAME_MAX 64 /* Header name */
 
 #define HTTP_GET		"GET"
@@ -64,6 +64,19 @@ typedef struct http_header_t
 	size_t vsize; /* Amount of memory allocated for value */
 } http_header_t;
 
+struct http_cookie_t
+{
+	char *data;
+	char *domain;
+	char *path;
+	char *expires;
+	size_t data_len;
+	size_t domain_len;
+	size_t path_len;
+	size_t expires_len;
+	time_t expires_ts;
+};
+
 extern wr_cache_t *http_hcache;
 
 int http_build_request_header(connection_t *, const char *, const char *) __nonnull((1,2,3)) __wur;
@@ -80,7 +93,9 @@ char *http_parse_page(char *, char *) __nonnull((1,2)) __wur;
 int parse_links(wr_cache_t *, buf_t *, char *) __nonnull((1,2,3)) __wur;
 int wr_cache_http_link_ctor(void *) __nonnull((1)) __wur;
 void wr_cache_http_link_dtor(void *) __nonnull((1));
-int wr_cache_http_cookie_ctor(void *) __nonnull((1)) __wur;
-void wr_cache_http_cookie_dtor(void *) __nonnull((1));
+int wr_cache_http_header_ctor(void *) __nonnull((1)) __wur;
+void wr_cache_http_header_dtor(void *) __nonnull((1));
+int http_cookie_ctor(void *) __nonnull((1)) __wur;
+void http_cookie_dtor(void *) __nonnull((1));
 
 #endif /* !defined HTTP_H */
