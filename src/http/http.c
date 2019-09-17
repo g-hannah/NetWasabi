@@ -153,14 +153,10 @@ http_build_request_header(connection_t *conn, const char *http_verb, const char 
 	assert(target);
 
 	buf_t *buf = &conn->write_buf;
-	buf_t tbuf;
+	buf_t tmp;
 	static char header_buf[4096];
 
-	buf_init(&tbuf, HTTP_URL_MAX);
-	buf_append(&tbuf, conn->host);
-
-	if (*(tbuf.buf_tail - 1) == '/')
-		buf_snip(&tbuf, 1);
+	buf_init(&tmp, HTTP_URL_MAX);
 
 /*
  * RFC 7230:
@@ -184,20 +180,43 @@ http_build_request_header(connection_t *conn, const char *http_verb, const char 
  * send a 400 Bad Request or a 301 Moved Permanently with the
  * correct encoding present in the Location header.
  */
-	sprintf(header_buf,
-			"%s %s HTTP/%s\r\n"
+
+	if (!strcmp("HEAD", http_verb))
+	{
+		buf_append(&tmp, "https://");
+		buf_append(&tmp, conn->host);
+		buf_append(&tmp, conn->page);
+
+		sprintf(header_buf,
+			"HEAD %s HTTP/%s\r\n"
+			"Host: %s\r\n"
+			"User-Agent: %s%s",
+			tmp.buf_head, HTTP_VERSION,
+			conn->host,
+			HTTP_USER_AGENT, HTTP_EOH_SENTINEL);
+	}
+	else
+	{
+		buf_append(&tmp, conn->host);
+
+		if (*(tmp.buf_tail - 1) == '/')
+			buf_snip(&tmp, 1);
+
+		sprintf(header_buf,
+			"GET %s HTTP/%s\r\n"
 			"User-Agent: %s\r\n"
 			"Accept: %s\r\n"
 			"Host: %s\r\n"
 			"Connection: keep-alive%s",
-			http_verb, target, HTTP_VERSION,
+			target, HTTP_VERSION,
 			HTTP_USER_AGENT,
 			HTTP_ACCEPT,
-			tbuf.buf_head,
+			tmp.buf_head,
 			HTTP_EOH_SENTINEL);
+	}
 
 	buf_append(buf, header_buf);
-	buf_destroy(&tbuf);
+	buf_destroy(&tmp);
 
 	return 0;
 }
@@ -295,6 +314,7 @@ __http_do_chunked_recv(connection_t *conn)
 	char *e;
 	char *t;
 	char *chunk_start;
+	char *__next_size;
 	off_t chunk_offset;
 	buf_t *buf = &conn->read_buf;
 	size_t chunk_size;
@@ -336,14 +356,28 @@ __http_do_chunked_recv(connection_t *conn)
 
 			__dump_buf(buf);
 
-			p -= 8;
+			p -= 32;
 
-			for (i = 0; i < 16; ++i)
-				printf("%02hhx ", p[i]);
+			for (i = 0; i < 64; ++i)
+				fprintf(stderr, "%02hhx ", p[i]);
 
 			putchar(0x0a);
 
-			printf("%.*s\n", (int)16, p);
+			fprintf(stderr, "%.*s\n", (int)64, p);
+
+			fprintf(stderr,
+					"BUF_SIZE=%lu bytes\n"
+					"END - DATA = %lu bytes\n"
+					"TAIL - HEAD = %lu bytes\n"
+					"HEAD @ %p\n"
+					"TAIL @ %p\n"
+					"END @ %p\n",
+					buf->buf_size,
+					(buf->buf_end - buf->data),
+					(buf->buf_tail - buf->buf_head),
+					buf->buf_head,
+					buf->buf_tail,
+					buf->buf_end);
 #endif
 
 			return -1;
@@ -368,6 +402,7 @@ __http_do_chunked_recv(connection_t *conn)
 		save_size = chunk_size;
 
 		SKIP_CRNL(e);
+
 		buf_collapse(buf, (off_t)(p - buf->buf_head), (e - p));
 		e = p;
 
@@ -424,15 +459,23 @@ __http_do_chunked_recv(connection_t *conn)
 				total += bytes_read;
 		}
 
+
 		/*
 		 * Read some extra data to get next chunk size.
 		 */
+		total = 0;
+
+		/*
+		 * Point at where next size string will be.
+		 */
+		__next_size = (buf->buf_head + chunk_offset + save_size + 2);
+
 		while (1)
 		{
 			if (option_set(OPT_USE_TLS))
-				bytes_read = buf_read_tls(conn->ssl, buf, HTTP_MAX_CHUNK_STR);
+				bytes_read = buf_read_tls(conn->ssl, buf, (HTTP_MAX_CHUNK_STR - total));
 			else
-				bytes_read = buf_read_socket(conn->sock, buf, HTTP_MAX_CHUNK_STR);
+				bytes_read = buf_read_socket(conn->sock, buf, (HTTP_MAX_CHUNK_STR - total));
 
 			if (bytes_read < 0)
 				return -1;
@@ -440,7 +483,34 @@ __http_do_chunked_recv(connection_t *conn)
 			if (!bytes_read)
 				continue;
 			else
-				break;
+			{
+				total += (size_t)bytes_read;
+
+				__next_size = (buf->buf_head + chunk_offset + save_size + 2);
+
+				assert(*(__next_size - 2) == '\r');
+					
+				if (!memchr(__next_size, '\r', 64))
+					continue;
+				else
+				{
+
+					assert(*__next_size != '\r');
+					assert(*(__next_size - 2) == '\r');
+
+					char *crnl = memchr(__next_size, '\r', 64);
+
+					if (!crnl)
+					{
+						continue;
+					}
+
+					assert(*crnl == 0x0d);
+					assert(__next_size != crnl);
+					assert(crnl > __next_size);
+					break;
+				}
+			}
 		}
 
 		chunk_start = (buf->buf_head + chunk_offset);
@@ -492,6 +562,12 @@ http_recv_response(connection_t *conn)
 	}
 
 	p += strlen(HTTP_EOH_SENTINEL);
+
+	if (strstr(conn->write_buf.buf_head, "HEAD"))
+	{
+		buf_collapse(&conn->read_buf, (off_t)(p - conn->read_buf.buf_head), (conn->read_buf.buf_tail - p));
+		return 0;
+	}
 
 	if (http_fetch_header(&conn->read_buf, "Transfer-Encoding", transfer_enc, (off_t)0))
 	{
@@ -673,25 +749,29 @@ http_response_header_len(buf_t *buf)
 char *
 http_parse_host(char *url, char *host)
 {
-	char *p = url;
-	//char *q;
+	char *p;
 	size_t url_len = strlen(url);
-	char *endp = (url + url_len);
+	char *endp;
+
+	host[0] = 0;
 
 	p = url;
 
-	if (!strncmp("http:", url, strlen("http:")))
+	if (!strncmp("http", url, 4))
 		p += strlen("http://");
-	else
-	if (!strncmp("https:", url, strlen("https:")))
-		p += strlen("https://");
+
+	while (*p == '/')
+		++p;
 
 	endp = memchr(p, '/', ((url + url_len) - p));
+
 	if (!endp)
 		endp = url + url_len;
 
 	strncpy(host, p, endp - p);
 	host[endp - p] = 0;
+
+	printf("host=%s\n", host);
 
 	return host;
 }
@@ -713,11 +793,11 @@ http_parse_page(char *url, char *page)
 		*endp = 0;
 	}
 
-	if (!strncmp("http:", url, 5))
+	if (!strncmp("http", url, 4))
 		p += strlen("http://");
-	else
-	if (!strncmp("https:", url, 6))
-		p += strlen("https://");
+
+	while (*p == '/')
+		++p;
 
 	q = memchr(p, '/', (endp - p));
 
@@ -937,22 +1017,3 @@ http_parse_header(buf_t *buf, wr_cache_t *cachep)
 
 	return 0;
 }
-
-#if 0
-int
-http_state_add_cookies(http_state_t *state, char *cookies)
-{
-	assert(state);
-
-	int i;
-	int nr_cookies = state->nr_cookies;
-
-	if (nr_cookies)
-	{
-		for (i = 0; i < nr_cookies; ++i)
-			free(state->cookies[i]);
-
-		free(state->cookies);
-	}
-}
-#endif
