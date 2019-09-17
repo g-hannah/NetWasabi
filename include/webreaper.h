@@ -8,6 +8,8 @@
 #define WEBREAPER_DIR			"WR_Reaped"
 
 #define COL_ORANGE	"\x1b[38;5;208m"
+#define COL_RED			"\x1b[38;5;9m"
+#define COL_GREEN		"\x1b[38;5;40m"
 #define COL_END			"\x1b[m"
 
 #define clear_struct(s) memset((s), 0, sizeof(*(s)))
