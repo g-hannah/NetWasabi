@@ -17,7 +17,7 @@ static inline int __wr_cache_next_free_idx(wr_cache_t *cachep)
 	int capacity = cachep->capacity;
 	int idx = 0;
 
-	while (bm && (*bm & bit))
+	while (*bm & bit)
 	{
 		bit <<= 1;
 
@@ -131,9 +131,9 @@ wr_cache_create(char *name,
 	int bitmap_size;
 	int	i;
 
-	bitmap_size = (size / 8);
+	bitmap_size = (capacity / 8);
 
-	if (size & 0x7)
+	if (capacity & 0x7)
 		++bitmap_size;
 
 	cachep->free_bitmap = wr_calloc(bitmap_size, 1);
@@ -226,53 +226,68 @@ wr_cache_alloc(wr_cache_t *cachep)
 	void *slot = NULL;
 	size_t objsize = cachep->objsize;
 	size_t cache_size = cachep->cache_size;
+	size_t new_size;
 	uint16_t bitmap_size = cachep->bitmap_size;
 	int idx = __wr_cache_next_free_idx(cachep);
-	int old_capacity;
+	int old_capacity = cachep->capacity;
 	int new_capacity;
 	int added_capacity;
 	int i;
-	size_t slack = 0;
 	unsigned char *bm;
 
-	if (idx != -1)
+/*
+ * Our bitmap can be deceiving and an index may be return
+ * because it found a zero-bit but in fact that has gone
+ * beyond the capacity of the cache.
+ */
+	if (idx != -1 && idx < old_capacity)
 	{
+		assert(idx < old_capacity);
 		slot = (void *)((char *)cache + (idx * objsize));
 		__wr_cache_mark_used(cachep, idx);
 		WR_CACHE_DEC_FREE(cachep);
+		assert(wr_cache_nr_used(cachep) > 0);
 		return slot;
 	}
 	else
 	{
+		new_size = cache_size * 2;
+
 		old_capacity = cachep->capacity;
-		new_capacity = (old_capacity * 2);
-
-		slack = ((cache_size * 2) % objsize);
-
-		if (slack > objsize)
-		{
-			while (slack > objsize)
-			{
-				++new_capacity;
-				--slack;
-			}
-		}
-
+		new_capacity = (new_size / objsize);
 		added_capacity = (new_capacity - old_capacity);
+
+		fprintf(stderr,
+			"doubling cache size to %lu bytes\n"
+			"old_capacity=%d\n"
+			"new_capacity=%d\n"
+			"added_capacity=%d\n",
+			new_size,
+			old_capacity,
+			new_capacity,
+			added_capacity);
 
 		cachep->cache = wr_realloc(cachep->cache, cache_size * 2);
 		cachep->free_bitmap = wr_realloc(cachep->free_bitmap, bitmap_size * 2);
 
-		bm = (cachep->free_bitmap + bitmap_size);
+		assert(cachep->cache);
+		assert(cachep->free_bitmap);
 
+		cachep->nr_free += added_capacity;
+		cachep->capacity += added_capacity;
+		cachep->cache_size = new_size;
+
+		bm = (cachep->free_bitmap + bitmap_size);
 		for (i = 0; i < bitmap_size; ++i)
 			*bm++ = 0;
 
+		cachep->bitmap_size *= 2;
+
 		if (cachep->ctor)
 		{
-			slot = (void *)((char *)cache + (objsize * old_capacity));
+			slot = (void *)((char *)cachep->cache + (objsize * old_capacity));
 
-			for (i = 0; (size_t)i < added_capacity; ++i)
+			for (i = 0; i < added_capacity; ++i)
 			{
 				cachep->ctor(slot);
 				slot = (void *)((char *)slot + objsize);
@@ -281,7 +296,9 @@ wr_cache_alloc(wr_cache_t *cachep)
 
 		idx = __wr_cache_next_free_idx(cachep);
 		slot = (void *)((char *)cachep->cache + (idx * objsize));
+		__wr_cache_mark_used(cachep, idx);
 		WR_CACHE_DEC_FREE(cachep);
+		assert(wr_cache_nr_used(cachep) > 0);
 		return slot;
 	}
 
@@ -306,6 +323,7 @@ wr_cache_dealloc(wr_cache_t *cachep, void *slot)
 
 	__wr_cache_mark_unused(cachep, obj_off);
 	WR_CACHE_INC_FREE(cachep);
+	assert(wr_cache_nr_used(cachep) >= 0);
 
 	return;
 }
@@ -321,7 +339,9 @@ wr_cache_clear_all(wr_cache_t *cachep)
 
 	for (i = 0; i < capacity; ++i)
 	{
-		wr_cache_dealloc(cachep, obj);
+		if (wr_cache_obj_used(cachep, obj))
+			wr_cache_dealloc(cachep, obj);
+
 		obj = (void *)((char *)obj + cachep->objsize);
 	}
 
