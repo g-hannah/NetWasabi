@@ -1,4 +1,5 @@
 #include <assert.h>
+#include <errno.h>
 #include <fcntl.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -29,6 +30,31 @@ do { \
 				free((PTR)[i]);\
 		}\
 		free((PTR));\
+	}\
+} while (0)
+
+#define MATRIX_CHECK_CAPACITY(PTR, CUR_IDX, NUM, SIZE, TYPE)\
+do {\
+	size_t ____i;\
+	size_t ____old_size;\
+	if ((PTR))\
+	{\
+		if ((CUR_IDX) >= (NUM))\
+		{\
+			____old_size = (NUM);\
+			(NUM) *= 2;\
+			(PTR) = realloc((PTR), ((NUM) * sizeof(TYPE *)));\
+			fprintf(stderr,\
+				"num=%lu\n"\
+				"old_size=%lu\n",\
+				(NUM),\
+				____old_size);\
+			for (____i = ____old_size; ____i < (NUM); ++____i)\
+			{\
+				(PTR)[____i] = NULL;\
+				(PTR)[____i] = calloc((SIZE), sizeof(TYPE));\
+			}\
+		}\
 	}\
 } while (0)
 		
@@ -82,6 +108,44 @@ static char *__ignore_tokens__[] =
 	NULL
 };
 
+static int
+__local_archive_exists(char *link, char *host)
+{
+	buf_t tmp;
+	int path_max = 0;
+	int exists = 0;
+	char *home;
+
+	path_max = pathconf("/", _PC_PATH_MAX);
+	if (path_max == 0)
+		path_max = 1024;
+
+	buf_init(&tmp, path_max);
+
+	home = getenv("HOME");
+
+	buf_append(&tmp, home);
+	buf_append(&tmp, "/" WEBREAPER_DIR "/");
+	buf_append(&tmp, host);
+	buf_append(&tmp, link);
+	buf_append(&tmp, ".html");
+
+#ifdef DEBUG
+	printf("CHECKING LOCAL PATH %s\n", tmp.buf_head);
+#endif
+
+	exists = access(tmp.buf_head, F_OK);
+
+	buf_destroy(&tmp);
+
+	if (exists == 0)
+		return 1;
+	else
+		return 0;
+}
+
+#define DEFAULT_MATRIX_SIZE 256
+
 int
 parse_links(wr_cache_t *cachep, buf_t *buf, char *host)
 {
@@ -95,13 +159,12 @@ parse_links(wr_cache_t *cachep, buf_t *buf, char *host)
 	int						nr = 0;
 	size_t url_len = 0;
 	size_t max_len = (HTTP_URL_MAX - strlen("https://"));
-	size_t old_size = 0;
-	size_t cur_size = 256;
-	size_t aidx = 0;
+	size_t cur_size = DEFAULT_MATRIX_SIZE;
+	int aidx = 0;
 	int i;
 	int ignore = 0;
 
-	MATRIX_INIT(url_links, cur_size, HTTP_URL_MAX, char);
+	MATRIX_INIT(url_links, cur_size, max_len, char);
 
 	savep = buf->buf_head;
 
@@ -145,7 +208,10 @@ parse_links(wr_cache_t *cachep, buf_t *buf, char *host)
 			continue;
 		}
 
-		assert(url_len < HTTP_URL_MAX);
+		MATRIX_CHECK_CAPACITY(url_links, aidx, cur_size, HTTP_URL_MAX, char);
+
+		assert(url_len < max_len);
+		assert(aidx < cur_size);
 		strncpy(url_links[aidx], savep, url_len);
 		url_links[aidx][url_len] = 0;
 
@@ -168,27 +234,14 @@ parse_links(wr_cache_t *cachep, buf_t *buf, char *host)
 			continue;
 		}
 
-		++aidx;
-
-		if (aidx >= cur_size)
+		if (__local_archive_exists(url_links[aidx], host))
 		{
-			old_size = cur_size;
-			cur_size *= 2;
-
-			url_links = realloc(url_links, (cur_size * sizeof(char *)));
-
-			if (!url_links)
-				goto out_free_links;
-
-			for (i = old_size; i < cur_size; ++i)
-				url_links[i] = NULL;
-
-			for (i = old_size; i < cur_size; ++i)
-				url_links[i] = calloc(HTTP_URL_MAX, 1);
+			savep = ++p;
+			continue;
 		}
 
 		savep = ++p;
-
+		++aidx;
 		++nr;
 	}
 
@@ -198,15 +251,24 @@ parse_links(wr_cache_t *cachep, buf_t *buf, char *host)
 
 	nr -= removed;
 
+	assert(nr < cur_size);
+	fprintf(stderr, "parsed %d links\n", nr);
+
 	for (i = 0; i < nr; ++i)
 	{
 		hl = (http_link_t *)wr_cache_alloc(cachep);
+
+		assert(hl);
+		assert(hl->url);
+		assert(wr_cache_obj_used(cachep, (void *)hl));
+
+		fprintf(stderr, "allocated obj #%d\n", (i+1));
 
 		if (!hl)
 			goto out_free_links;
 
 		url_len = strlen(url_links[i]);
-		assert(url_len < HTTP_URL_MAX);
+		assert(url_len < max_len);
 		strncpy(hl->url, url_links[i], url_len);
 		hl->url[url_len] = 0;
 		hl->nr_requests = 0;
