@@ -23,6 +23,7 @@
 #define HTTP_URL_MAX	256
 #define HTTP_COOKIE_MAX 1024 /* Surely this is more than enough */
 #define HTTP_HNAME_MAX 64 /* Header name */
+#define HTTP_HOST_MAX 64
 
 #define HTTP_GET		"GET"
 #define HTTP_HEAD		"HEAD"
@@ -37,6 +38,25 @@
 
 #define HTTP_PORT_NR	80
 #define HTTPS_PORT_NR 443
+
+#define HTTP_SKIP_HOST_PART(PTR, URL)\
+do {\
+	if (!strncmp("http", (URL), 4))\
+	{\
+		(PTR) = (URL) + strlen("http://");\
+		if ((*PTR) == '/')\
+			++(PTR);\
+	}\
+	else\
+	{\
+		(PTR) = (URL);\
+	}\
+	while ((*PTR) == '/')\
+		++(PTR);\
+	char *____s_p = (PTR);\
+	char *____e_p = ((URL) + strlen((URL)));\
+	(PTR) = memchr(____s_p, '/', (____e_p - ____s_p));\
+} while (0)
 
 typedef struct http_link_t
 {
