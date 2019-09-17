@@ -13,6 +13,11 @@
 #include "buffer.h"
 #include "malloc.h"
 
+#ifdef DEBUG
+	static void *__old;
+	static void *__new;
+#endif
+
 static inline void
 __buf_reset_head(buf_t *buf)
 {
@@ -124,11 +129,24 @@ buf_extend(buf_t *buf, size_t by)
 	tail_off = buf->buf_tail - buf->data;
 	head_off = buf->buf_head - buf->data;
 
+#ifdef DEBUG
+	__old = buf->data;
+#endif
+
 	if (!(buf->data = realloc(buf->data, new_size)))
 	{
 		fprintf(stderr, "buf_extend: realloc error (%s)\n", strerror(errno));
 		return -1;
 	}
+
+#ifdef DEBUG
+	__new = buf->data;
+
+	if (__old != __new)
+	{
+		fprintf(stderr, "MEMORY WAS MOVED TO ANOTHER LOCATION ON HEAP (OLD=%p ; NEW=%p)\n", __old, __new);
+	}
+#endif
 
 	buf->buf_end = (buf->data + new_size);
 	buf->buf_head = (buf->data + head_off);
