@@ -17,7 +17,7 @@
 #include "robots.h"
 #include "webreaper.h"
 
-#define SLEEP_TIME	2
+#define SLEEP_TIME	3
 
 static int get_opts(int, char *[]) __nonnull((2)) __wur;
 
@@ -26,6 +26,10 @@ static int get_opts(int, char *[]) __nonnull((2)) __wur;
  */
 uint32_t runtime_options = 0;
 wr_cache_t *http_hcache;
+wr_cache_t *http_lcache;
+wr_cache_t *cookies;
+static char PRIMARY_HOST[HTTP_HOST_MAX];
+static size_t PRIMARY_HOST_LEN = 0;
 
 /*
  * Catch SIGINT
@@ -60,6 +64,422 @@ __print_prog_info(void)
 	return;
 }
 
+static int
+__includes_host(char *url)
+{
+	assert(url);
+
+	size_t url_len = strlen(url);
+
+	if (memchr(url, '.', url_len))
+		return 1;
+	else
+		return 0;
+}
+
+static void
+__extract_cookie_info(struct http_cookie_t *dest, http_header_t *src)
+{
+	assert(dest);
+	assert(src);
+
+	strncpy(dest->data, src->value, src->vlen);
+	dest->data[src->vlen] = 0;
+	dest->data_len = src->vlen;
+
+	char *p;
+	char *e;
+	char *s = dest->data;
+
+	p = strstr(s, "path");
+
+	if (p)
+	{
+		p += strlen("path=");
+		e = memchr(p, ';', dest->data_len - (p - s));
+
+		/*
+		 * Some seem to end with "path=/" and no semi-colon...
+		 */
+		if (!e)
+			e = memchr(p, 0x0d, dest->data_len - (p - s));
+
+		if (e)
+		{
+			strncpy(dest->path, p, (e - p));
+			dest->path_len = (e - p);
+			dest->path[dest->path_len] = 0;
+		}
+	}
+	else
+	{
+		dest->path[0] = 0;
+	}
+
+	p = strstr(s, "domain");
+
+	if (p)	
+	{
+		p += strlen("domain=");
+		e = memchr(p, ';', dest->data_len - (p - s));
+
+		strncpy(dest->domain, p, (e - p));
+		dest->domain_len = (e - p);
+		dest->domain[dest->domain_len] = 0;
+	}
+	else
+	{
+		dest->domain[0] = 0;
+	}
+
+	p = strstr(s, "expires");
+
+	if (p)
+	{
+		p += strlen("expires=");
+		e = memchr(p, ';', dest->data_len - (p - s));
+
+		strncpy(dest->expires, p, (e - p));
+		dest->expires_len = (e - p);
+		dest->expires[dest->expires_len] = 0;
+	}
+	else
+	{
+		dest->expires[0] = 0;
+	}
+
+	dest->expires_ts = (time(NULL) + ((time_t)86400 * 7));
+
+	return;
+}
+
+/**
+ * __check_cookies - check for Set-Cookie headers; extract and append to outgoing header if any
+ * @conn: struct holding connection context
+ */
+static void
+__check_cookies(connection_t *conn)
+{
+	assert(conn);
+
+	off_t offset = 0;
+	struct http_cookie_t *cookie = NULL;
+	http_header_t *tmp;
+
+	/*
+	 * If there is a Set-Cookie header, then clear all
+	 * previously-cached cookies. Otherwise, if no such
+	 * header and we have cached cookies, append them
+	 * to the buffer. Otherwise, do nothing.
+	 */
+	if (http_check_header(&conn->read_buf, "Set-Cookie", (off_t)0, &offset))
+	{
+		printf("Clearing old cookies\n");
+		wr_cache_clear_all(cookies);
+		offset = 0;
+
+		tmp = (http_header_t *)wr_cache_alloc(http_hcache);
+
+		while(http_check_header(&conn->read_buf, "Set-Cookie", offset, &offset))
+		{
+			http_fetch_header(&conn->read_buf, "Set-Cookie", tmp, offset);
+			http_append_header(&conn->write_buf, tmp);
+
+			cookie = (struct http_cookie_t *)wr_cache_alloc(cookies);
+
+			__extract_cookie_info(cookie, tmp);
+
+			++offset;
+			printf("Appended cookie:\n\n"
+				"domain=%s\n"
+				"path=%s\n"
+				"expires=%s\n",
+				cookie->domain,
+				cookie->path,
+				cookie->expires);
+		}
+	}
+	else
+	{
+		int nr_used = wr_cache_nr_used(cookies);
+		int i;
+
+		if (!nr_used)
+			return;
+
+		tmp = (http_header_t *)wr_cache_alloc(http_hcache);
+
+		cookie = (struct http_cookie_t *)cookies->cache;
+
+		printf("Appending %d saved cookies\n", nr_used);
+		for (i = 0; i < nr_used; ++i)
+		{
+			while (!wr_cache_obj_used(cookies, (void *)cookie))
+				++cookie;
+
+#if 0
+			if (__cookie_expired(cookie))
+			{
+				printf("cookie \"%s\" expired\n", cookie->data);
+				wr_cache_dealloc(cookies, (void *)cookie);
+				++cookie;
+			}
+#endif
+
+			strncpy(tmp->value, cookie->data, cookie->data_len);
+			tmp->value[cookie->data_len] = 0;
+			tmp->vlen = cookie->data_len;
+			strcpy(tmp->name, "Cookie");
+
+			http_append_header(&conn->write_buf, tmp);
+
+			++cookie;
+		}
+	}
+
+	wr_cache_dealloc(http_hcache, (void *)tmp);
+
+	return;
+}
+
+static void
+__show_request_header(buf_t *buf)
+{
+	assert(buf);
+
+	fprintf(stderr, "%s", buf->buf_head);
+	return;
+}
+
+static void
+__show_response_header(buf_t *buf)
+{
+	assert(buf);
+
+	char *p = strstr(buf->buf_head, HTTP_EOH_SENTINEL);
+
+	if (!p)
+	{
+		fprintf(stderr, "__show_response_header: failed to find end of HTTP header\n");
+		errno = EPROTO;
+		return;
+	}
+
+	p += strlen(HTTP_EOH_SENTINEL);
+	fprintf(stderr, "%.*s", (int)(p - buf->buf_head), buf->buf_head);
+
+	return;
+}
+
+static void
+__adjust_host_and_page(connection_t *conn)
+{
+	assert(conn);
+
+	char *host_dup;
+	char *p;
+	char *e;
+	buf_t tmp;
+	int got_host = 0;
+	size_t http_len = strlen("http://");
+	size_t https_len = strlen("https://");
+
+	buf_init(&tmp, HTTP_URL_MAX);
+
+	if (__includes_host(conn->page))
+	{
+		got_host = 1;
+		host_dup = wr_strdup(conn->host);
+		http_parse_host(conn->page, conn->host);
+
+		fprintf(stderr, "PARSED HOST = %s\n", conn->host);
+
+		if (strcmp(host_dup, conn->host))
+		{
+			fprintf(stderr, "DIFFERENT HOST - RECONNECTING\n");
+			fprintf(stderr, "host=%s ; page=%s\n", conn->host, conn->page);
+			wr_cache_clear_all(cookies);
+			reconnect(conn);
+		}
+
+		free(host_dup);
+		host_dup = NULL;
+	}
+	else
+	{
+		if (strcmp(conn->host, PRIMARY_HOST))
+		{
+			fprintf(stderr, "RECOPYING PRIMARY HOST\n");
+			strncpy(conn->host, PRIMARY_HOST, PRIMARY_HOST_LEN);
+			conn->host[PRIMARY_HOST_LEN] = 0;
+		}
+	}
+
+	if (!strncmp("http", conn->page, 4)) // then we have the full link */
+		goto out_free_buf;
+
+	if (option_set(OPT_USE_TLS))
+		buf_append(&tmp, "https://");
+	else
+		buf_append(&tmp, "http://");
+
+	if (!got_host)
+		buf_append(&tmp, conn->host);
+
+	buf_append(&tmp, conn->page);
+
+	if (!strncmp("http://", tmp.buf_head, http_len))
+	{
+		p = tmp.buf_head + http_len;
+		e = p;
+
+		while (*e == '/')
+			++e;
+
+		if (e - p)
+			buf_collapse(&tmp, (off_t)(p - tmp.buf_head), (e - p));
+	}
+	else
+	{
+		p = tmp.buf_head + https_len;
+		e = p;
+
+		while (*e == '/')
+			++e;
+
+		if (e - p)
+			buf_collapse(&tmp, (off_t)(p - tmp.buf_head), (e - p));
+	}
+
+	strncpy(conn->page, tmp.buf_head, tmp.data_len);
+	conn->page[tmp.data_len] = 0;
+
+	out_free_buf:
+	buf_destroy(&tmp);
+
+	return;
+}
+
+static int
+__send_head_request(connection_t *conn)
+{
+	assert(conn);
+
+	buf_t *wbuf = &conn->write_buf;
+	buf_t *rbuf = &conn->read_buf;
+	char *tmp_cbuf = NULL;
+	int status_code = 0;
+
+	buf_clear(wbuf);
+
+	__adjust_host_and_page(conn);
+
+	if (!(tmp_cbuf = wr_calloc(8192, 1)))
+		goto fail_free_bufs;
+
+	sprintf(tmp_cbuf,
+			"HEAD %s HTTP/%s\r\n"
+			"User-Agent: %s\r\n"
+			"Host: %s%s",
+			conn->page, HTTP_VERSION,
+			HTTP_USER_AGENT,
+			conn->host, HTTP_EOH_SENTINEL);
+
+	buf_append(wbuf, tmp_cbuf);
+
+	__check_cookies(conn);
+
+	free(tmp_cbuf);
+	tmp_cbuf = NULL;
+
+	if (option_set(OPT_SHOW_REQ_HEADER))
+		__show_request_header(wbuf);
+
+	if (http_send_request(conn) < 0)
+		goto fail;
+
+	if (http_recv_response(conn) < 0)
+		goto fail;
+
+	if (option_set(OPT_SHOW_RES_HEADER))
+		__show_response_header(rbuf);
+
+	status_code = http_status_code_int(rbuf);
+
+	return status_code;
+
+	fail_free_bufs:
+	if (tmp_cbuf)
+	{
+		free(tmp_cbuf);
+		tmp_cbuf = NULL;
+	}
+
+	fail:
+	return -1;
+}
+
+static int
+__send_get_request(connection_t *conn)
+{
+	assert(conn);
+
+	buf_t *wbuf = &conn->write_buf;
+	buf_t *rbuf = &conn->read_buf;
+	char *tmp_cbuf = NULL;
+	int status_code = 0;
+
+	buf_clear(wbuf);
+
+	__adjust_host_and_page(conn);
+
+	if (!(tmp_cbuf = wr_calloc(8192, 1)))
+		goto fail_free_bufs;
+
+	sprintf(tmp_cbuf,
+			"GET %s HTTP/%s\r\n"
+			"User-Agent: %s\r\n"
+			"Host: %s\r\n"
+			"Connection: keep-alive%s",
+			conn->page, HTTP_VERSION,
+			HTTP_USER_AGENT,
+			conn->host,
+			HTTP_EOH_SENTINEL);
+
+	buf_append(wbuf, tmp_cbuf);
+
+	__check_cookies(conn);
+
+	free(tmp_cbuf);
+	tmp_cbuf = NULL;
+
+	if (option_set(OPT_SHOW_REQ_HEADER))
+		__show_request_header(wbuf);
+
+	if (http_send_request(conn) < 0)
+		goto fail;
+
+	if (http_recv_response(conn) < 0)
+		goto fail;
+
+	if (option_set(OPT_SHOW_RES_HEADER))
+		__show_response_header(rbuf);
+
+	status_code = http_status_code_int(rbuf);
+
+	return status_code;
+
+	fail_free_bufs:
+	if (tmp_cbuf)
+	{
+		free(tmp_cbuf);
+		tmp_cbuf = NULL;
+	}
+
+	fail:
+	return -1;
+}
+
 static void
 __normalise_filename(char *filename)
 {
@@ -75,10 +495,10 @@ __normalise_filename(char *filename)
 
 	if (!strncmp("http", tmp.buf_head, 4))
 	{
-		if (!strncmp("https", tmp.buf_head, 5))
-			p = (tmp.buf_head + strlen("https://"));
-		else
-			p = (tmp.buf_head + strlen("http://"));
+		p = (tmp.buf_head + strlen("http://"));
+
+		if (*p == '/')
+			++p;
 
 		buf_collapse(&tmp, (off_t)0, (p - tmp.buf_head));
 	}
@@ -88,8 +508,7 @@ __normalise_filename(char *filename)
 
 	while (p < end)
 	{
-		if (*p == 0x20
-		|| (*p != 0x5f && !isalpha(*p) && !isdigit(*p)))
+		if (*p == 0x20)
 		{
 			*p++ = 0x5f;
 
@@ -117,6 +536,76 @@ __normalise_filename(char *filename)
 }
 
 static int
+__check_local_dirs(char *filename)
+{
+	assert(filename);
+
+	char *p;
+	char *e;
+	char *end;
+	size_t len;
+	buf_t tmp;
+
+	len = strlen(filename);
+
+	if (filename[len-1] == '/')
+		filename[--len] = 0;
+
+	end = (filename + len);
+	buf_init(&tmp, len+1);
+	p = strstr(filename, WEBREAPER_DIR);
+
+	if (!p)
+	{
+		fprintf(stderr, "__check_local_dirs: failed to find webreaper directory in caller's filename\n");
+		errno = EPROTO;
+		return -1;
+	}
+
+	e = ++p;
+
+	e = memchr(p, '/', (end - p));
+
+	if (!e)
+	{
+		fprintf(stderr, "__check_local_dirs: failed to find necessary '/' character in caller's filename\n");
+		errno = EPROTO;
+		return -1;
+	}
+
+	p = ++e;
+
+/*
+ * e.g. /home/johndoe/WR_Reaped/favourite-site.com/categories/best-rated
+ *                              ^start here, work along to end, checking
+ * creating a directory for each part if necessary.
+ */
+
+	while (e < end)
+	{
+		e = memchr(p, '/', (end - p));
+
+		if (!e) /* The rest of the filename is the file itself */
+			break;
+
+		buf_append_ex(&tmp, filename, (e - filename));
+
+		BUF_NULL_TERMINATE(&tmp);
+
+		if (access(tmp.buf_head, F_OK) != 0)
+		{
+			mkdir(tmp.buf_head, S_IRWXU);
+			printf("@@@ Created local dir %s\n", tmp.buf_head);
+		}
+
+		p = ++e;
+		buf_clear(&tmp);
+	}
+
+	return 0;
+}
+
+static int
 __archive_page(connection_t *conn)
 {
 	int fd = -1;
@@ -141,20 +630,32 @@ __archive_page(connection_t *conn)
 	home = getenv("HOME");
 	buf_append(&tmp, home);
 	buf_append(&tmp, "/" WEBREAPER_DIR "/");
+	if (!strstr(filename, conn->host))
+		buf_append(&tmp, conn->host);
 	buf_append(&tmp, filename);
+
+	if (__check_local_dirs(tmp.buf_head) < 0)
+		goto out_free;
+
+	if (access(tmp.buf_head, F_OK) == 0)
+	{
+		printf("%s!!! Already archived %s%s\n", COL_RED, tmp.buf_head, COL_END);
+		goto out;
+	}
 
 	fd = open(tmp.buf_head, O_RDWR|O_CREAT|O_TRUNC, S_IRUSR|S_IWUSR);
 	if (fd == -1)
 		goto out_free;
 
 #ifdef DEBUG
-	printf("Created file %s\n", tmp.buf_head);
+	printf("%s@@@ Created file %s%s\n", COL_GREEN, tmp.buf_head, COL_END);
 #endif
 
 	buf_write_fd(fd, buf);
 	close(fd);
 	fd = -1;
 
+	out:
 	free(filename);
 	buf_destroy(&tmp);
 	return 0;
@@ -163,117 +664,6 @@ __archive_page(connection_t *conn)
 	free(filename);
 	buf_destroy(&tmp);
 
-	return -1;
-}
-
-/**
- * __check_cookies - check for Set-Cookie headers; extract and append to outgoing header if any
- * @conn: struct holding connection context
- */
-static void
-__check_cookies(connection_t *conn)
-{
-	assert(conn);
-
-	off_t offset = 0;
-	http_header_t *cookie = NULL;
-	http_header_t *hp = NULL;
-
-	/*
-	 * If there is a Set-Cookie header, then clear all
-	 * previously-cached cookies. Otherwise, if no such
-	 * header and we have cached cookies, append them
-	 * to the buffer. Otherwise, do nothing.
-	 */
-	if (http_check_header(&conn->read_buf, "Set-Cookie", (off_t)0, &offset))
-	{
-		printf("Clearing old cookies\n");
-		wr_cache_clear_all(http_hcache);
-		offset = 0;
-
-		while(http_check_header(&conn->read_buf, "Set-Cookie", offset, &offset))
-		{
-			cookie = (http_header_t *)wr_cache_alloc(http_hcache);
-			http_fetch_header(&conn->read_buf, "Set-Cookie", cookie, offset);
-			http_append_header(&conn->write_buf, cookie);
-			++offset;
-			printf("Appended cookie=%s\n", cookie->value);
-		}
-	}
-	else
-	{
-		int nr_used = wr_cache_nr_used(http_hcache);
-		int i;
-
-		if (!nr_used)
-			return;
-
-		hp = (http_header_t *)http_hcache->cache;
-
-		printf("Appending %d saved cookies\n", nr_used);
-		for (i = 0; i < nr_used; ++i)
-		{
-			while (!wr_cache_obj_used(http_hcache, (void *)hp))
-				++hp;
-
-			if (strncmp("Cookie", hp->name, hp->nlen))
-			{
-				++hp;
-				continue;
-			}
-
-			http_append_header(&conn->write_buf, hp);
-			++hp;
-		}
-	}
-
-	return;
-}
-
-static int
-__do_request(connection_t *conn)
-{
-	assert(conn);
-
-	int status_code = 0;
-
-	http_build_request_header(conn, HTTP_GET, conn->page);
-
-	/*
-	 * Will append cached or new cookies.
-	 */
-	__check_cookies(conn);
-
-	if (option_set(OPT_SHOW_REQ_HEADER))
-		printf("%s", conn->write_buf.buf_head);
-
-	if (http_send_request(conn) < 0)
-	{
-		fprintf(stderr, "__do_request: failed to send HTTP request (%s)\n", strerror(errno));
-		goto fail;
-	}
-
-	buf_clear(&conn->read_buf);
-
-	if (http_recv_response(conn) < 0)
-	{
-		fprintf(stderr, "__do_request: failed to receive HTTP response (%s)\n", strerror(errno));
-		goto fail;
-	}
-
-	if (option_set(OPT_SHOW_RES_HEADER))
-	{
-		char *p = strstr(conn->read_buf.buf_head, HTTP_EOH_SENTINEL);
-		p += strlen(HTTP_EOH_SENTINEL);
-
-		printf("%.*s", (int)(p - conn->read_buf.buf_head), conn->read_buf.buf_head);
-	}
-
-	status_code = http_status_code_int(&conn->read_buf);
-
-	return status_code;
-
-	fail:
 	return -1;
 }
 
@@ -310,85 +700,49 @@ __handle301(connection_t *conn)
 	return 0;
 }
 
-#if 0
 static int
-__same_domain(char *url, char *current)
+__do_request(connection_t *conn)
 {
-	size_t url_len = strlen(url);
-	char *p = url;
-	char *end = (url + url_len);
-	static char tmp[HTTP_URL_MAX];
-
-	if (!strncmp(url, "http", 4))
-	{
-		end = memchr(url, '/', ((url + url_len) - url));
-		if (!end)
-			return 0;
-
-		end += 2;
-		p = end;
-
-		end = memchr(p, '/', ((url + url_len) - p));
-		if (!end)
-			end = (url + url_len);
-
-		p = url;
-
-		strncpy(tmp, p, (end - p));
-		tmp[end - p] = 0;
-	}
-	else
-	{
-		end = memchr(url, '/', ((url + url_len) - url));
-		if (!end)
-			end = (url + url_len);
-
-		strncpy(tmp, url, (end - url));
-		tmp[end - url] = 0;
-	}
-
-	if (!strcmp(current, tmp))
-		return 1;
-	else
-		return 0;
-}
-
-static int
-__switch_host(char *url, connection_t *conn)
-{
-	assert(url);
 	assert(conn);
 
-	shutdown(conn->sock, SHUT_RDWR);
-	
-	if (option_set(OPT_USE_TLS))
+	int status_code = 0;
+
+	/*
+	 * Save bandwidth: send HEAD first.
+	 */
+	resend_head:
+	status_code = __send_head_request(conn);
+
+	switch(status_code)
 	{
-		SSL_free(conn->ssl);
-		SSL_CTX_free(conn->ssl_ctx);
-		conn->ssl = NULL;
-		conn->ssl_ctx = NULL;
+		case HTTP_FOUND:
+		case HTTP_MOVED_PERMANENTLY:
+			__handle301(conn);
+			reconnect(conn);
+			goto resend_head;
+			break;
+		case HTTP_OK:
+			break;
+		default:
+			return status_code;
 	}
 
-	close(conn->sock);
-	conn->sock = -1;
+	/*
+	 * We only get here if 200 OK.
+	 *
+	 * With a HEAD request, the web server
+	 * terminates the connection since
+	 * only metadata is being requested.
+	 */
+	reconnect(conn);
 
-	memset(conn->host, 0, HTTP_URL_MAX);
-	memset(conn->page, 0, HTTP_URL_MAX);
+	status_code &= ~status_code;
+	buf_clear(&conn->write_buf);
 
-	http_parse_host(url, conn->host);
-	http_parse_page(url, conn->page);
+	status_code = __send_get_request(conn);
 
-	if (open_connection(conn) < 0)
-		goto fail;
-
-	printf("Connected to new host \"%s\"\n", conn->host);
-
-	return 0;
-
-	fail:
-	return -1;
+	return status_code;
 }
-#endif
 
 /**
  * __iterate_cached_links - archive the pages in the link cache,
@@ -403,13 +757,12 @@ __iterate_cached_links(wr_cache_t *cachep, connection_t *conn)
 	assert(cachep);
 	assert(conn);
 
-	//char *saved_host = wr_strdup(conn->host);
 	int nr_links = wr_cache_nr_used(cachep);
 	int status_code = 0;
 	int choice;
 	int i;
+	size_t len;
 	http_link_t *link;
-	buf_t tmp;
 
 	if (!nr_links && wr_cache_obj_used(cachep, cachep->cache))
 	{
@@ -424,9 +777,37 @@ __iterate_cached_links(wr_cache_t *cachep, connection_t *conn)
 		return -2;
 	}
 
-	buf_init(&tmp, HTTP_URL_MAX);
+	/*
+	 * Choose a random link that works to follow after
+	 * reaping all of the URLs in the list.
+	 */
+	while (HTTP_OK != status_code)
+	{
+		choice = (rand() % nr_links);
 
-	choice = (rand() % nr_links);
+		link = (http_link_t *)((char *)http_lcache->cache + (choice * cachep->objsize));
+		len = strlen(link->url);
+		strncpy(conn->page, link->url, len);
+		conn->page[len] = 0;
+
+		status_code = __send_head_request(conn);
+
+		switch (status_code)
+		{
+			case HTTP_OK:
+				break;
+			case HTTP_MOVED_PERMANENTLY:
+			case HTTP_FOUND:
+				__handle301(conn);
+				reconnect(conn);
+				break;
+			default:
+				return status_code;
+		}
+	}
+
+	fprintf(stderr, "FOUND WORKING LINK TO FOLLOW NEXT %s\n", link->url);
+	wr_cache_clear_all(cookies);
 
 	link = (http_link_t *)cachep->cache;
 
@@ -439,33 +820,13 @@ __iterate_cached_links(wr_cache_t *cachep, connection_t *conn)
 		}
 
 		sleep(SLEEP_TIME);
-
 		buf_clear(&conn->write_buf);
-		buf_clear(&tmp);
 
-#if 0
-		if (!(__same_domain(link->url, saved_host)))
-		{
-			printf("New domain - switching host (old=%s ; new=%s)\n", saved_host, link->url);
+		len = strlen(link->url);
+		strncpy(conn->page, link->url, len);
+		conn->page[len] = 0;
 
-			if (__switch_host(link->url, conn) < 0)
-				goto fail;
-
-			free(saved_host);
-			saved_host = NULL;
-			saved_host = wr_strdup(conn->host);
-		}
-#endif
-
-		if (!strstr(conn->host, "http"))
-			buf_append(&tmp, "https://");
-
-		buf_append(&tmp, conn->host);
-		buf_append(&tmp, link->url);
-		BUF_NULL_TERMINATE(&tmp);
-
-		strncpy(conn->page, tmp.buf_head, tmp.data_len);
-		conn->page[tmp.data_len] = 0;
+		__adjust_host_and_page(conn);
 
 		resend:
 		if (link->nr_requests > 2) /* loop */
@@ -500,7 +861,7 @@ __iterate_cached_links(wr_cache_t *cachep, connection_t *conn)
 				goto out_release_dup_str;
 		}
 
-		printf("Archiving %s\n", conn->page);
+		fprintf(stderr, "Archiving %s\n", conn->page);
 		__archive_page(conn);
 
 		next:
@@ -509,11 +870,9 @@ __iterate_cached_links(wr_cache_t *cachep, connection_t *conn)
 
 	//free(saved_host);
 	//saved_host = NULL;
-	buf_destroy(&tmp);
 	return choice;
 
 	out_release_dup_str:
-	buf_destroy(&tmp);
 	//free(saved_host);
 	//saved_host = NULL;
 
@@ -530,6 +889,7 @@ catch_signal(int signo)
 	siglongjmp(main_env, 1);
 }
 
+#if 0
 static void
 __dump_links(wr_cache_t *cachep)
 {
@@ -549,6 +909,7 @@ __dump_links(wr_cache_t *cachep)
 
 	return;
 }
+#endif
 
 static void
 __check_directory(void)
@@ -607,23 +968,27 @@ main(int argc, char *argv[])
 	__check_directory();
 
 	connection_t conn;
-	http_state_t http_state;
 	http_link_t *link = NULL;
-	wr_cache_t *http_lcache = NULL;
 	int status_code;
 	int choice = 0;
-
-	clear_struct(&http_state);
-	http_state.base_page = wr_strdup(argv[1]);
+	int _url_len = 0;
 
 	conn_init(&conn);
-	http_parse_host(http_state.base_page, conn.host);
-	http_parse_page(http_state.base_page, conn.page);
+
+	http_parse_host(argv[1], conn.host);
+
+	_url_len = strlen(argv[1]);
+	strncpy(conn.page, argv[1], _url_len);
+	conn.page[_url_len] = 0;
+
+	PRIMARY_HOST_LEN = strlen(conn.host);
+	strncpy(PRIMARY_HOST, conn.host, PRIMARY_HOST_LEN);
+	PRIMARY_HOST[PRIMARY_HOST_LEN] = 0;
 
 	fprintf(stderr,
-		"parsed host: %s\n"
-		"parsed page: %s\n",
-		conn.host,
+		"PRIMARY HOST = %s\n"
+		"PAGE         = %s\n",
+		PRIMARY_HOST,
 		conn.page);
 
 	/*
@@ -635,22 +1000,38 @@ main(int argc, char *argv[])
 	/*
 	 * Create a new cache for http_link_t objects.
 	 */
-	http_lcache = wr_cache_create("http_link_cache",
-							sizeof(http_link_t),
-							0,
-							wr_cache_http_link_ctor,
-							wr_cache_http_link_dtor);
+	http_lcache = wr_cache_create(
+			"http_link_cache",
+			sizeof(http_link_t),
+			0,
+			wr_cache_http_link_ctor,
+			wr_cache_http_link_dtor);
 
 	/*
-	 * Some websites require setting more than once cookie, so create
-	 * a cache for them so that it is easy to pass them around.
+	 * Create a cache for HTTP header fields.
 	 */
-	http_hcache = wr_cache_create("http_cookie_cache",
-							sizeof(http_header_t),
-							0,
-							wr_cache_http_cookie_ctor,
-							wr_cache_http_cookie_dtor);
+	http_hcache = wr_cache_create(
+			"http_header_field_cache",
+			sizeof(http_header_t),
+			0,
+			wr_cache_http_header_ctor,
+			wr_cache_http_header_dtor);
 
+	/*
+	 * Create a cache for cookies; separate cache because we want
+	 * a different struct to separate and easily access cookie
+	 * params (like domain, path, etc).
+	 */
+	cookies = wr_cache_create(
+			"cookie_cache",
+			sizeof(struct http_cookie_t),
+			0,
+			http_cookie_ctor,
+			http_cookie_dtor);
+
+	/*
+	 * Catch SIGINT and SIGQUIT so we can release cache memory, etc.
+	 */
 	if (sigsetjmp(main_env, 0) != 0)
 	{
 		fprintf(stderr, "%c%c%c%c%c%c", 0x08, 0x20, 0x08, 0x08, 0x20, 0x08);
@@ -662,12 +1043,16 @@ main(int argc, char *argv[])
 	{
 		loop_start:
 
+		/*
+		 * Would rather sleep between requests to avoid
+		 * having IP address banned by the server.
+		 */
 		sleep(SLEEP_TIME);
 
 		buf_clear(&conn.read_buf);
 		buf_clear(&conn.write_buf);
 
-		printf("Requesting %s from host %s\n", conn.page, conn.host);
+		printf(">>> %s%s%s <<<\n", COL_ORANGE, conn.page, COL_END);
 		status_code = __do_request(&conn);
 
 		switch(status_code)
@@ -679,38 +1064,52 @@ main(int argc, char *argv[])
 				__handle301(&conn);
 				goto loop_start;
 				break;
+			case HTTP_NOT_FOUND:
+				fprintf(stderr, "@@@ 404 Not Found\n");
+				goto out_disconnect;
 			case HTTP_BAD_REQUEST:
-				printf("400 Bad Request\n\n%.*s\n", (int)conn.write_buf.data_len, conn.write_buf.buf_head);
+				printf("@@@ 400 Bad Request\n"
+#ifdef DEBUG
+				"\n%.*s\n", (int)conn.write_buf.data_len, conn.write_buf.buf_head);
+#else
+				);
+#endif
 				goto out_disconnect;
 			default:
 				fprintf(stderr, "main: received HTTP status code %d\n", status_code);
 				goto out_disconnect;
 		}
 
-		printf("Archiving %s\n", conn.page);
+		fprintf(stderr, "Archiving %s\n", conn.page);
 		__archive_page(&conn);
 
-		/* http_parse_links(wr_cache_t *cachep, buf_t *buf, const char *host); */
+		/* parse_links(wr_cache_t *cachep, buf_t *buf, const char *host); */
 
-		printf("Extracting links from page\n");
+		fprintf(stderr, "Extracting links from page\n");
 		parse_links(http_lcache, &conn.read_buf, conn.host);
 
-		__dump_links(http_lcache);
-		putchar(0x0a);
-
+		/*
+		 * Choose one of the links at random (rand() MODULO #links)
+		 * to follow and proceed to extract links from its page
+		 */
 		choice = __iterate_cached_links(http_lcache, &conn);
-
-		break;
-
-		printf("choice=%d\n", choice);
 
 		if (choice < 0)
 			goto out_disconnect;
 
+#ifdef DEBUG
+		fprintf(stderr, "CHOSEN TO FOLLOW LINK #%d\n", choice);
+#endif
+
+		int nr_links = wr_cache_nr_used(http_lcache);
+
+		assert(nr_links > 0);
+		assert(choice < nr_links);
+
 		link = (http_link_t *)((char *)http_lcache->cache + (choice * http_lcache->objsize));
 
-		http_parse_host(link->url, conn.host);
-		http_parse_page(link->url, conn.page);
+		strncpy(conn.page, link->url, strlen(link->url));
+		conn.page[strlen(link->url)] = 0;
 
 		wr_cache_clear_all(http_lcache);
 	}
@@ -723,10 +1122,10 @@ main(int argc, char *argv[])
 
 	wr_cache_clear_all(http_lcache);
 	wr_cache_clear_all(http_hcache);
+	wr_cache_clear_all(cookies);
 	wr_cache_destroy(http_lcache);
 	wr_cache_destroy(http_hcache);
-
-	free(http_state.base_page);
+	wr_cache_destroy(cookies);
 
 	sigaction(SIGINT, &old_sigint, NULL);
 	sigaction(SIGQUIT, &old_sigquit, NULL);
@@ -739,8 +1138,10 @@ main(int argc, char *argv[])
 
 	wr_cache_clear_all(http_lcache);
 	wr_cache_clear_all(http_hcache);
+	wr_cache_clear_all(cookies);
 	wr_cache_destroy(http_lcache);
 	wr_cache_destroy(http_hcache);
+	wr_cache_destroy(cookies);
 
 	fail:
 	sigaction(SIGINT, &old_sigint, NULL);
