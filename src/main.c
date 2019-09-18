@@ -73,78 +73,6 @@ __print_prog_info(void)
 	return;
 }
 
-const char *__extensions[] =
-{
-	".css",
-	".js",
-	".php",
-	".ico",
-	".jpg",
-	".jpeg",
-	".png",
-	".gif",
-	".pdf",
-	".bmp",
-	".html",
-	".doc",
-	".docx",
-	".odt",
-	".txt",
-	NULL
-};
-
-#if 0
-static int
-__includes_host(char *url)
-{
-	assert(url);
-
-	size_t url_len = strlen(url);
-	char *p;
-	char *e;
-	char *end = url + url_len;
-	buf_t tmp;
-	int rv = 0;
-	int i;
-
-	buf_init(&tmp, HTTP_URL_MAX);
-
-	if (!strncmp("http", url, 4))
-		p = url + 4;
-
-	while (*p == '/')
-		++p;
-
-/*
- * /private_msg.php
- *
- * https://something.com/join.php
- *
- */
-
-	e = strrchr(url, '.');
-
-	if (!e)
-		goto out_free_buf;
-
-	for (i = 0; __extensions[i] != NULL; ++i)
-	{
-		if (!strcmp(__extensions[i], e))
-		{
-			end = e;
-			break;
-		}
-	}
-
-	if (memchr(url, '.', (end - url)))
-		rv = 1;
-
-	out_free_buf:
-	buf_destroy(&tmp);
-	return rv;
-}
-#endif
-
 static void
 __extract_cookie_info(struct http_cookie_t *dest, http_header_t *src)
 {
@@ -384,100 +312,6 @@ __check_host(connection_t *conn)
 
 	return;
 }
-
-#if 0
-static void
-__adjust_host_and_page(connection_t *conn)
-{
-	assert(conn);
-
-	char *p;
-	char *e;
-	buf_t tmp;
-	int got_host = 0;
-	size_t http_len = strlen("http://");
-	size_t https_len = strlen("https://");
-
-	buf_init(&tmp, HTTP_URL_MAX);
-
-	if (__new_host(conn->full_url))
-	{
-		got_host = 1;
-		http_parse_host(conn->full_url, conn->host);
-
-		fprintf(stderr, "New Host\n\nHost=%s\nPage=%s\nFull_URL=%s\n",
-			conn->host, conn->page, conn->full_url);
-
-		if (strcmp(host_dup, conn->host))
-		{
-			fprintf(stderr, "DIFFERENT HOST - RECONNECTING\n");
-			fprintf(stderr, "host=%s ; page=%s\n", conn->host, conn->page);
-			wr_cache_clear_all(cookies);
-			reconnect(conn);
-		}
-
-		free(host_dup);
-		host_dup = NULL;
-	}
-	else
-	{
-		if (strcmp(conn->host, PRIMARY_HOST))
-		{
-			fprintf(stderr, "RECOPYING PRIMARY HOST\n");
-			strncpy(conn->host, PRIMARY_HOST, PRIMARY_HOST_LEN);
-			conn->host[PRIMARY_HOST_LEN] = 0;
-		}
-	}
-
-	if (!strncmp("http", conn->page, 4)) // then we have the full link */
-		goto out_free_buf;
-
-	if (option_set(OPT_USE_TLS))
-		buf_append(&tmp, "https://");
-	else
-		buf_append(&tmp, "http://");
-
-	if (!got_host)
-		buf_append(&tmp, conn->host);
-
-	if (conn->page[0] != '/')
-		buf_append(&tmp, "/");
-
-	buf_append(&tmp, conn->page);
-
-	/* Remove extra slashes: e.g., https:////... */
-	if (!strncmp("http://", tmp.buf_head, http_len))
-	{
-		p = tmp.buf_head + http_len;
-		e = p;
-
-		while (*e == '/')
-			++e;
-
-		if (e - p)
-			buf_collapse(&tmp, (off_t)(p - tmp.buf_head), (e - p));
-	}
-	else
-	{
-		p = tmp.buf_head + https_len;
-		e = p;
-
-		while (*e == '/')
-			++e;
-
-		if (e - p)
-			buf_collapse(&tmp, (off_t)(p - tmp.buf_head), (e - p));
-	}
-
-	strncpy(conn->page, tmp.buf_head, tmp.data_len);
-	conn->page[tmp.data_len] = 0;
-
-	out_free_buf:
-	buf_destroy(&tmp);
-
-	return;
-}
-#endif
 
 static int
 __send_head_request(connection_t *conn)
@@ -763,7 +597,6 @@ __replace_with_local_urls(connection_t *conn, buf_t *buf)
 	while (1)
 	{
 		buf_clear(&url);
-		buf_clear(&path);
 
 		p = strstr(savep, "href=\"");
 
@@ -775,14 +608,17 @@ __replace_with_local_urls(connection_t *conn, buf_t *buf)
 
 		if (!url_end)
 		{
-			savep = ++p;
+			savep = ++url_start;
 			continue;
 		}
 
 		range = (url_end - url_start);
 
 		if (range >= HTTP_URL_MAX)
+		{
+			savep = ++url_end;
 			continue;
+		}
 
 		buf_append_ex(&url, url_start, range);
 		BUF_NULL_TERMINATE(&url);
@@ -792,18 +628,25 @@ __replace_with_local_urls(connection_t *conn, buf_t *buf)
 		if (range)
 		{
 			make_full_url(conn, &url, &full);
+#ifdef DEBUG
+			fprintf(stderr, "made full url: %s\n", full.buf_head);
+#endif
 
 			if (make_local_url(conn, &full, &path) == 0)
 			{
+#ifdef DEBUG
+				fprintf(stderr, "made local url: %s\n", path.buf_head);
+#endif
 				buf_collapse(buf, (off_t)(url_start - buf->buf_head), range);
 				tail = buf->buf_tail;
 
 				buf_shift(buf, (off_t)(url_start - buf->buf_head), path.data_len);
 				strncpy(url_start, path.buf_head, path.data_len);
+				tail = buf->buf_tail;
 			}
 		}
 
-		savep = ++p;
+		savep = ++url_end;
 	}
 }
 
