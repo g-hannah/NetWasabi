@@ -221,7 +221,7 @@ http_send_request(connection_t *conn)
 
 	buf_t *buf = &conn->write_buf;
 
-	if (conn_using_tls(conn))
+	if (option_set(OPT_USE_TLS))
 	{
 		if (buf_write_tls(conn_tls(conn), buf) == -1)
 		{
@@ -813,10 +813,13 @@ http_parse_page(char *url, char *page)
 	p = url;
 	q = endp;
 
-	if (*(endp - 1) == '/')
+	if (!TRAILING_SLASH)
 	{
-		--endp;
-		*endp = 0;
+		if (*(endp - 1) == '/')
+		{
+			--endp;
+			*endp = 0;
+		}
 	}
 
 	if (!strncmp("http", url, 4))
