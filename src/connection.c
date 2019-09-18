@@ -25,6 +25,8 @@ conn_init(connection_t *conn)
 	clear_struct(conn);
 	conn->host = wr_calloc(HTTP_URL_MAX+1, 1);
 	conn->page = wr_calloc(HTTP_URL_MAX+1, 1);
+	conn->full_url = wr_calloc(HTTP_URL_MAX+1, 1);
+	conn->primary_host = wr_calloc(HTTP_URL_MAX+1,1);
 
 	return;
 }
@@ -36,6 +38,9 @@ conn_destroy(connection_t *conn)
 
 	free(conn->host);
 	free(conn->page);
+	free(conn->full_url);
+	free(conn->primary_host);
+
 	clear_struct(conn);
 
 	return;
