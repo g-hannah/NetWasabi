@@ -31,6 +31,18 @@ wr_cache_t *cookies;
 static char PRIMARY_HOST[HTTP_HOST_MAX];
 static size_t PRIMARY_HOST_LEN = 0;
 
+#ifndef PATHMAX
+int PATHMAX = 0;
+
+static void
+__ctor __wr_init(void)
+{
+	PATHMAX = pathconf("/", _PC_PATH_MAX);
+	if (PATHMAX == 0)
+		PATHMAX = 1024;
+}
+#endif
+
 /*
  * Catch SIGINT
  */
@@ -123,6 +135,9 @@ __extract_cookie_info(struct http_cookie_t *dest, http_header_t *src)
 		p += strlen("domain=");
 		e = memchr(p, ';', dest->data_len - (p - s));
 
+		if (!e)
+			e = memchr(p, 0x0d, dest->data_len - (p - s));
+
 		strncpy(dest->domain, p, (e - p));
 		dest->domain_len = (e - p);
 		dest->domain[dest->domain_len] = 0;
@@ -138,6 +153,9 @@ __extract_cookie_info(struct http_cookie_t *dest, http_header_t *src)
 	{
 		p += strlen("expires=");
 		e = memchr(p, ';', dest->data_len - (p - s));
+
+		if (!e)
+			e = memchr(p, 0x0d, dest->data_len - (p - s));
 
 		strncpy(dest->expires, p, (e - p));
 		dest->expires_len = (e - p);
@@ -328,6 +346,7 @@ __adjust_host_and_page(connection_t *conn)
 
 	buf_append(&tmp, conn->page);
 
+	/* Remove extra slashes: e.g., https:////... */
 	if (!strncmp("http://", tmp.buf_head, http_len))
 	{
 		p = tmp.buf_head + http_len;
@@ -718,7 +737,7 @@ __do_request(connection_t *conn)
 		case HTTP_FOUND:
 		case HTTP_MOVED_PERMANENTLY:
 			__handle301(conn);
-			reconnect(conn);
+			reconnect(conn); /* server resets connection after HEAD */
 			goto resend_head;
 			break;
 		case HTTP_OK:
@@ -763,18 +782,17 @@ __iterate_cached_links(wr_cache_t *cachep, connection_t *conn)
 	int i;
 	size_t len;
 	http_link_t *link;
+	buf_t *wbuf = &conn->write_buf;
 
-	if (!nr_links && wr_cache_obj_used(cachep, cachep->cache))
-	{
-		fprintf(stderr,
-			"__iterate_cached_links: nr_used==0 && first object used...\n");
-		goto fail;
-	}
-	else
 	if (!nr_links)
 	{
-		printf("no links\n");
-		return -2;
+		fprintf(stderr, "__iterate_cached_links: no links\n");
+		return -1;
+	}
+	else
+	if (nr_links > 0)
+	{
+		assert(wr_cache_obj_used(cachep, cachep->cache));
 	}
 
 	/*
@@ -807,7 +825,7 @@ __iterate_cached_links(wr_cache_t *cachep, connection_t *conn)
 	}
 
 	fprintf(stderr, "FOUND WORKING LINK TO FOLLOW NEXT %s\n", link->url);
-	wr_cache_clear_all(cookies);
+	//wr_cache_clear_all(cookies);
 
 	link = (http_link_t *)cachep->cache;
 
@@ -820,7 +838,8 @@ __iterate_cached_links(wr_cache_t *cachep, connection_t *conn)
 		}
 
 		sleep(SLEEP_TIME);
-		buf_clear(&conn->write_buf);
+
+		buf_clear(wbuf);
 
 		len = strlen(link->url);
 		strncpy(conn->page, link->url, len);
@@ -832,7 +851,7 @@ __iterate_cached_links(wr_cache_t *cachep, connection_t *conn)
 		if (link->nr_requests > 2) /* loop */
 		{
 			++link;
-			printf("Skipping %s%s%s (infinite redirect loop)\n", COL_ORANGE, link->url, COL_END);
+			fprintf(stderr, "Skipping %s%s%s (infinite redirect loop)\n", COL_ORANGE, link->url, COL_END);
 			continue;
 		}
 
@@ -849,8 +868,12 @@ __iterate_cached_links(wr_cache_t *cachep, connection_t *conn)
 				break;
 			case HTTP_MOVED_PERMANENTLY:
 			case HTTP_FOUND:
-				__handle301(conn); /* can also handle 302 since both give Location header */
-				buf_clear(&conn->write_buf);
+			/*
+			 * Shouldn't get here, because __do_request() first
+			 * sends a HEAD request, and handles 301/302 for us.
+			 */
+				__handle301(conn);
+				buf_clear(wbuf);
 				goto resend;
 				break;
 			case HTTP_BAD_REQUEST:
@@ -858,7 +881,7 @@ __iterate_cached_links(wr_cache_t *cachep, connection_t *conn)
 				goto next;
 			default:
 				fprintf(stderr, "__iterate_cached_links: received HTTP status code %d\n", status_code);
-				goto out_release_dup_str;
+				goto fail;
 		}
 
 		fprintf(stderr, "Archiving %s\n", conn->page);
@@ -868,13 +891,7 @@ __iterate_cached_links(wr_cache_t *cachep, connection_t *conn)
 		++link;
 	}
 
-	//free(saved_host);
-	//saved_host = NULL;
 	return choice;
-
-	out_release_dup_str:
-	//free(saved_host);
-	//saved_host = NULL;
 
 	fail:
 	return -1;
@@ -917,7 +934,7 @@ __check_directory(void)
 	char *home = getenv("HOME");
 	buf_t tmp;
 
-	buf_init(&tmp, pathconf("/", _PC_PATH_MAX));
+	buf_init(&tmp, PATHMAX);
 	buf_append(&tmp, home);
 	buf_append(&tmp, "/WR_Reaped");
 
