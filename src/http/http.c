@@ -593,7 +593,9 @@ http_recv_response(connection_t *conn)
 
 	if (http_fetch_header(&conn->read_buf, "Transfer-Encoding", transfer_enc, (off_t)0))
 	{
+#ifdef DEBUG
 		fprintf(stderr, "transfer encoding = %s\n", transfer_enc->value);
+#endif
 		if (!strncmp("chunked", transfer_enc->value, transfer_enc->vlen))
 		{
 			if (__http_do_chunked_recv(conn) == -1)
