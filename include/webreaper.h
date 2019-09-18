@@ -92,6 +92,7 @@ do {\
 #define OPT_ALLOW_XDOMAIN 0x8 /* if not set, ignore URLs that are a different host */
 
 extern uint32_t runtime_options;
+int TRAILING_SLASH;
 
 #define option_set(o) ((o) & runtime_options)
 #define set_option(o) (runtime_options |= (o))
