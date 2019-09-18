@@ -58,6 +58,13 @@ do {\
 	(PTR) = memchr(____s_p, '/', (____e_p - ____s_p));\
 } while (0)
 
+#define HTTP_EOH(BUF)\
+({\
+	char *___p_t_r = strstr((BUF)->buf_head, HTTP_EOH_SENTINEL);\
+	___p_t_r += strlen(HTTP_EOH_SENTINEL);\
+	___p_t_r;\
+})
+
 typedef struct http_link_t
 {
 	int status_code;
@@ -110,7 +117,7 @@ int http_check_header(buf_t *, const char *, off_t, off_t *) __nonnull((1,2,4)) 
 char *http_fetch_header(buf_t *, const char *, http_header_t *, off_t) __nonnull((1,2,3)) __wur;
 char *http_parse_host(char *, char *) __nonnull((1,2)) __wur;
 char *http_parse_page(char *, char *) __nonnull((1,2)) __wur;
-int parse_links(wr_cache_t *, buf_t *, char *) __nonnull((1,2,3)) __wur;
+int parse_links(wr_cache_t *, connection_t *, char *) __nonnull((1,2,3)) __wur;
 int wr_cache_http_link_ctor(void *) __nonnull((1)) __wur;
 void wr_cache_http_link_dtor(void *) __nonnull((1));
 int wr_cache_http_header_ctor(void *) __nonnull((1)) __wur;
