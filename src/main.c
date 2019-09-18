@@ -8,6 +8,7 @@
 #include <stdlib.h>
 #include <sys/stat.h>
 #include <sys/socket.h>
+#include <sys/stat.h>
 #include <time.h>
 #include <unistd.h>
 #include "buffer.h"
@@ -509,6 +510,7 @@ __check_local_dirs(connection_t *conn, buf_t *filename)
 	char *end;
 	char *name = filename->buf_head;
 	buf_t _tmp;
+	struct stat statb;
 
 	buf_init(&_tmp, pathconf("/", _PC_PATH_MAX));
 
@@ -557,7 +559,19 @@ __check_local_dirs(connection_t *conn, buf_t *filename)
 
 		BUF_NULL_TERMINATE(&_tmp);
 
-		if (access(_tmp.buf_head, F_OK) != 0)
+		if (access(_tmp.buf_head, F_OK) == 0)
+		{
+			clear_struct(&statb);
+
+			lstat(_tmp.buf_head, &statb);
+			if (S_ISREG(statb.st_mode)) /* remove it; it should be a dir! */
+			{
+				unlink(_tmp.buf_head);
+				mkdir(_tmp.buf_head, S_IRWXU);
+				fprintf(stderr, "%sCreated local dir %s\n", ACTION_DONE_STR, _tmp.buf_head);
+			}
+		}
+		else
 		{
 			mkdir(_tmp.buf_head, S_IRWXU);
 			fprintf(stderr, "%sCreated local dir %s\n", ACTION_DONE_STR, _tmp.buf_head);
