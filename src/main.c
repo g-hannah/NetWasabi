@@ -15,6 +15,7 @@
 #include "http.h"
 #include "malloc.h"
 #include "robots.h"
+#include "utils_url.h"
 #include "webreaper.h"
 
 #define SLEEP_TIME	3
@@ -264,6 +265,7 @@ __check_cookies(connection_t *conn)
 			__extract_cookie_info(cookie, tmp);
 
 			++offset;
+#ifdef DEBUG
 			printf("Appended cookie:\n\n"
 				"domain=%s\n"
 				"path=%s\n"
@@ -271,6 +273,7 @@ __check_cookies(connection_t *conn)
 				cookie->domain,
 				cookie->path,
 				cookie->expires);
+#endif
 		}
 	}
 	else
@@ -671,16 +674,14 @@ __check_local_dirs(connection_t *conn, buf_t *filename)
 	char *e;
 	char *end;
 	char *name = filename->buf_head;
-	size_t len;
-	buf_t tmp;
+	buf_t _tmp;
 
-	len = filename->data_len;
+	buf_init(&_tmp, pathconf("/", _PC_PATH_MAX));
 
 	if (*(filename->buf_tail - 1) == '/')
 		buf_snip(filename, 1);
 
 	end = filename->buf_tail;
-	buf_init(&tmp, len+1);
 	p = strstr(name, WEBREAPER_DIR);
 
 	if (!p)
@@ -715,40 +716,95 @@ __check_local_dirs(connection_t *conn, buf_t *filename)
 
 		if (!e) /* The rest of the filename is the file itself */
 		{
-			/* unless... */
-			e = strstr(p, ".html");
-			if (!strncmp(conn->primary_host, p, (e - p)))
-			{
-				buf_snip(filename, strlen(".html"));
-
-				if (access(name, F_OK) != 0)
-				{
-					mkdir(filename->buf_head, S_IRWXU);
-					fprintf(stderr, "@@@ Created local dir %s\n", name);
-				}
-
-				buf_append(filename, "/main_page.html");
-			}
-
 			break;
 		}
 
-		buf_append_ex(&tmp, name, (e - name));
+		buf_append_ex(&_tmp, name, (e - name));
 
-		BUF_NULL_TERMINATE(&tmp);
+		BUF_NULL_TERMINATE(&_tmp);
 
-		if (access(tmp.buf_head, F_OK) != 0)
+		if (access(_tmp.buf_head, F_OK) != 0)
 		{
-			mkdir(tmp.buf_head, S_IRWXU);
-			fprintf(stderr, "@@@ Created local dir %s\n", tmp.buf_head);
+			mkdir(_tmp.buf_head, S_IRWXU);
+			fprintf(stderr, "%sCreated local dir %s\n", ACTION_DONE_STR, _tmp.buf_head);
 		}
 
 		p = ++e;
-		buf_clear(&tmp);
+		buf_clear(&_tmp);
 	}
 
-	buf_destroy(&tmp);
+	buf_destroy(&_tmp);
 	return 0;
+}
+
+static void
+__replace_with_local_urls(connection_t *conn, buf_t *buf)
+{
+	assert(conn);
+	assert(buf);
+
+	char *tail = buf->buf_tail;
+	char *p;
+	char *savep;
+	char *url_start;
+	char *url_end;
+	size_t href_len = strlen("href=\"");
+	size_t range;
+	buf_t url;
+	buf_t path;
+	buf_t full;
+
+	buf_init(&url, HTTP_URL_MAX);
+	buf_init(&path, HTTP_URL_MAX);
+	buf_init(&full, HTTP_URL_MAX);
+
+	savep = buf->buf_head;
+
+	while (1)
+	{
+		buf_clear(&url);
+		buf_clear(&path);
+
+		p = strstr(savep, "href=\"");
+
+		if (!p || p >= tail)
+			break;
+
+		url_start = (p += href_len);
+		url_end = memchr(url_start, '"', (tail - url_start));
+
+		if (!url_end)
+		{
+			savep = ++p;
+			continue;
+		}
+
+		range = (url_end - url_start);
+
+		if (range >= HTTP_URL_MAX)
+			continue;
+
+		buf_append_ex(&url, url_start, range);
+		BUF_NULL_TERMINATE(&url);
+
+		assert(range >= 0);
+
+		if (range)
+		{
+			make_full_url(conn, &url, &full);
+
+			if (make_local_url(conn, &full, &path) == 0)
+			{
+				buf_collapse(buf, (off_t)(url_start - buf->buf_head), range);
+				tail = buf->buf_tail;
+
+				buf_shift(buf, (off_t)(url_start - buf->buf_head), path.data_len);
+				strncpy(url_start, path.buf_head, path.data_len);
+			}
+		}
+
+		savep = ++p;
+	}
 }
 
 static int
@@ -760,6 +816,13 @@ __archive_page(connection_t *conn)
 	char *home = NULL;
 	char *p;
 	size_t page_len;
+
+	p = HTTP_EOH(buf);
+
+	if (p)
+		buf_collapse(buf, (off_t)0, (p - buf->buf_head));
+
+	__replace_with_local_urls(conn, buf);
 
 	buf_init(&tmp, HTTP_URL_MAX);
 
@@ -779,22 +842,16 @@ __archive_page(connection_t *conn)
 	buf_append(&tmp, conn->page);
 
 /*
- * If it does end with '/', then page was simply "/",
- * so just append this.
+ * With the main page of a site that is simply the
+ * host name itself, we must create a directory
+ * with this name but also a file in that directory
+ * of the same name. So append "<host>.html" here.
  */
 	if (*(tmp.buf_tail - 1) == '/')
 	{
-		buf_append(&tmp, "main_page.html");
+		buf_append(&tmp, conn->host);
+		buf_append(&tmp, ".html");
 	}
-
-	fprintf(stderr,
-		"in __archive_page: PATH=%s\n",
-		tmp.buf_head);
-
-	p = HTTP_EOH(buf);
-
-	if (p)
-		buf_collapse(buf, (off_t)0, (p - buf->buf_head));
 
 	/*
 	 * Create local directories as necessary.
@@ -804,7 +861,7 @@ __archive_page(connection_t *conn)
 
 	if (access(tmp.buf_head, F_OK) == 0)
 	{
-		printf("%s!!! Already archived %s%s\n", COL_RED, tmp.buf_head, COL_END);
+		printf("%s%sAlready archived %s%s\n", COL_RED, ATTENTION_STR, tmp.buf_head, COL_END);
 		goto out_free_bufs;
 	}
 
@@ -812,9 +869,7 @@ __archive_page(connection_t *conn)
 	if (fd == -1)
 		goto fail_free_bufs;
 
-#ifdef DEBUG
-	printf("%s@@@ Created file %s%s\n", COL_GREEN, tmp.buf_head, COL_END);
-#endif
+	printf("%sCreated file %s\n", ACTION_DONE_STR, tmp.buf_head);
 
 	buf_write_fd(fd, buf);
 	close(fd);
@@ -855,7 +910,9 @@ __handle301(connection_t *conn)
 
 	http_parse_page(conn->full_url, conn->page);
 
+#ifdef DEBUG
 	fprintf(stderr, "PARSED PAGE=%s (location header=%s)\n", conn->page, location->value);
+#endif
 
 	wr_cache_dealloc(http_hcache, (void *)location);
 
@@ -1155,10 +1212,10 @@ main(int argc, char *argv[])
 	strcpy(conn.primary_host, conn.host);
 
 	fprintf(stderr,
-		"PRIMARY HOST = %s\n"
-		"PAGE         = %s\n",
-		conn.primary_host,
-		conn.page);
+		"%sReaping site %s%s%s\n"
+		"%sStarting at %s\n",
+		ACTION_ING_STR, COL_ORANGE, conn.full_url, COL_END,
+		ACTION_ING_STR, conn.page);
 
 	/*
 	 * Initialises read/write buffers in conn.
@@ -1249,13 +1306,16 @@ main(int argc, char *argv[])
 				goto out_disconnect;
 		}
 
-		fprintf(stderr, "Archiving %s\n", conn.page);
-		__archive_page(&conn);
-
-		/* parse_links(wr_cache_t *cachep, buf_t *buf, const char *host); */
-
-		fprintf(stderr, "Extracting links from page\n");
+	/*
+	 * Extract the URLs first, because __archive_page()
+	 * replaces the URLs with local ones ("file:///...")
+	 */
+		fprintf(stderr, "%sExtracting URLs\n", ACTION_ING_STR);
 		parse_links(http_lcache, &conn, conn.host);
+
+
+		fprintf(stderr, "%sArchiving %s\n", ACTION_ING_STR, conn.page);
+		__archive_page(&conn);
 
 		/*
 		 * Choose one of the links at random (rand() MODULO #links)
