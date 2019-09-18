@@ -104,7 +104,7 @@ static char *__ignore_tokens__[] =
 	".jpeg",
 	".gif",
 	".pdf",
-	".php",
+	//".php",
 	NULL
 };
 
@@ -115,6 +115,7 @@ __local_archive_exists(char *link, char *host)
 	int path_max = 0;
 	int exists = 0;
 	char *home;
+	static char ptmp[1024];
 
 	path_max = pathconf("/", _PC_PATH_MAX);
 	if (path_max == 0)
@@ -127,12 +128,10 @@ __local_archive_exists(char *link, char *host)
 	buf_append(&tmp, home);
 	buf_append(&tmp, "/" WEBREAPER_DIR "/");
 	buf_append(&tmp, host);
-	buf_append(&tmp, link);
-	buf_append(&tmp, ".html");
+	http_parse_page(link, ptmp);
+	buf_append(&tmp, ptmp);
 
-#ifdef DEBUG
-	printf("CHECKING LOCAL PATH %s\n", tmp.buf_head);
-#endif
+	//buf_append(&tmp, ".html");
 
 	exists = access(tmp.buf_head, F_OK);
 
@@ -147,15 +146,15 @@ __local_archive_exists(char *link, char *host)
 #define DEFAULT_MATRIX_SIZE 256
 
 int
-parse_links(wr_cache_t *cachep, buf_t *buf, char *host)
+parse_links(wr_cache_t *cachep, connection_t *conn, char *host)
 {
 	assert(cachep);
-	assert(buf);
+	assert(conn);
 
 	http_link_t		*hl = NULL;
 	char					*p = NULL;
 	char					*savep = NULL;
-	char					*tail = buf->buf_tail;
+	char					*tail;
 	int						nr = 0;
 	size_t url_len = 0;
 	size_t max_len = (HTTP_URL_MAX - strlen("https://"));
@@ -163,6 +162,16 @@ parse_links(wr_cache_t *cachep, buf_t *buf, char *host)
 	int aidx = 0;
 	int i;
 	int ignore = 0;
+	buf_t *buf = &conn->read_buf;
+	buf_t url;
+	buf_t tmp;
+	static char page_tmp[1024];
+	static char host_tmp[1024];
+
+	tail = buf->buf_tail;
+
+	buf_init(&url, HTTP_URL_MAX);
+	buf_init(&tmp, HTTP_URL_MAX);
 
 	MATRIX_INIT(url_links, cur_size, max_len, char);
 
@@ -171,34 +180,23 @@ parse_links(wr_cache_t *cachep, buf_t *buf, char *host)
 	while (1)
 	{
 		ignore = 0;
+		buf_clear(&url);
+		buf_clear(&tmp);
 
 		p = strstr(savep, "href=\"");
 
 		if (!p || p >= tail)
 			break;
 
-		savep = p;
+		savep = (p += strlen("href=\""));
 
-		p += strlen("href=\"");
+		p = memchr(savep, '?', (p - savep));
 
-		if (*p != '/')
-		{
-			savep = p;
-			continue;
-		}
-
-		savep = p;
-
-		p = memchr(savep, 0x22, (tail - savep));
+		if (!p)
+			p = memchr(savep, '"', (tail - savep));
 
 		if (!p)
 			break;
-
-		if (memchr(savep, '?', (p - savep)))
-		{
-			savep = ++p;
-			continue;
-		}
 
 		url_len = (p - savep);
 
@@ -212,8 +210,124 @@ parse_links(wr_cache_t *cachep, buf_t *buf, char *host)
 
 		assert(url_len < max_len);
 		assert(aidx < cur_size);
-		strncpy(url_links[aidx], savep, url_len);
-		url_links[aidx][url_len] = 0;
+
+	/*
+	 * Different servers of same site (e.g., community.something... / blog.something)
+	 * are coded in the page starting with 2 slashes. Handle this.
+	 */
+		if (!strncmp("//", savep, 2))
+		{
+			if (!option_set(OPT_ALLOW_XDOMAIN))
+			{
+				savep = ++p;
+				continue;
+			}
+
+			savep += 2;
+			url_len -= 2;
+			p = memchr(savep, '/', url_len);
+			if (!p)
+				continue;
+
+			url_len = (p - savep);
+
+			if (option_set(OPT_USE_TLS))
+				buf_append(&tmp, "https://");
+			else
+				buf_append(&tmp, "http://");
+
+			buf_append_ex(&tmp, savep, url_len);
+		}
+		else
+		{
+			buf_append_ex(&tmp, savep, url_len);
+		}
+
+	/*
+	 * Ignore URLs that refer
+	 * to part of their own page.
+	 */
+		if (memchr(tmp.buf_head, '#', url_len))
+		{
+			savep = ++p;
+			continue;
+		}
+
+		if (!strncmp(tmp.buf_head, "//", 2))
+		{
+			if (!option_set(OPT_ALLOW_XDOMAIN))
+			{
+				savep = ++p;
+				continue;
+			}
+		}
+
+		if (!strncmp("http", tmp.buf_head, 4))
+		{
+			if (!strncmp("https", tmp.buf_head, 5))
+				buf_append(&url, "https://");
+			else
+				buf_append(&url, "http://");
+
+			http_parse_host(tmp.buf_head, host_tmp);
+
+			if (strcmp(host_tmp, conn->primary_host))
+			{
+				if (!option_set(OPT_ALLOW_XDOMAIN))
+				{
+					savep = ++p;
+					continue;
+				}
+			}
+
+			buf_append(&url, host_tmp);
+
+			http_parse_page(tmp.buf_head, page_tmp);
+
+			buf_append(&url, page_tmp);
+		}
+		else
+		{
+			if (option_set(OPT_USE_TLS))
+				buf_append(&url, "https://");
+			else
+				buf_append(&url, "http://");
+
+			buf_append(&url, conn->host);
+
+		/*
+		 * It's a link relative to the current page.
+		 */
+			if (*savep == '.' || *savep != '/')
+			{
+				if (*savep == '.')
+				{
+					savep += 2;
+					url_len = (p - savep);
+				}
+
+				buf_append(&url, conn->page);
+
+				if (*(url.buf_tail - 1) != '/')
+					buf_append(&url, "/");
+
+				buf_append_ex(&url, savep, url_len);
+			}
+			else
+			{
+				/* If we get here, *savep == '/' */
+				buf_append_ex(&url, savep, url_len);
+			}
+		}
+
+		BUF_NULL_TERMINATE(&url);
+
+		fprintf(stderr,
+			"in parse_links: parsed URL=%s\n",
+			url.buf_head);
+
+		strncpy(url_links[aidx], url.buf_head, url.data_len);
+		url_links[aidx][url.data_len] = 0;
 
 		for (i = 0; __ignore_tokens__[i] != NULL; ++i)
 		{
@@ -228,12 +342,6 @@ parse_links(wr_cache_t *cachep, buf_t *buf, char *host)
 		if (ignore)
 			continue;
 
-		if (strstr(url_links[aidx], host))
-		{
-			savep = ++p;
-			continue;
-		}
-
 		if (__local_archive_exists(url_links[aidx], host))
 		{
 			savep = ++p;
@@ -245,6 +353,8 @@ parse_links(wr_cache_t *cachep, buf_t *buf, char *host)
 		++nr;
 	}
 
+	buf_destroy(&url);
+
 	int removed;
 
 	removed = __remove_dups(url_links, nr);
@@ -252,7 +362,6 @@ parse_links(wr_cache_t *cachep, buf_t *buf, char *host)
 	nr -= removed;
 
 	assert(nr < cur_size);
-	fprintf(stderr, "parsed %d links\n", nr);
 
 	for (i = 0; i < nr; ++i)
 	{
@@ -261,8 +370,6 @@ parse_links(wr_cache_t *cachep, buf_t *buf, char *host)
 		assert(hl);
 		assert(hl->url);
 		assert(wr_cache_obj_used(cachep, (void *)hl));
-
-		fprintf(stderr, "allocated obj #%d\n", (i+1));
 
 		if (!hl)
 			goto out_free_links;
@@ -273,6 +380,8 @@ parse_links(wr_cache_t *cachep, buf_t *buf, char *host)
 		hl->url[url_len] = 0;
 		hl->nr_requests = 0;
 	}
+
+	assert(nr == wr_cache_nr_used(cachep));
 
 	MATRIX_DESTROY(url_links, cur_size);
 
