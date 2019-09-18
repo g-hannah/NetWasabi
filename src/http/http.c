@@ -585,9 +585,6 @@ http_recv_response(connection_t *conn)
  *         p
  */
 
-	if (option_set(OPT_SHOW_RES_HEADER))
-		fprintf(stderr, "%.*s", (int)(p - conn->read_buf.buf_head), conn->read_buf.buf_head);
-
 	if (strstr(conn->write_buf.buf_head, "HEAD"))
 	{
 		//buf_collapse(&conn->read_buf, (off_t)(p - conn->read_buf.buf_head), (conn->read_buf.buf_tail - p));
