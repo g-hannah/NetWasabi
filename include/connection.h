@@ -14,7 +14,6 @@ typedef struct connection_t
 	char *page;
 	char *full_url;
 	char *primary_host;
-	int using_tls;
 	SSL_CTX *ssl_ctx;
 } connection_t;
 

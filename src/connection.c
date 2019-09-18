@@ -56,11 +56,6 @@ inline SSL *conn_tls(connection_t *conn)
 	return conn->ssl;
 }
 
-inline int conn_using_tls(connection_t *conn)
-{
-	return conn->using_tls;
-}
-
 /**
  * __init_openssl - initialise the openssl library
  */
@@ -137,7 +132,6 @@ open_connection(connection_t *conn)
 
 		SSL_set_fd(conn->ssl, conn->sock); /* Set the socket for reading/writing */
 		SSL_set_connect_state(conn->ssl); /* Set as client */
-		conn->using_tls = 1;
 	}
 
 	freeaddrinfo(ainf);
@@ -159,10 +153,12 @@ close_connection(connection_t *conn)
 	close(conn->sock);
 	conn->sock = -1;
 
-	if (conn_using_tls(conn))
+	if (option_set(OPT_USE_TLS))
 	{
 		SSL_CTX_free(conn->ssl_ctx);
 		SSL_free(conn->ssl);
+		conn->ssl_ctx = NULL;
+		conn->ssl = NULL;
 	}
 
 	buf_destroy(&conn->read_buf);
@@ -184,7 +180,7 @@ reconnect(connection_t *conn)
 	close(conn->sock);
 	conn->sock = -1;
 
-	if (conn_using_tls(conn))
+	if (option_set(OPT_USE_TLS))
 	{
 		SSL_CTX_free(conn->ssl_ctx);
 		SSL_free(conn->ssl);
@@ -238,7 +234,6 @@ reconnect(connection_t *conn)
 
 		SSL_set_fd(conn->ssl, conn->sock); /* Set the socket for reading/writing */
 		SSL_set_connect_state(conn->ssl); /* Set as client */
-		conn->using_tls = 1;
 	}
 
 	freeaddrinfo(ainf);
