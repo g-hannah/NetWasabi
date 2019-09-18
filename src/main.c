@@ -28,10 +28,7 @@ uint32_t runtime_options = 0;
 wr_cache_t *http_hcache;
 wr_cache_t *http_lcache;
 wr_cache_t *cookies;
-static char PRIMARY_HOST[HTTP_HOST_MAX];
-static size_t PRIMARY_HOST_LEN = 0;
 
-#ifndef PATHMAX
 int PATHMAX = 0;
 
 static void
@@ -41,7 +38,6 @@ __ctor __wr_init(void)
 	if (PATHMAX == 0)
 		PATHMAX = 1024;
 }
-#endif
 
 /*
  * Catch SIGINT
@@ -56,11 +52,11 @@ __noret usage(int exit_status)
 {
 	fprintf(stderr,
 		"webreaper <url> [options]\n\n"
-		"-T/--tls            use a TLS connection\n"
-		"-R/--raw            show raw HTML output\n"
-		"-oH/--req-head  	   show the request header (\"out header\")\n"
-		"-iH/--res-head    	 show the response header (\"in header\")\n"
-		"--help/-h           display this information\n");
+		"-T/--tls          use a TLS connection\n"
+		"-oH/--req-head    show the request header (\"out header\")\n"
+		"-iH/--res-head    show the response header (\"in header\")\n"
+		"-X/--xdomain      follow URLs into other domains\n"
+		"--help/-h         display this information\n");
 
 	exit(exit_status);
 }
@@ -76,18 +72,77 @@ __print_prog_info(void)
 	return;
 }
 
+const char *__extensions[] =
+{
+	".css",
+	".js",
+	".php",
+	".ico",
+	".jpg",
+	".jpeg",
+	".png",
+	".gif",
+	".pdf",
+	".bmp",
+	".html",
+	".doc",
+	".docx",
+	".odt",
+	".txt",
+	NULL
+};
+
+#if 0
 static int
 __includes_host(char *url)
 {
 	assert(url);
 
 	size_t url_len = strlen(url);
+	char *p;
+	char *e;
+	char *end = url + url_len;
+	buf_t tmp;
+	int rv = 0;
+	int i;
 
-	if (memchr(url, '.', url_len))
-		return 1;
-	else
-		return 0;
+	buf_init(&tmp, HTTP_URL_MAX);
+
+	if (!strncmp("http", url, 4))
+		p = url + 4;
+
+	while (*p == '/')
+		++p;
+
+/*
+ * /private_msg.php
+ *
+ * https://something.com/join.php
+ *
+ */
+
+	e = strrchr(url, '.');
+
+	if (!e)
+		goto out_free_buf;
+
+	for (i = 0; __extensions[i] != NULL; ++i)
+	{
+		if (!strcmp(__extensions[i], e))
+		{
+			end = e;
+			break;
+		}
+	}
+
+	if (memchr(url, '.', (end - url)))
+		rv = 1;
+
+	out_free_buf:
+	buf_destroy(&tmp);
+	return rv;
 }
+#endif
 
 static void
 __extract_cookie_info(struct http_cookie_t *dest, http_header_t *src)
@@ -292,12 +347,47 @@ __show_response_header(buf_t *buf)
 	return;
 }
 
+static int
+__new_host(connection_t *conn)
+{
+	static char __host[HTTP_URL_MAX];
+
+	http_parse_host(conn->full_url, __host);
+
+	return strcmp(conn->host, __host);
+}
+
+static void
+__check_host(connection_t *conn)
+{
+	assert(conn);
+
+	if (__new_host(conn))
+	{
+		fprintf(stderr,
+				"Changing Host\n\n"
+				"primary_host=%s\n"
+				"host=%s\n"
+				"page=%s\n"
+				" url=%s\n",
+				conn->primary_host,
+				conn->host,
+				conn->page,
+				conn->full_url);
+
+		wr_cache_clear_all(cookies);
+		reconnect(conn);
+	}
+
+	return;
+}
+
+#if 0
 static void
 __adjust_host_and_page(connection_t *conn)
 {
 	assert(conn);
 
-	char *host_dup;
 	char *p;
 	char *e;
 	buf_t tmp;
@@ -307,13 +397,13 @@ __adjust_host_and_page(connection_t *conn)
 
 	buf_init(&tmp, HTTP_URL_MAX);
 
-	if (__includes_host(conn->page))
+	if (__new_host(conn->full_url))
 	{
 		got_host = 1;
-		host_dup = wr_strdup(conn->host);
-		http_parse_host(conn->page, conn->host);
+		http_parse_host(conn->full_url, conn->host);
 
-		fprintf(stderr, "PARSED HOST = %s\n", conn->host);
+		fprintf(stderr, "New Host\n\nHost=%s\nPage=%s\nFull_URL=%s\n",
+			conn->host, conn->page, conn->full_url);
 
 		if (strcmp(host_dup, conn->host))
 		{
@@ -346,6 +436,9 @@ __adjust_host_and_page(connection_t *conn)
 
 	if (!got_host)
 		buf_append(&tmp, conn->host);
+
+	if (conn->page[0] != '/')
+		buf_append(&tmp, "/");
 
 	buf_append(&tmp, conn->page);
 
@@ -381,6 +474,7 @@ __adjust_host_and_page(connection_t *conn)
 
 	return;
 }
+#endif
 
 static int
 __send_head_request(connection_t *conn)
@@ -394,7 +488,9 @@ __send_head_request(connection_t *conn)
 
 	buf_clear(wbuf);
 
-	__adjust_host_and_page(conn);
+	__check_host(conn);
+
+	//__adjust_host_and_page(conn);
 
 	if (!(tmp_cbuf = wr_calloc(8192, 1)))
 		goto fail_free_bufs;
@@ -403,7 +499,7 @@ __send_head_request(connection_t *conn)
 			"HEAD %s HTTP/%s\r\n"
 			"User-Agent: %s\r\n"
 			"Host: %s%s",
-			conn->page, HTTP_VERSION,
+			conn->full_url, HTTP_VERSION,
 			HTTP_USER_AGENT,
 			conn->host, HTTP_EOH_SENTINEL);
 
@@ -455,7 +551,9 @@ __send_get_request(connection_t *conn)
 
 	buf_clear(wbuf);
 
-	__adjust_host_and_page(conn);
+	__check_host(conn);
+
+	//__adjust_host_and_page(conn);
 
 	if (!(tmp_cbuf = wr_calloc(8192, 1)))
 		goto fail_free_bufs;
@@ -465,7 +563,7 @@ __send_get_request(connection_t *conn)
 			"User-Agent: %s\r\n"
 			"Host: %s\r\n"
 			"Connection: keep-alive%s",
-			conn->page, HTTP_VERSION,
+			conn->full_url, HTTP_VERSION,
 			HTTP_USER_AGENT,
 			conn->host,
 			HTTP_EOH_SENTINEL);
@@ -506,6 +604,7 @@ __send_get_request(connection_t *conn)
 	return -1;
 }
 
+#if 0
 static void
 __normalise_filename(char *filename)
 {
@@ -560,10 +659,12 @@ __normalise_filename(char *filename)
 
 	return;
 }
+#endif
 
 static int
-__check_local_dirs(buf_t *filename)
+__check_local_dirs(connection_t *conn, buf_t *filename)
 {
+	assert(conn);
 	assert(filename);
 
 	char *p;
@@ -616,7 +717,7 @@ __check_local_dirs(buf_t *filename)
 		{
 			/* unless... */
 			e = strstr(p, ".html");
-			if (!strncmp(PRIMARY_HOST, p, (e - p)))
+			if (!strncmp(conn->primary_host, p, (e - p)))
 			{
 				buf_snip(filename, strlen(".html"));
 
@@ -656,41 +757,60 @@ __archive_page(connection_t *conn)
 	int fd = -1;
 	buf_t *buf = &conn->read_buf;
 	buf_t tmp;
-	char *filename = wr_strdup(conn->page);
 	char *home = NULL;
 	char *p;
+	size_t page_len;
 
 	buf_init(&tmp, HTTP_URL_MAX);
-
-	p = strstr(buf->buf_head, HTTP_EOH_SENTINEL);
-
-	if (p)
-	{
-		p += strlen(HTTP_EOH_SENTINEL);
-		buf_collapse(buf, (off_t)0, (p - buf->buf_head));
-	}
-
-	__normalise_filename(filename);
 
 	home = getenv("HOME");
 	buf_append(&tmp, home);
 	buf_append(&tmp, "/" WEBREAPER_DIR "/");
-	if (!strstr(filename, conn->host))
-		buf_append(&tmp, conn->host);
-	buf_append(&tmp, filename);
+	buf_append(&tmp, conn->host);
 
-	if (__check_local_dirs(&tmp) < 0)
-		goto out_free;
+	if (!strncmp("http", conn->page, 4))
+		http_parse_page(conn->full_url, conn->page);
+
+	page_len = strlen(conn->page);
+
+	if (page_len > 1 && conn->page[page_len - 1] == '/')
+		conn->page[--page_len] = 0;
+
+	buf_append(&tmp, conn->page);
+
+/*
+ * If it does end with '/', then page was simply "/",
+ * so just append this.
+ */
+	if (*(tmp.buf_tail - 1) == '/')
+	{
+		buf_append(&tmp, "main_page.html");
+	}
+
+	fprintf(stderr,
+		"in __archive_page: PATH=%s\n",
+		tmp.buf_head);
+
+	p = HTTP_EOH(buf);
+
+	if (p)
+		buf_collapse(buf, (off_t)0, (p - buf->buf_head));
+
+	/*
+	 * Create local directories as necessary.
+	 */
+	if (__check_local_dirs(conn, &tmp) < 0)
+		goto out_free_bufs;
 
 	if (access(tmp.buf_head, F_OK) == 0)
 	{
 		printf("%s!!! Already archived %s%s\n", COL_RED, tmp.buf_head, COL_END);
-		goto out;
+		goto out_free_bufs;
 	}
 
 	fd = open(tmp.buf_head, O_RDWR|O_CREAT|O_TRUNC, S_IRUSR|S_IWUSR);
 	if (fd == -1)
-		goto out_free;
+		goto fail_free_bufs;
 
 #ifdef DEBUG
 	printf("%s@@@ Created file %s%s\n", COL_GREEN, tmp.buf_head, COL_END);
@@ -700,13 +820,12 @@ __archive_page(connection_t *conn)
 	close(fd);
 	fd = -1;
 
-	out:
-	free(filename);
+	out_free_bufs:
 	buf_destroy(&tmp);
+
 	return 0;
 
-	out_free:
-	free(filename);
+	fail_free_bufs:
 	buf_destroy(&tmp);
 
 	return -1;
@@ -731,12 +850,16 @@ __handle301(connection_t *conn)
 	memset(conn->host, 0, HTTP_URL_MAX);
 	http_parse_host(location->value, conn->host);
 
-	strncpy(conn->page, location->value, location->vlen);
-	conn->page[location->vlen] = 0;
+	strncpy(conn->full_url, location->value, location->vlen);
+	conn->full_url[location->vlen] = 0;
+
+	http_parse_page(conn->full_url, conn->page);
+
+	fprintf(stderr, "PARSED PAGE=%s (location header=%s)\n", conn->page, location->value);
 
 	wr_cache_dealloc(http_hcache, (void *)location);
 
-	if (!strncmp("https", conn->page, 5))
+	if (!strncmp("https", conn->full_url, 5))
 	{
 		if (!option_set(OPT_USE_TLS))
 			conn_switch_to_tls(conn);
@@ -763,7 +886,7 @@ __do_request(connection_t *conn)
 		case HTTP_FOUND:
 		case HTTP_MOVED_PERMANENTLY:
 			__handle301(conn);
-			reconnect(conn); /* server resets connection after HEAD */
+			//reconnect(conn); /* server resets connection after HEAD */
 			goto resend_head;
 			break;
 		case HTTP_OK:
@@ -813,11 +936,6 @@ __iterate_cached_links(wr_cache_t *cachep, connection_t *conn)
 		fprintf(stderr, "__iterate_cached_links: no links\n");
 		return -1;
 	}
-	else
-	if (nr_links > 0)
-	{
-		assert(wr_cache_obj_used(cachep, cachep->cache));
-	}
 
 	/*
 	 * Choose a random link that works to follow after
@@ -829,8 +947,11 @@ __iterate_cached_links(wr_cache_t *cachep, connection_t *conn)
 
 		link = (http_link_t *)((char *)http_lcache->cache + (choice * cachep->objsize));
 		len = strlen(link->url);
-		strncpy(conn->page, link->url, len);
-		conn->page[len] = 0;
+
+		strncpy(conn->full_url, link->url, len);
+		conn->full_url[len] = 0;
+
+		http_parse_page(conn->full_url, conn->page);
 
 		status_code = __send_head_request(conn);
 
@@ -866,10 +987,14 @@ __iterate_cached_links(wr_cache_t *cachep, connection_t *conn)
 		buf_clear(wbuf);
 
 		len = strlen(link->url);
-		strncpy(conn->page, link->url, len);
-		conn->page[len] = 0;
 
-		__adjust_host_and_page(conn);
+		strncpy(conn->full_url, link->url, len);
+		conn->full_url[len] = 0;
+
+		http_parse_page(conn->full_url, conn->page);
+
+		__check_host(conn);
+		//__adjust_host_and_page(conn);
 
 		resend:
 		if (link->nr_requests > 2) /* loop */
@@ -908,6 +1033,7 @@ __iterate_cached_links(wr_cache_t *cachep, connection_t *conn)
 				goto fail;
 		}
 
+		assert(!strstr(conn->page, "http"));
 		fprintf(stderr, "Archiving %s\n", conn->page);
 		__archive_page(conn);
 
@@ -1012,27 +1138,26 @@ main(int argc, char *argv[])
 	http_link_t *link = NULL;
 	int status_code;
 	int choice = 0;
-	int _url_len = 0;
+	size_t url_len;
 
 	conn_init(&conn);
 
 	http_parse_host(argv[1], conn.host);
+	http_parse_page(argv[1], conn.page);
 
-	_url_len = strlen(argv[1]);
-	strncpy(conn.page, argv[1], _url_len);
-	conn.page[_url_len] = 0;
+	url_len = strlen(argv[1]);
+	strncpy(conn.full_url, argv[1], url_len);
+	conn.full_url[url_len] = 0;
 
-	if (conn.page[_url_len-1] == '/')
-		conn.page[--_url_len] = 0;
+	if (conn.full_url[url_len-1] == '/')
+		conn.full_url[--url_len] = 0;
 
-	PRIMARY_HOST_LEN = strlen(conn.host);
-	strncpy(PRIMARY_HOST, conn.host, PRIMARY_HOST_LEN);
-	PRIMARY_HOST[PRIMARY_HOST_LEN] = 0;
+	strcpy(conn.primary_host, conn.host);
 
 	fprintf(stderr,
 		"PRIMARY HOST = %s\n"
 		"PAGE         = %s\n",
-		PRIMARY_HOST,
+		conn.primary_host,
 		conn.page);
 
 	/*
@@ -1130,7 +1255,7 @@ main(int argc, char *argv[])
 		/* parse_links(wr_cache_t *cachep, buf_t *buf, const char *host); */
 
 		fprintf(stderr, "Extracting links from page\n");
-		parse_links(http_lcache, &conn.read_buf, conn.host);
+		parse_links(http_lcache, &conn, conn.host);
 
 		/*
 		 * Choose one of the links at random (rand() MODULO #links)
@@ -1213,10 +1338,10 @@ get_opts(int argc, char *argv[])
 			usage(EXIT_SUCCESS);
 		}
 		else
-		if (!strcmp("--raw", argv[i])
-			|| !strcmp("-R", argv[i]))
+		if (!strcmp("--xdomain", argv[i])
+			|| !strcmp("-X", argv[i]))
 		{
-			set_option(OPT_SHOW_RAW);
+			set_option(OPT_ALLOW_XDOMAIN);
 		}
 		else
 		if (!strcmp("-oH", argv[i])
