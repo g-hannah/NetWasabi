@@ -38,7 +38,7 @@
 #define OPT_USE_TLS	0x1
 #define OPT_SHOW_REQ_HEADER 0x2
 #define OPT_SHOW_RES_HEADER 0x4
-#define OPT_SHOW_RAW 0x8
+#define OPT_ALLOW_XDOMAIN 0x8 /* if not set, ignore URLs that are a different host */
 
 extern uint32_t runtime_options;
 
