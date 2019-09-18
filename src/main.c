@@ -101,42 +101,43 @@ __extract_cookie_info(struct http_cookie_t *dest, http_header_t *src)
 
 	char *p;
 	char *e;
-	char *s = dest->data;
+	char *start = dest->data;
+	size_t data_len = dest->data_len;
 
-	p = strstr(s, "path");
+/*
+ * Some cookie values do not end with ';' but instead end with '\r\n'.
+ * \r\n is not included in the http_header_t->value, so if no ';', just
+ * go to the null byte.
+ */
+
+	p = strstr(start, "path");
 
 	if (p)
 	{
 		p += strlen("path=");
-		e = memchr(p, ';', dest->data_len - (p - s));
+		e = memchr(p, ';', data_len - (p - start));
 
-		/*
-		 * Some seem to end with "path=/" and no semi-colon...
-		 */
 		if (!e)
-			e = memchr(p, 0x0d, dest->data_len - (p - s));
+			e = start + data_len;
 
-		if (e)
-		{
-			strncpy(dest->path, p, (e - p));
-			dest->path_len = (e - p);
-			dest->path[dest->path_len] = 0;
-		}
+		strncpy(dest->path, p, (e - p));
+		dest->path_len = (e - p);
+		dest->path[dest->path_len] = 0;
 	}
 	else
 	{
 		dest->path[0] = 0;
 	}
 
-	p = strstr(s, "domain");
+	p = strstr(start, "domain");
 
 	if (p)	
 	{
 		p += strlen("domain=");
-		e = memchr(p, ';', dest->data_len - (p - s));
+		e = memchr(p, ';', data_len - (p - start));
 
 		if (!e)
-			e = memchr(p, 0x0d, dest->data_len - (p - s));
+			e = start + data_len;
 
 		strncpy(dest->domain, p, (e - p));
 		dest->domain_len = (e - p);
@@ -147,15 +148,15 @@ __extract_cookie_info(struct http_cookie_t *dest, http_header_t *src)
 		dest->domain[0] = 0;
 	}
 
-	p = strstr(s, "expires");
+	p = strstr(start, "expires");
 
 	if (p)
 	{
 		p += strlen("expires=");
-		e = memchr(p, ';', dest->data_len - (p - s));
+		e = memchr(p, ';', data_len - (p - start));
 
 		if (!e)
-			e = memchr(p, 0x0d, dest->data_len - (p - s));
+			e = start + data_len;
 
 		strncpy(dest->expires, p, (e - p));
 		dest->expires_len = (e - p);
@@ -279,6 +280,8 @@ __show_response_header(buf_t *buf)
 	if (!p)
 	{
 		fprintf(stderr, "__show_response_header: failed to find end of HTTP header\n");
+		fprintf(stderr, "%s", buf->buf_head);
+		
 		errno = EPROTO;
 		return;
 	}
@@ -408,6 +411,8 @@ __send_head_request(connection_t *conn)
 
 	__check_cookies(conn);
 
+	buf_clear(rbuf);
+
 	free(tmp_cbuf);
 	tmp_cbuf = NULL;
 
@@ -468,6 +473,8 @@ __send_get_request(connection_t *conn)
 	buf_append(wbuf, tmp_cbuf);
 
 	__check_cookies(conn);
+
+	buf_clear(rbuf);
 
 	free(tmp_cbuf);
 	tmp_cbuf = NULL;
@@ -555,24 +562,25 @@ __normalise_filename(char *filename)
 }
 
 static int
-__check_local_dirs(char *filename)
+__check_local_dirs(buf_t *filename)
 {
 	assert(filename);
 
 	char *p;
 	char *e;
 	char *end;
+	char *name = filename->buf_head;
 	size_t len;
 	buf_t tmp;
 
-	len = strlen(filename);
+	len = filename->data_len;
 
-	if (filename[len-1] == '/')
-		filename[--len] = 0;
+	if (*(filename->buf_tail - 1) == '/')
+		buf_snip(filename, 1);
 
-	end = (filename + len);
+	end = filename->buf_tail;
 	buf_init(&tmp, len+1);
-	p = strstr(filename, WEBREAPER_DIR);
+	p = strstr(name, WEBREAPER_DIR);
 
 	if (!p)
 	{
@@ -605,22 +613,40 @@ __check_local_dirs(char *filename)
 		e = memchr(p, '/', (end - p));
 
 		if (!e) /* The rest of the filename is the file itself */
-			break;
+		{
+			/* unless... */
+			e = strstr(p, ".html");
+			if (!strncmp(PRIMARY_HOST, p, (e - p)))
+			{
+				buf_snip(filename, strlen(".html"));
 
-		buf_append_ex(&tmp, filename, (e - filename));
+				if (access(name, F_OK) != 0)
+				{
+					mkdir(filename->buf_head, S_IRWXU);
+					fprintf(stderr, "@@@ Created local dir %s\n", name);
+				}
+
+				buf_append(filename, "/main_page.html");
+			}
+
+			break;
+		}
+
+		buf_append_ex(&tmp, name, (e - name));
 
 		BUF_NULL_TERMINATE(&tmp);
 
 		if (access(tmp.buf_head, F_OK) != 0)
 		{
 			mkdir(tmp.buf_head, S_IRWXU);
-			printf("@@@ Created local dir %s\n", tmp.buf_head);
+			fprintf(stderr, "@@@ Created local dir %s\n", tmp.buf_head);
 		}
 
 		p = ++e;
 		buf_clear(&tmp);
 	}
 
+	buf_destroy(&tmp);
 	return 0;
 }
 
@@ -653,7 +679,7 @@ __archive_page(connection_t *conn)
 		buf_append(&tmp, conn->host);
 	buf_append(&tmp, filename);
 
-	if (__check_local_dirs(tmp.buf_head) < 0)
+	if (__check_local_dirs(&tmp) < 0)
 		goto out_free;
 
 	if (access(tmp.buf_head, F_OK) == 0)
@@ -756,8 +782,6 @@ __do_request(connection_t *conn)
 	reconnect(conn);
 
 	status_code &= ~status_code;
-	buf_clear(&conn->write_buf);
-
 	status_code = __send_get_request(conn);
 
 	return status_code;
@@ -997,6 +1021,9 @@ main(int argc, char *argv[])
 	_url_len = strlen(argv[1]);
 	strncpy(conn.page, argv[1], _url_len);
 	conn.page[_url_len] = 0;
+
+	if (conn.page[_url_len-1] == '/')
+		conn.page[--_url_len] = 0;
 
 	PRIMARY_HOST_LEN = strlen(conn.host);
 	strncpy(PRIMARY_HOST, conn.host, PRIMARY_HOST_LEN);
