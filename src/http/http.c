@@ -12,13 +12,6 @@
 #include "malloc.h"
 #include "webreaper.h"
 
-struct http_vars
-{
-	size_t header_len;
-	size_t content_len;
-	int is_chunked;
-};
-
 /**
  * wr_cache_http_cookie_ctor - initialise object for the cookie cache
  * @hh: pointer to the object in the cache
@@ -278,7 +271,8 @@ __http_read_until_eoh(connection_t *conn)
 			p = strstr(buf->buf_head, HTTP_EOH_SENTINEL);
 	}
 
-	return p;
+	assert(!strncmp(HTTP_EOH_SENTINEL, p, strlen(HTTP_EOH_SENTINEL)));
+	return p + strlen(HTTP_EOH_SENTINEL);
 }
 
 #ifdef DEBUG
@@ -465,11 +459,6 @@ __http_do_chunked_recv(connection_t *conn)
 		 */
 		total = 0;
 
-		/*
-		 * Point at where next size string will be.
-		 */
-		__next_size = (buf->buf_head + chunk_offset + save_size + 2);
-
 		while (1)
 		{
 			if (option_set(OPT_USE_TLS))
@@ -486,15 +475,44 @@ __http_do_chunked_recv(connection_t *conn)
 			{
 				total += (size_t)bytes_read;
 
-				__next_size = (buf->buf_head + chunk_offset + save_size + 2);
-
-				assert(*(__next_size - 2) == '\r');
+/*
+ * BS=BUF_START ; CS=CHUNK_START ; CE=CHUNK_END ; b=byte
+ *
+ * |BSbbbbbbbbbbCSbbbbbbbbbbbbbbbbbbbbbbbbbCE\r\n5a8\r\n......
+ *                                               ^
+ *                                             __next_size
+ * This is absolutey where __next_size should be pointing after
+ * the below... Something is very wrong if the assertions fail.
+ *
+ * EDIT:
+ * Assertion *(__next_size - 2) == '\r' was failing in a certain
+ * case after the final chunk, jumping forward from buf_head
+ * chunk_offset + save_size + 2, was pointing ONE byte past the
+ * 30 byte: 0d0a0d0a300d0a
+ *                    ^
+ * To solve this, don't jump forward the extra 2 bytes, and then
+ * use SKIP_CRNL to land on the start of the next size string.
+ *
+ */
+				__next_size = (buf->buf_head + chunk_offset + save_size);
+				SKIP_CRNL(__next_size);
 					
 				if (!memchr(__next_size, '\r', 64))
 					continue;
 				else
 				{
+#ifdef DEBUG
+					if (*(__next_size - 2) != 0x0d)
+						__dump_buf(buf);
 
+					__next_size -= 4;
+					int __i__;
+					for (__i__ = 0; __i__ < 8; ++__i__)
+						fprintf(stderr, "%02hhx ", __next_size[__i__]);
+					fputc(0x0a, stderr);
+					__next_size += 4;
+					SKIP_CRNL(__next_size);
+#endif
 					assert(*__next_size != '\r');
 					assert(*(__next_size - 2) == '\r');
 
@@ -561,26 +579,33 @@ http_recv_response(connection_t *conn)
 		goto out_dealloc;
 	}
 
-	p += strlen(HTTP_EOH_SENTINEL);
+/*
+ * \r\n\r\nBBBBBBB...
+ *         ^
+ *         p
+ */
+
+	if (option_set(OPT_SHOW_RES_HEADER))
+		fprintf(stderr, "%.*s", (int)(p - conn->read_buf.buf_head), conn->read_buf.buf_head);
 
 	if (strstr(conn->write_buf.buf_head, "HEAD"))
 	{
-		buf_collapse(&conn->read_buf, (off_t)(p - conn->read_buf.buf_head), (conn->read_buf.buf_tail - p));
+		//buf_collapse(&conn->read_buf, (off_t)(p - conn->read_buf.buf_head), (conn->read_buf.buf_tail - p));
 		return 0;
 	}
 
 	if (http_fetch_header(&conn->read_buf, "Transfer-Encoding", transfer_enc, (off_t)0))
 	{
+		fprintf(stderr, "transfer encoding = %s\n", transfer_enc->value);
 		if (!strncmp("chunked", transfer_enc->value, transfer_enc->vlen))
 		{
-#ifdef DEBUG
-			printf("Transfer-Encoding = chunked\n");
-#endif
 			if (__http_do_chunked_recv(conn) == -1)
-				goto out_dealloc;
+				goto fail_dealloc;
+
+			goto out_dealloc;
 		}
 	}
-	else
+
 	if (http_fetch_header(buf, "Content-Length", content_len, (off_t)0))
 	{
 		clen = strtoul(content_len->value, NULL, 0);
@@ -599,7 +624,7 @@ http_recv_response(connection_t *conn)
 					bytes = buf_read_socket(conn->sock, buf, clen);
 
 				if (bytes < 0)
-					goto out_dealloc;
+					goto fail_dealloc;
 				else
 				if (!bytes)
 					continue;	
@@ -623,7 +648,7 @@ http_recv_response(connection_t *conn)
 			bytes = buf_read_socket(conn->sock, &conn->read_buf, clen);
 
 		if (bytes < 0)
-			goto out_dealloc;
+			goto fail_dealloc;
 
 		p = strstr(conn->read_buf.buf_head, "</body");
 
@@ -633,13 +658,14 @@ http_recv_response(connection_t *conn)
 		}
 	}
 
+	out_dealloc:
 	assert(conn->read_buf.magic == BUFFER_MAGIC);
 	wr_cache_dealloc(http_hcache, (void *)content_len);
 	wr_cache_dealloc(http_hcache, (void *)transfer_enc);
 
 	return 0;
 
-	out_dealloc:
+	fail_dealloc:
 	wr_cache_dealloc(http_hcache, (void *)content_len);
 	wr_cache_dealloc(http_hcache, (void *)transfer_enc);
 
@@ -763,7 +789,10 @@ http_parse_host(char *url, char *host)
 	while (*p == '/')
 		++p;
 
-	endp = memchr(p, '/', ((url + url_len) - p));
+	endp = memchr(p, ':', ((url + url_len) - p));
+
+	if (!endp)
+		endp = memchr(p, '/', ((url + url_len) - p));
 
 	if (!endp)
 		endp = url + url_len;
