@@ -42,7 +42,6 @@ make_full_url(connection_t *conn, buf_t *in, buf_t *out)
 	{
 		p += 2;
 		buf_append(out, p);
-		return 0;
 	}
 	else
 	{
