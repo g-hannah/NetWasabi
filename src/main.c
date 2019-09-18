@@ -30,6 +30,7 @@ uint32_t runtime_options = 0;
 wr_cache_t *http_hcache;
 wr_cache_t *http_lcache;
 wr_cache_t *cookies;
+int TRAILING_SLASH = 0;
 
 int PATHMAX = 0;
 
@@ -262,7 +263,7 @@ __show_response_header(buf_t *buf)
 {
 	assert(buf);
 
-	char *p = strstr(buf->buf_head, HTTP_EOH_SENTINEL);
+	char *p = HTTP_EOH(buf);
 
 	if (!p)
 	{
@@ -273,7 +274,6 @@ __show_response_header(buf_t *buf)
 		return;
 	}
 
-	p += strlen(HTTP_EOH_SENTINEL);
 	fprintf(stderr, "%.*s", (int)(p - buf->buf_head), buf->buf_head);
 
 	return;
@@ -779,6 +779,8 @@ __handle301(connection_t *conn)
 			conn_switch_to_tls(conn);
 	}
 
+	TRAILING_SLASH = 1;
+
 	return 0;
 }
 
@@ -844,6 +846,8 @@ __iterate_cached_links(wr_cache_t *cachep, connection_t *conn)
 	size_t len;
 	http_link_t *link;
 	buf_t *wbuf = &conn->write_buf;
+
+	TRAILING_SLASH = 0;
 
 	if (!nr_links)
 	{
@@ -922,7 +926,7 @@ __iterate_cached_links(wr_cache_t *cachep, connection_t *conn)
 		status_code = __do_request(conn);
 
 		link->status_code = status_code;
-		++link->nr_requests;
+		++(link->nr_requests);
 
 		switch(status_code)
 		{
@@ -953,6 +957,7 @@ __iterate_cached_links(wr_cache_t *cachep, connection_t *conn)
 
 		next:
 		++link;
+		TRAILING_SLASH = 0;
 	}
 
 	return choice;
@@ -1198,6 +1203,8 @@ main(int argc, char *argv[])
 		conn.page[strlen(link->url)] = 0;
 
 		wr_cache_clear_all(http_lcache);
+
+		TRAILING_SLASH = 0;
 	}
 
 	/*
