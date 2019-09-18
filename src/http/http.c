@@ -797,8 +797,6 @@ http_parse_host(char *url, char *host)
 	strncpy(host, p, endp - p);
 	host[endp - p] = 0;
 
-	printf("host=%s\n", host);
-
 	return host;
 }
 
