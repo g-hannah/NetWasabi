@@ -4,4 +4,6 @@
 *.gch
 *.txt
 *.html
+*.log
+core
 webreaper
