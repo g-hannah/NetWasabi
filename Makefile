@@ -15,6 +15,7 @@ PRIMARY_OBJS := \
 	$(TOP_DIR)/connection.o \
 	$(TOP_DIR)/parse_links.o \
 	$(TOP_DIR)/robots.o \
+	$(TOP_DIR)/utils_url.o \
 	$(TOP_DIR)/webreaper.o
 
 MM_OBJS := \

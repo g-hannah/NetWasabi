@@ -11,6 +11,7 @@ PRIMARY_DEPENDENCIES = \
 	$(INCLUDE_DIR)/http.h \
 	$(INCLUDE_DIR)/malloc.h \
 	$(INCLUDE_DIR)/robots.h \
+	$(INCLUDE_DIR)/utils_url.h \
 	$(INCLUDE_DIR)/webreaper.h
 
 PRIMARY_SOURCE = \
@@ -18,6 +19,7 @@ PRIMARY_SOURCE = \
 	connection.c \
 	parse_links.c \
 	robots.c \
+	utils_url.c \
 	webreaper.c
 
 PRIMARY_OBJS := $(PRIMARY_SOURCE:.c=.o)
