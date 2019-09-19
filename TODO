@@ -1,3 +1,5 @@
 Improve cookie storage implementation (current wr_cache_t is overkill)
 
-Fix bug in __http_do_chunked_recv (stopping prematurely when more chunks to come)
+FIX BUG IN __HTTP_DO_CHUNKED_RECV:
+	Now and then, when there is a larger chunk size (e.g., 14000 bytes),
+	the program hangs (presumably stuck in a recv() / SSL_read() syscall...
