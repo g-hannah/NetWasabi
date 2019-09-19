@@ -125,6 +125,8 @@ wr_cache_create(char *name,
 	wr_cache_t	*cachep = malloc(sizeof(wr_cache_t));
 	clear_struct(cachep);
 
+	cachep->name = wr_calloc(WR_CACHE_MAX_NAME, 1);
+	strcpy(cachep->name, name);
 	cachep->cache = wr_calloc(WR_CACHE_SIZE, 1);
 	cachep->objsize = size;
 	int capacity = (WR_CACHE_SIZE / size);
@@ -193,6 +195,12 @@ wr_cache_destroy(wr_cache_t *cachep)
 		cachep->capacity);
 #endif
 
+	if (cachep->name)
+	{
+		free(cachep->name);
+		cachep->name = NULL;
+	}
+
 	if (cachep->free_bitmap)
 	{
 		free(cachep->free_bitmap);
@@ -217,6 +225,7 @@ wr_cache_destroy(wr_cache_t *cachep)
 
 	free(cachep->cache);
 	free(cachep);
+	cachep = NULL;
 
 	return;
 }
@@ -250,6 +259,10 @@ wr_cache_alloc(wr_cache_t *cachep)
  */
 	if (idx != -1 && idx < old_capacity)
 	{
+#ifdef DEBUG
+		fprintf(stderr,
+			"Allocating object #%d from cache \"%s\"\n", idx, cachep->name);
+#endif
 		assert(idx < old_capacity);
 		slot = (void *)((char *)cache + (idx * objsize));
 		__wr_cache_mark_used(cachep, idx);
@@ -354,21 +367,20 @@ void
 wr_cache_clear_all(wr_cache_t *cachep)
 {
 	void *obj;
-	int i;
+	size_t objsize = cachep->objsize;
 	int capacity = cachep->capacity;
+	int i;
 
 #ifdef DEBUG
 	fprintf(stderr,
 			"Clearing all objects from cache \"%s\"\n", cachep->name);
 #endif
-	obj = cachep->cache;
-
 	for (i = 0; i < capacity; ++i)
 	{
+		obj = (void *)((char *)cachep->cache + (i * objsize));
+
 		if (wr_cache_obj_used(cachep, obj))
 			wr_cache_dealloc(cachep, obj);
-
-		obj = (void *)((char *)obj + cachep->objsize);
 	}
 
 	return;
