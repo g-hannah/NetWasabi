@@ -19,6 +19,7 @@
 #define HTTP_BAD_GATEWAY 502u
 #define HTTP_SERVICE_UNAV 503u
 #define HTTP_GATEWAY_TIMEOUT 504u
+#define HTTP_ALREADY_EXISTS 0xdeadbeefu
 
 #define HTTP_URL_MAX	256
 #define HTTP_COOKIE_MAX 1024 /* Surely this is more than enough */
