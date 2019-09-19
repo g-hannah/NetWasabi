@@ -17,6 +17,8 @@
 #define likely(x) __builtin_expect(!!(x), 1)
 #define unlikely(x) __builtin_expect(!!(x), 0)
 
+#define __ALIGN(size) (((size) + 0xf) & ~(0xf))
+
 #define MATRIX_INIT(PTR, NUM, ALEN, TYPE) \
 do {\
 	int i;\
