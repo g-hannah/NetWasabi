@@ -68,6 +68,9 @@ buf_collapse(buf_t *buf, off_t offset, size_t range)
 	if (range > buf->buf_size || offset >= buf->buf_size)
 		return;
 
+	assert(offset >= 0);
+	assert(range > 0);
+
 	char *to = (buf->data + offset);
 	char *from = (to + range);
 	char *end = buf->buf_end;
@@ -98,16 +101,31 @@ buf_shift(buf_t *buf, off_t offset, size_t range)
 {
 	assert(buf);
 
-	char *from = buf->buf_head + offset;
-	char *to = from + range;
+	assert(range > 0);
+	assert(offset >= 0);
+	assert(offset < buf->buf_size);
 
-	if (range > buf_slack(buf))
-		buf_extend(buf, __ALIGN(range));
+	char *from;
+	char *to;
+	size_t slack = buf_slack(buf);
+	size_t bytes;
 
-	memmove(to, from, buf->buf_tail - from);
+	if (range > slack)
+		buf_extend(buf, __ALIGN((range - slack)));
+
+	from = (buf->buf_head + offset);
+	to = (from + range);
+
+	bytes = (buf->buf_tail - from);
+	assert(bytes <= buf->buf_size);
+
+	memmove(to, from, bytes);
 	memset(from, 0, range);
 
 	__buf_pull_tail(buf, range);
+
+	assert(buf->buf_tail <= buf->buf_end);
+	assert(buf->buf_head >= buf->buf_head);
 
 	return;
 }
@@ -118,12 +136,21 @@ buf_extend(buf_t *buf, size_t by)
 	assert(buf);
 	assert(buf->data);
 
-	size_t	new_size = (by + buf->buf_size);
-	size_t	tail_off;
-	size_t	head_off;
+	if (by < 0)
+		return -1;
+	else
+	if (!by)
+		return 0;
 
-	tail_off = buf->buf_tail - buf->data;
-	head_off = buf->buf_head - buf->data;
+	size_t	new_size = (by + buf->buf_size);
+	off_t		tail_off;
+	off_t		head_off;
+
+	tail_off = (buf->buf_tail - buf->data);
+	head_off = (buf->buf_head - buf->data);
+
+	assert(head_off >= 0);
+	assert(tail_off >= 0);
 
 	if (!(buf->data = realloc(buf->data, new_size)))
 	{
@@ -210,7 +237,7 @@ buf_init(buf_t *buf, size_t bufsize)
 
 	memset(buf, 0, sizeof(*buf));
 
-	if (!(buf->data = calloc(bufsize, 1)))
+	if (!(buf->data = calloc(__ALIGN(bufsize), 1)))
 	{
 		perror("buf_init: calloc error");
 		return -1;
@@ -779,6 +806,40 @@ buf_copy(buf_t *to, buf_t *from)
 	to->buf_tail = (to->data + (from->buf_tail - from->data));
 	to->data_len = from->data_len;
 	to->magic = from->magic;
+
+	return;
+}
+
+void
+buf_replace(buf_t *buf, char *pattern, char *with)
+{
+	assert(buf);
+	assert(pattern);
+	assert(with);
+
+	size_t pattern_len = strlen(pattern);
+	size_t replace_len = strlen(with);
+	char *p;
+	off_t poff;
+
+	p = strstr(buf->buf_head, pattern);
+
+	if (!p)
+		return;
+
+	if (pattern_len > replace_len)
+	{
+		strncpy(p, with, replace_len);
+		p += replace_len;
+		buf_collapse(buf, (off_t)(p - buf->buf_head), (pattern_len - replace_len));
+	}
+	else
+	{
+		poff = (p - buf->buf_head);
+		buf_shift(buf, (off_t)(p - buf->buf_head), (replace_len - pattern_len));
+		p = (buf->buf_head + poff);
+		strncpy(p, with, replace_len);
+	}
 
 	return;
 }
