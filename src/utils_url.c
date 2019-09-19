@@ -24,15 +24,60 @@ make_full_url(connection_t *conn, buf_t *in, buf_t *out)
 
 	char *p = in->buf_head;
 	size_t page_len;
+	static char tmp_page[1024];
 
 	buf_clear(out);
 
+/*
+ * Some examples of what we want this function to do:
+ *
+ * https://something.com/
+ *   ==> https://something.com.html
+ * https://something.com/page
+ *   ==> https://something.com/page.html
+ * https://something.com/page/
+ *   ==> https://something.com/page.html
+ * https://something.com
+ *   ==> https://something.com.html
+ * //community.something.com/page
+ *   ==> https://community.something.com/page.html
+ * //community.something.com
+ *   ==> https://community.something.com.html
+ * /forum/category/page
+ *   ==> https://<previously-saved-host>/forum/category/page.html
+ * ./page
+ *   ==> https://<previously-saved-host>/<previously-saved-page>/page.html
+ */
+
+/*
+ * Handle already-full URLs.
+ */
 	if (!strncmp("http", p, 4))
 	{
+		http_parse_page(in->buf_head, tmp_page);
+		page_len = strlen(tmp_page);
+
 		buf_append(out, in->buf_head);
+
+		if (tmp_page[page_len - 1] == '/')
+			buf_snip(out, (size_t)1);
+
+		if (page_len == 1 && tmp_page[0] == '/')
+		{
+			buf_append(out, ".html");
+		}
+		else
+		{
+			if (!has_extension(tmp_page))
+				buf_append(out, ".html");
+		}
+
 		return 0;
 	}
 
+/*
+ * Handle relative URLs.
+ */
 	if (option_set(OPT_USE_TLS))
 		buf_append(out, "https://");
 	else
@@ -42,6 +87,15 @@ make_full_url(connection_t *conn, buf_t *in, buf_t *out)
 	{
 		p += 2;
 		buf_append(out, p);
+
+		http_parse_page(out->buf_head, tmp_page);
+		page_len = strlen(tmp_page);
+
+		if (tmp_page[page_len - 1] == '/')
+			buf_snip(out, (size_t)1);
+
+		if (!has_extension(tmp_page))
+			buf_append(out, ".html");
 	}
 	else
 	{
@@ -58,7 +112,7 @@ make_full_url(connection_t *conn, buf_t *in, buf_t *out)
 			buf_append(out, conn->page);
 			page_len = strlen(conn->page);
 
-			if (conn->page[page_len-1] != '/')
+			if (conn->page[page_len -1 ] != '/')
 				buf_append(out, "/");
 
 			buf_append(out, p);
@@ -68,6 +122,12 @@ make_full_url(connection_t *conn, buf_t *in, buf_t *out)
 			buf_append(out, p);
 		}
 	}
+
+	if (*(out->buf_tail - 1) == '/')
+		buf_snip(out, (size_t)1);
+
+	if (!has_extension(tmp_page))
+		buf_append(out, ".html");
 
 	return 0;
 }
@@ -80,6 +140,11 @@ make_local_url(connection_t *conn, buf_t *url, buf_t *path)
 
 	char *home = getenv("HOME");
 	char *p;
+	static char tmp_page[1024];
+	size_t page_len;
+
+	http_parse_page(url->buf_head, tmp_page);
+	page_len = strlen(tmp_page);
 
 	if (strncmp("http", url->buf_head, 4))
 	{
@@ -98,6 +163,13 @@ make_local_url(connection_t *conn, buf_t *url, buf_t *path)
 		++p;
 
 	buf_append(path, p);
+
+	if (tmp_page[page_len - 1] == '/')
+		buf_snip(path, (size_t)1);
+
+	if (!has_extension(tmp_page))
+		buf_append(path, ".html");
+
 	return 0;
 }
 
@@ -139,6 +211,19 @@ local_archive_exists(char *link)
 	buf_destroy(&tmp);
 
 	if (exists == 0)
+		return 1;
+	else
+		return 0;
+}
+
+int
+has_extension(char *page)
+{
+	assert(page);
+
+	size_t page_len = strlen(page);
+
+	if (memchr(page, '.', page_len))
 		return 1;
 	else
 		return 0;
