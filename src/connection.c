@@ -180,6 +180,8 @@ reconnect(connection_t *conn)
 	close(conn->sock);
 	conn->sock = -1;
 
+	fprintf(stdout, "Reconnecting to %s\n", conn->host);
+
 	if (option_set(OPT_USE_TLS))
 	{
 		SSL_CTX_free(conn->ssl_ctx);
