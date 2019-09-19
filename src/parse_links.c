@@ -86,7 +86,7 @@ parse_links(wr_cache_t *cachep, connection_t *conn, char *host)
 
 	buf_init(&url, HTTP_URL_MAX);
 	buf_init(&full_url, HTTP_URL_MAX);
-	buf_init(&path, pathconf("/", _PC_PATH_MAX));
+	buf_init(&path, path_max);
 
 	tail = buf->buf_tail;
 
@@ -125,10 +125,10 @@ parse_links(wr_cache_t *cachep, connection_t *conn, char *host)
 		assert(aidx < cur_size);
 
 	/*
-	 * Ignore URLs that refer
-	 * to part of their own page.
+	 * Ignore URLs that refer to part of their own page
+	 * and URLs that have parameters (page.php?id=1234).
 	 */
-		if (memchr(savep, '#', url_len))
+		if (memchr(savep, '#', url_len) || memchr(savep, '?', url_len))
 		{
 			savep = ++p;
 			continue;
