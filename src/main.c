@@ -826,15 +826,15 @@ __do_request(connection_t *conn)
  * @conn: our struct with connection context
  */
 static int
-__iterate_cached_links(wr_cache_t *cachep, connection_t *conn)
+__iterate_cached_links(wr_cache_t *cachep, connection_t *conn, int *choice)
 {
 	assert(cachep);
 	assert(conn);
 
 	int nr_links = wr_cache_nr_used(cachep);
 	int status_code = 0;
-	int choice;
 	int i;
+	int loops = 0;
 	size_t len;
 	http_link_t *link;
 	buf_t *wbuf = &conn->write_buf;
@@ -853,9 +853,17 @@ __iterate_cached_links(wr_cache_t *cachep, connection_t *conn)
 	 */
 	while (HTTP_OK != status_code)
 	{
-		choice = (rand() % nr_links);
+		++loops;
 
-		link = (http_link_t *)((char *)http_lcache->cache + (choice * cachep->objsize));
+		if (loops >= nr_links)
+		{
+			fprintf(stderr, "__iterate_cached_links: no working linkes to follow\n");
+			return -1;
+		}
+
+		*choice = (rand() % nr_links);
+
+		link = (http_link_t *)((char *)http_lcache->cache + (*choice * cachep->objsize));
 		len = strlen(link->url);
 
 		strncpy(conn->full_url, link->url, len);
@@ -875,36 +883,31 @@ __iterate_cached_links(wr_cache_t *cachep, connection_t *conn)
 				reconnect(conn);
 				break;
 			default:
-				return status_code;
+				continue;
 		}
 	}
 
 	fprintf(stderr, "FOUND WORKING LINK TO FOLLOW NEXT %s\n", link->url);
-	//wr_cache_clear_all(cookies);
 
 	link = (http_link_t *)cachep->cache;
 
 	for (i = 0; i < nr_links; ++i)
 	{
-		if (i == choice)
+		if (i == *choice)
 		{
 			++link;
 			continue;
 		}
 
 		sleep(SLEEP_TIME);
-
 		buf_clear(wbuf);
-
 		len = strlen(link->url);
 
 		strncpy(conn->full_url, link->url, len);
 		conn->full_url[len] = 0;
 
 		http_parse_page(conn->full_url, conn->page);
-
 		__check_host(conn);
-		//__adjust_host_and_page(conn);
 
 		resend:
 		if (link->nr_requests > 2) /* loop */
@@ -952,7 +955,7 @@ __iterate_cached_links(wr_cache_t *cachep, connection_t *conn)
 		TRAILING_SLASH = 0;
 	}
 
-	return choice;
+	return 0;
 
 	fail:
 	return -1;
@@ -1049,6 +1052,7 @@ main(int argc, char *argv[])
 	http_link_t *link = NULL;
 	int status_code;
 	int choice = 0;
+	int _nr_links = 0;
 	size_t url_len;
 
 	conn_init(&conn);
@@ -1175,19 +1179,16 @@ main(int argc, char *argv[])
 		 * Choose one of the links at random (rand() MODULO #links)
 		 * to follow and proceed to extract links from its page
 		 */
-		choice = __iterate_cached_links(http_lcache, &conn);
+		if (__iterate_cached_links(http_lcache, &conn, &choice) < 0)
+			goto out_disconnect;
+
+		_nr_links = wr_cache_nr_used(http_lcache);
 
 		if (choice < 0)
 			goto out_disconnect;
 
-#ifdef DEBUG
-		fprintf(stderr, "CHOSEN TO FOLLOW LINK #%d\n", choice);
-#endif
-
-		int nr_links = wr_cache_nr_used(http_lcache);
-
-		assert(nr_links > 0);
-		assert(choice < nr_links);
+		assert(_nr_links > 0);
+		assert(choice < _nr_links);
 
 		link = (http_link_t *)((char *)http_lcache->cache + (choice * http_lcache->objsize));
 
