@@ -59,18 +59,13 @@ make_full_url(connection_t *conn, buf_t *in, buf_t *out)
 
 		buf_append(out, in->buf_head);
 
-		if (tmp_page[page_len - 1] == '/')
+		if (*(out->buf_tail - 1) == '/')
 			buf_snip(out, (size_t)1);
 
-		if (page_len == 1 && tmp_page[0] == '/')
-		{
+		if (!has_extension(tmp_page))
 			buf_append(out, ".html");
-		}
 		else
-		{
-			if (!has_extension(tmp_page))
-				buf_append(out, ".html");
-		}
+			buf_replace(out, ".php", ".html");
 
 		return 0;
 	}
@@ -91,11 +86,13 @@ make_full_url(connection_t *conn, buf_t *in, buf_t *out)
 		http_parse_page(out->buf_head, tmp_page);
 		page_len = strlen(tmp_page);
 
-		if (tmp_page[page_len - 1] == '/')
+		if (*(out->buf_tail - 1) == '/')
 			buf_snip(out, (size_t)1);
 
 		if (!has_extension(tmp_page))
 			buf_append(out, ".html");
+		else
+			buf_replace(out, ".php", ".html");
 	}
 	else
 	{
@@ -112,7 +109,7 @@ make_full_url(connection_t *conn, buf_t *in, buf_t *out)
 			buf_append(out, conn->page);
 			page_len = strlen(conn->page);
 
-			if (conn->page[page_len -1 ] != '/')
+			if (conn->page[page_len - 1] != '/')
 				buf_append(out, "/");
 
 			buf_append(out, p);
@@ -128,6 +125,8 @@ make_full_url(connection_t *conn, buf_t *in, buf_t *out)
 
 	if (!has_extension(tmp_page))
 		buf_append(out, ".html");
+	else
+		buf_replace(out, ".php", ".html");
 
 	return 0;
 }
@@ -141,10 +140,8 @@ make_local_url(connection_t *conn, buf_t *url, buf_t *path)
 	char *home = getenv("HOME");
 	char *p;
 	static char tmp_page[1024];
-	size_t page_len;
 
 	http_parse_page(url->buf_head, tmp_page);
-	page_len = strlen(tmp_page);
 
 	if (strncmp("http", url->buf_head, 4))
 	{
@@ -164,11 +161,13 @@ make_local_url(connection_t *conn, buf_t *url, buf_t *path)
 
 	buf_append(path, p);
 
-	if (tmp_page[page_len - 1] == '/')
+	if (*(path->buf_tail - 1) == '/')
 		buf_snip(path, (size_t)1);
 
 	if (!has_extension(tmp_page))
 		buf_append(path, ".html");
+	else
+		buf_replace(path, ".php", ".html");
 
 	return 0;
 }
