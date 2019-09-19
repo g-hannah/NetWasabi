@@ -555,7 +555,6 @@ __check_local_dirs(connection_t *conn, buf_t *filename)
 	}
 
 	buf_destroy(&_tmp);
-	fprintf(stderr, "Returning ZERO to caller\n");
 	return 0;
 }
 
@@ -570,6 +569,10 @@ __replace_with_local_urls(connection_t *conn, buf_t *buf)
 	char *savep;
 	char *url_start;
 	char *url_end;
+	off_t url_start_off;
+	off_t url_end_off;
+	off_t savep_off;
+	off_t poff;
 	size_t href_len = strlen("href=\"");
 	size_t range;
 	buf_t url;
@@ -580,11 +583,30 @@ __replace_with_local_urls(connection_t *conn, buf_t *buf)
 	buf_init(&path, HTTP_URL_MAX);
 	buf_init(&full, HTTP_URL_MAX);
 
+#define save_pointers()\
+do {\
+	savep_off = (savep - buf->buf_head);\
+	poff = (savep - buf->buf_head);\
+	url_start_off = (url_start - buf->buf_head);\
+	url_end_off = (url_end - buf->buf_head);\
+} while (0)
+
+#define restore_pointers()\
+do {\
+	savep = (buf->buf_head + savep_off);\
+	p = (buf->buf_head + poff);\
+	url_start = (buf->buf_head + url_start_off);\
+	url_end = (buf->buf_head + url_end_off);\
+} while (0)
+
 	savep = buf->buf_head;
 
 	while (1)
 	{
 		buf_clear(&url);
+
+		assert(buf->buf_tail <= buf->buf_end);
+		assert(buf->buf_head >= buf->data);
 
 		p = strstr(savep, "href=\"");
 
@@ -600,6 +622,12 @@ __replace_with_local_urls(connection_t *conn, buf_t *buf)
 			continue;
 		}
 
+		assert(url_start < buf->buf_tail);
+		assert(url_end < buf->buf_tail);
+		assert(p < buf->buf_tail);
+		assert(savep < buf->buf_tail);
+		assert((tail - buf->buf_head) == (buf->buf_tail - buf->buf_head));
+
 		range = (url_end - url_start);
 
 		if (range >= HTTP_URL_MAX)
@@ -608,10 +636,10 @@ __replace_with_local_urls(connection_t *conn, buf_t *buf)
 			continue;
 		}
 
+		assert(range < HTTP_URL_MAX);
+
 		buf_append_ex(&url, url_start, range);
 		BUF_NULL_TERMINATE(&url);
-
-		assert(range >= 0);
 
 		if (range)
 		{
@@ -622,13 +650,31 @@ __replace_with_local_urls(connection_t *conn, buf_t *buf)
 				buf_collapse(buf, (off_t)(url_start - buf->buf_head), range);
 				tail = buf->buf_tail;
 
+				save_pointers();
+
+				assert(path.data_len < path_max);
 				buf_shift(buf, (off_t)(url_start - buf->buf_head), path.data_len);
-				strncpy(url_start, path.buf_head, path.data_len);
+
+				restore_pointers();
 				tail = buf->buf_tail;
+
+				assert((url_start - buf->buf_head) == url_start_off);
+				assert((url_end - buf->buf_head) == url_end_off);
+				assert((p - buf->buf_head) == poff);
+				assert((savep - buf->buf_head) == savep_off);
+
+				strncpy(url_start, path.buf_head, path.data_len);
 			}
 		}
 
+		assert(url.magic == BUFFER_MAGIC);
+		assert(full.magic == BUFFER_MAGIC);
+		assert(path.magic == BUFFER_MAGIC);
+
 		savep = ++url_end;
+
+		if (savep >= tail)
+			break;
 	}
 }
 
@@ -900,6 +946,8 @@ __iterate_cached_links(wr_cache_t *cachep, connection_t *conn, int *choice)
 
 		switch(status_code)
 		{
+			fprintf(stdout, "%s%s\n", ACTION_ING_STR, http_status_code_string(status_code));
+
 			case HTTP_OK:
 				link->time_reaped = time(NULL);
 				break;
@@ -976,10 +1024,10 @@ __check_directory(void)
 
 	buf_init(&tmp, path_max);
 	buf_append(&tmp, home);
-	buf_append(&tmp, "/WR_Reaped");
+	buf_append(&tmp, "/" WEBREAPER_DIR);
 
 	if (access(tmp.buf_head, F_OK) != 0)
-		mkdir(tmp.buf_head, S_IRUSR|S_IWUSR|S_IXUSR);
+		mkdir(tmp.buf_head, S_IRWXU);
 
 	buf_destroy(&tmp);
 
@@ -993,13 +1041,31 @@ int
 main(int argc, char *argv[])
 {
 	if (argc < 2)
+	{
 		usage(EXIT_FAILURE);
-
-	__print_prog_info();
+	}
 
 	if (get_opts(argc, argv) < 0)
+	{
+		fprintf(stderr, "main: failed to parse program options\n");
 		goto fail;
+	}
 
+	if (strlen(argv[1]) >= HTTP_URL_MAX)
+	{
+		fprintf(stderr, "URL too long (>= %d)\n", HTTP_URL_MAX);
+		usage(EXIT_FAILURE);
+	}
+#if 0
+	else
+	if (!valid_url(argv[1]))
+	{
+		fprintf(stderr, "\"%s\" is an invalid URL\n", argv[1]);
+		usage(EXIT_FAILURE);
+	}
+#endif
+
+	__print_prog_info();
 	srand(time(NULL));
 
 	clear_struct(&new_act);
@@ -1031,6 +1097,8 @@ main(int argc, char *argv[])
 	int _nr_links = 0;
 	int do_not_archive = 0;
 	size_t url_len;
+	buf_t *rbuf;
+	buf_t *wbuf;
 
 	conn_init(&conn);
 
@@ -1038,6 +1106,9 @@ main(int argc, char *argv[])
 	http_parse_page(argv[1], conn.page);
 
 	url_len = strlen(argv[1]);
+
+	assert(url_len < HTTP_URL_MAX);
+
 	strncpy(conn.full_url, argv[1], url_len);
 	conn.full_url[url_len] = 0;
 
@@ -1057,6 +1128,9 @@ main(int argc, char *argv[])
 	 */
 	if (open_connection(&conn) < 0)
 		goto fail;
+
+	rbuf = &conn.read_buf;
+	wbuf = &conn.write_buf;
 
 	/*
 	 * Create a new cache for http_link_t objects.
@@ -1110,8 +1184,8 @@ main(int argc, char *argv[])
 		 */
 		sleep(SLEEP_TIME);
 
-		buf_clear(&conn.read_buf);
-		buf_clear(&conn.write_buf);
+		buf_clear(rbuf);
+		buf_clear(wbuf);
 
 		do_not_archive = 0;
 		printf(">>> %s%s%s <<<\n", COL_ORANGE, conn.page, COL_END);
@@ -1166,6 +1240,8 @@ main(int argc, char *argv[])
 		assert(choice < _nr_links);
 
 		link = (http_link_t *)((char *)http_lcache->cache + (choice * http_lcache->objsize));
+
+		assert(strlen(link->url) < HTTP_URL_MAX);
 
 		strncpy(conn.page, link->url, strlen(link->url));
 		conn.page[strlen(link->url)] = 0;
