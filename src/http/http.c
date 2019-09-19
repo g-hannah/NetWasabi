@@ -633,10 +633,7 @@ http_recv_response(connection_t *conn)
  */
 
 	if (strstr(conn->write_buf.buf_head, "HEAD"))
-	{
-		//buf_collapse(&conn->read_buf, (off_t)(p - conn->read_buf.buf_head), (conn->read_buf.buf_tail - p));
 		goto out_dealloc;
-	}
 
 	if (http_fetch_header(&conn->read_buf, "Transfer-Encoding", transfer_enc, (off_t)0))
 	{
@@ -681,22 +678,20 @@ http_recv_response(connection_t *conn)
 	}
 	else
 	{
-		clen = 0;
-
 		read_again:
 
 		bytes = 0;
 		p = NULL;
 
 		if (option_set(OPT_USE_TLS))
-			bytes = buf_read_tls(conn->ssl, &conn->read_buf, clen);
+			bytes = buf_read_tls(conn->ssl, buf, 0);
 		else
-			bytes = buf_read_socket(conn->sock, &conn->read_buf, clen);
+			bytes = buf_read_socket(conn->sock, buf, 0);
 
 		if (bytes < 0)
 			goto fail_dealloc;
 
-		p = strstr(conn->read_buf.buf_head, "</body");
+		p = strstr(buf->buf_head, "</body");
 
 		if (!p)
 		{
@@ -733,7 +728,6 @@ http_status_code_int(buf_t *buf)
 	char *tail = buf->buf_tail;
 	char *head = buf->buf_head;
 	static char code_str[16];
-	//size_t data_len = buf->data_len;
 
 	/*
 	 * HTTP/1.1 200 OK\r\n
@@ -749,7 +743,11 @@ http_status_code_int(buf_t *buf)
 	++p;
 
 	q = memchr(p, 0x20, (tail - p));
+
 	if (!q)
+		return -1;
+
+	if ((q - p) >= 16)
 		return -1;
 
 	strncpy(code_str, p, (q - p));
@@ -812,20 +810,14 @@ http_response_header_len(buf_t *buf)
 {
 	assert(buf);
 
-	char	*p = buf->data;
-	char	*q = NULL;
+	char	*p;
 
 	if (!buf_integrity(buf))
 		return -1;
 
-	q = strstr(p, HTTP_EOH_SENTINEL);
+	p = HTTP_EOH(buf);
 
-	if (!q)
-		return -1;
-
-	q += strlen(HTTP_EOH_SENTINEL);
-
-	return (q - p);
+	return (p - buf->buf_head);
 }
 
 char *
@@ -930,16 +922,18 @@ http_check_header(buf_t *buf, const char *name, off_t off, off_t *ret_off)
 
 	char *check_from = buf->buf_head + off;
 	char *p;
+	char *tail = buf->buf_tail;
 
 	if ((p = strstr(check_from, name)))
 	{
-		*ret_off = (off_t)(p - buf->buf_head);
-		return 1;
+		if (p < tail)
+		{
+			*ret_off = (off_t)(p - buf->buf_head);
+			return 1;
+		}
 	}
-	else
-	{
-		return 0;
-	}
+
+	return 0;
 }
 
 /**
@@ -958,25 +952,35 @@ http_fetch_header(buf_t *buf, const char *name, http_header_t *hh, off_t whence)
 
 	char *check_from = buf->buf_head + whence;
 	char *tail = buf->buf_tail;
+	char *eoh = HTTP_EOH(buf);
+	char *eol;
 	char *p;
 	char *q;
-	char *hend;
+
+	hh->name[0] = 0;
+	hh->value[0] = 0;
+	hh->nlen = 0;
+	hh->vlen = 0;
+
+	if (!eoh)
+	{
+		fprintf(stderr, "http_get_header: failed to find end of header\n");
+		errno = EPROTO;
+		return NULL;
+	}
 
 	p = strstr(check_from, name);
 
-	if (!p)
+	if (!p || p > eoh)
 		return NULL;
 
-	hend = strstr(check_from, HTTP_EOH_SENTINEL);
-	if (!hend)
-	{
-		fprintf(stderr,
-				"http_get_header: failed to find end of header sentinel\n");
-		errno = EPROTO;
-		goto out_clear_ret;
-	}
+	eol = memchr(p, '\r', (tail - p));
 
-	q = memchr(p, ':', (tail - p));
+	if (!eol)
+		return NULL;
+
+	q = memchr(p, ':', (eol - p));
+
 	if (!q)
 		return NULL;
 
@@ -994,28 +998,16 @@ http_fetch_header(buf_t *buf, const char *name, http_header_t *hh, off_t whence)
 		hh->nlen = (q - p);
 	}
 
-	p = (q + 2);
-	if (*(p-1) != ' ')
-		--p;
+	p = (q + 1);
 
-	q = memchr(p, 0x0d, (tail - p));
-	if (!q)
-		goto out_clear_ret;
+	while (*p == ' ' && p < eol)
+		++p;
 
-	strncpy(hh->value, p, (q - p));
-	hh->value[q - p] = 0;
-	hh->vlen = (q - p);
+	hh->vlen = (eol - p);
+	strncpy(hh->value, p, hh->vlen);
+	hh->value[hh->vlen] = 0;
 
 	return hh->value;
-
-	out_clear_ret:
-	memset(hh->name, 0, hh->nsize);
-	memset(hh->value, 0, hh->vsize);
-	hh->nlen = 0;
-	hh->vlen = 0;
-
-	//fail:
-	return NULL;
 }
 
 int
@@ -1026,28 +1018,31 @@ http_append_header(buf_t *buf, http_header_t *hh)
 
 	char *p;
 	char *head = buf->buf_head;
+	char *eoh = HTTP_EOH(buf);
+	off_t poff;
 
-	p = strstr(head, HTTP_EOH_SENTINEL);
-
-	if (!p)
+	if (!eoh)
 	{
-		fprintf(stderr,
-				"http_append_header: failed to find end of header sentinel\n");
+		fprintf(stderr, "http_append_header: failed to find end of header\n");
 		errno = EPROTO;
 		return -1;
 	}
 
-	p += 2;
+	p = (eoh - 2);
 
 	buf_t tmp;
 
-	buf_init(&tmp, HTTP_COOKIE_MAX+strlen("Cookie: "));
+	assert(hh->vlen < HTTP_COOKIE_MAX);
+
+	buf_init(&tmp, HTTP_COOKIE_MAX + strlen(hh->name) + 2);
 	buf_append(&tmp, hh->name);
 	buf_append(&tmp, ": ");
 	buf_append(&tmp, hh->value);
 	buf_append(&tmp, "\r\n");
 
+	poff = (p - buf->buf_head);
 	buf_shift(buf, (off_t)(p - head), tmp.data_len);
+	p = (buf->buf_head + poff);
 
 	strncpy(p, tmp.buf_head, tmp.data_len);
 
@@ -1056,6 +1051,7 @@ http_append_header(buf_t *buf, http_header_t *hh)
 	return 0;
 }
 
+#if 0
 int
 http_parse_header(buf_t *buf, wr_cache_t *cachep)
 {
@@ -1065,10 +1061,18 @@ http_parse_header(buf_t *buf, wr_cache_t *cachep)
 	http_header_t *hp;
 	char *p;
 	char *savep;
-	char *line;
 	char *tail = buf->buf_tail;
 	char *head = buf->buf_head;
+	char *eoh = HTTP_EOH(buf);
+	char *eol;
 	size_t len;
+
+	if (!eoh)
+	{
+		fprintf(stderr, "http_parse_header: failed to find end of header\n");
+		errno = EPROTO;
+		return -1;
+	}
 
 	p = head;
 
@@ -1076,12 +1080,12 @@ http_parse_header(buf_t *buf, wr_cache_t *cachep)
 	{
 		savep = p;
 
-		line = memchr(savep, 0x0d, tail - savep);
+		eol = memchr(savep, '\r', (tail - savep));
 
-		if (!line)
+		if (!eol)
 			break;
 
-		p = memchr(savep, ':', line - savep);
+		p = memchr(savep, ':', (eol - savep));
 
 		if (!p)
 			break;
@@ -1096,7 +1100,7 @@ http_parse_header(buf_t *buf, wr_cache_t *cachep)
 
 		++p;
 
-		while ((*p == ' ' || *p == '\t') && p < tail)
+		while (*p == ' ' && p < tail)
 			++p;
 
 		if (p == tail)
@@ -1104,17 +1108,17 @@ http_parse_header(buf_t *buf, wr_cache_t *cachep)
 
 		savep = p;
 
-		len = (line - p);
+		len = (eol - p);
 		strncpy(hp->value, p, len);
 		hp->value[len] = 0;
 		hp->vlen = len;
 
-		while ((*p == 0x0a || *p == 0x0d) && p < tail)
-			++p;
+		SKIP_CRNL(p);
 
-		if (p == tail)
+		if (p >= tail)
 			break;
 	}
 
 	return 0;
 }
+#endif
