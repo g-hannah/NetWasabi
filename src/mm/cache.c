@@ -157,14 +157,10 @@ wr_cache_create(char *name,
 	printf(
 			"Created cache \"%s\"\n"
 			"Size of each object=%lu bytes\n"
-			"Capacity of cache=%d objects\n"
-			"%s\n"
-			"%s\n",
+			"Capacity of cache=%d objects\n",
 			name,
 			size,
-			capacity,
-			ctor ? "constructor provided\n" : "constructor not provided\n",
-			dtor ? "destructor provided\n" : "destructor not provided\n");
+			capacity);
 #endif
 
 	return cachep;
@@ -184,6 +180,18 @@ wr_cache_destroy(wr_cache_t *cachep)
 	void *obj = NULL;
 	void *cache = NULL;
 	size_t objsize = cachep->objsize;
+
+#ifdef DEBUG
+	fprintf(stderr,
+		"Destroying cache \"%s\"\n"
+		"Size of cache = %lu bytes\n"
+		"Size of objects = %lu bytes\n"
+		"Cache capacity = %d objects\n",
+		cachep->name,
+		cachep->cache_size,
+		cachep->objsize,
+		cachep->capacity);
+#endif
 
 	if (cachep->free_bitmap)
 	{
@@ -257,15 +265,23 @@ wr_cache_alloc(wr_cache_t *cachep)
 		new_capacity = (new_size / objsize);
 		added_capacity = (new_capacity - old_capacity);
 
+#ifdef DEBUG
 		fprintf(stderr,
-			"doubling cache size to %lu bytes\n"
-			"old_capacity=%d\n"
-			"new_capacity=%d\n"
-			"added_capacity=%d\n",
-			new_size,
+			"Extending cache \"%s\"\n"
+			"Size of objects = %lu bytes\n"
+			"Current cache size = %lu bytes\n"
+			"Current capacity = %d objects\n"
+			"New cache size = %lu bytes\n"
+			"New capacity = %d objects\n"
+			"Added capacity = %d objects\n",
+			cachep->name,
+			objsize,
+			cache_size,
 			old_capacity,
+			new_size,
 			new_capacity,
 			added_capacity);
+#endif
 
 		cachep->cache = wr_realloc(cachep->cache, cache_size * 2);
 		cachep->free_bitmap = wr_realloc(cachep->free_bitmap, bitmap_size * 2);
@@ -316,12 +332,18 @@ wr_cache_dealloc(wr_cache_t *cachep, void *slot)
 	assert(cachep);
 	assert(slot);
 
-	off_t obj_off;
+	int obj_idx;
 	size_t objsize = cachep->objsize;
 
-	obj_off = (off_t)(((char *)slot - (char *)cachep->cache) / objsize);
+	obj_idx = (int)(((char *)slot - (char *)cachep->cache) / objsize);
 
-	__wr_cache_mark_unused(cachep, obj_off);
+#ifdef DEBUG
+	fprintf(stderr,
+			"Deallocating object #%d from cache \"%s\"\n",
+			obj_idx, cachep->name);
+#endif
+
+	__wr_cache_mark_unused(cachep, obj_idx);
 	WR_CACHE_INC_FREE(cachep);
 	assert(wr_cache_nr_used(cachep) >= 0);
 
@@ -335,6 +357,10 @@ wr_cache_clear_all(wr_cache_t *cachep)
 	int i;
 	int capacity = cachep->capacity;
 
+#ifdef DEBUG
+	fprintf(stderr,
+			"Clearing all objects from cache \"%s\"\n", cachep->name);
+#endif
 	obj = cachep->cache;
 
 	for (i = 0; i < capacity; ++i)
