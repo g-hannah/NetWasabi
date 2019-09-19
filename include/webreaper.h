@@ -93,6 +93,7 @@ do {\
 
 extern uint32_t runtime_options;
 int TRAILING_SLASH;
+int path_max;
 
 #define option_set(o) ((o) & runtime_options)
 #define set_option(o) (runtime_options |= (o))
