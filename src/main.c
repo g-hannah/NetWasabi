@@ -32,14 +32,15 @@ wr_cache_t *http_lcache;
 wr_cache_t *cookies;
 int TRAILING_SLASH = 0;
 
-int PATHMAX = 0;
+int path_max = 1024;
 
 static void
 __ctor __wr_init(void)
 {
-	PATHMAX = pathconf("/", _PC_PATH_MAX);
-	if (PATHMAX == 0)
-		PATHMAX = 1024;
+	path_max = pathconf("/", _PC_PATH_MAX);
+
+	if (!path_max)
+		path_max = 1024;
 }
 
 /*
@@ -760,8 +761,14 @@ __handle301(connection_t *conn)
 	http_parse_page(conn->full_url, conn->page);
 
 #ifdef DEBUG
-	fprintf(stderr, "PARSED PAGE=%s (location header=%s)\n", conn->page, location->value);
+	fprintf(stderr,
+		"PARSED PAGE=%s (location header=%s)\n"
+		"PARSED HOST=%s\n",
+		conn->page, location->value,
+		conn->host);
 #endif
+
+	assert(!memchr(conn->host, '/', strlen(conn->host)));
 
 	wr_cache_dealloc(http_hcache, (void *)location);
 
@@ -794,6 +801,8 @@ __do_request(connection_t *conn)
 		case HTTP_FOUND:
 		case HTTP_MOVED_PERMANENTLY:
 			__handle301(conn);
+			if (local_archive_exists(conn->full_url))
+				return HTTP_ALREADY_EXISTS;
 			//reconnect(conn); /* server resets connection after HEAD */
 			goto resend_head;
 			break;
@@ -938,6 +947,7 @@ __iterate_cached_links(wr_cache_t *cachep, connection_t *conn, int *choice)
 				buf_clear(wbuf);
 				goto resend;
 				break;
+			case HTTP_ALREADY_EXISTS:
 			case HTTP_BAD_REQUEST:
 			case HTTP_NOT_FOUND:
 				goto next;
@@ -998,7 +1008,7 @@ __check_directory(void)
 	char *home = getenv("HOME");
 	buf_t tmp;
 
-	buf_init(&tmp, PATHMAX);
+	buf_init(&tmp, path_max);
 	buf_append(&tmp, home);
 	buf_append(&tmp, "/WR_Reaped");
 
@@ -1053,6 +1063,7 @@ main(int argc, char *argv[])
 	int status_code;
 	int choice = 0;
 	int _nr_links = 0;
+	int do_not_archive = 0;
 	size_t url_len;
 
 	conn_init(&conn);
@@ -1136,6 +1147,7 @@ main(int argc, char *argv[])
 		buf_clear(&conn.read_buf);
 		buf_clear(&conn.write_buf);
 
+		do_not_archive = 0;
 		printf(">>> %s%s%s <<<\n", COL_ORANGE, conn.page, COL_END);
 		status_code = __do_request(&conn);
 
@@ -1146,6 +1158,11 @@ main(int argc, char *argv[])
 			case HTTP_MOVED_PERMANENTLY:
 			case HTTP_FOUND:
 				__handle301(&conn);
+				if (local_archive_exists(conn.full_url))
+				{
+					do_not_archive = 1;
+					goto extract_urls;
+				}
 				goto loop_start;
 				break;
 			case HTTP_NOT_FOUND:
@@ -1168,12 +1185,15 @@ main(int argc, char *argv[])
 	 * Extract the URLs first, because __archive_page()
 	 * replaces the URLs with local ones ("file:///...")
 	 */
+		extract_urls:
 		fprintf(stderr, "%sExtracting URLs\n", ACTION_ING_STR);
 		parse_links(http_lcache, &conn, conn.host);
 
-
-		fprintf(stderr, "%sArchiving %s\n", ACTION_ING_STR, conn.page);
-		__archive_page(&conn);
+		if (!do_not_archive)
+		{
+			fprintf(stderr, "%sArchiving %s\n", ACTION_ING_STR, conn.page);
+			__archive_page(&conn);
+		}
 
 		/*
 		 * Choose one of the links at random (rand() MODULO #links)
