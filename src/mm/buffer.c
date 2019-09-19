@@ -12,6 +12,7 @@
 #include <unistd.h>
 #include "buffer.h"
 #include "malloc.h"
+#include "webreaper.h"
 
 static inline void
 __buf_reset_head(buf_t *buf)
@@ -101,7 +102,7 @@ buf_shift(buf_t *buf, off_t offset, size_t range)
 	char *to = from + range;
 
 	if (range > buf_slack(buf))
-		buf_extend(buf, range);
+		buf_extend(buf, __ALIGN(range));
 
 	memmove(to, from, buf->buf_tail - from);
 	memset(from, 0, range);
@@ -156,7 +157,7 @@ buf_append(buf_t *buf, char *str)
 
 	if (new_size > buf_slack(buf))
 	{
-		buf_extend(buf, len);
+		buf_extend(buf, __ALIGN(len));
 	}
 
 	strcat(buf->buf_tail, str);
@@ -172,10 +173,10 @@ buf_append_ex(buf_t *buf, char *str, size_t bytes)
 	if (strlen(str) < bytes)
 		return -1;
 
-	size_t new_size = (buf->buf_size + bytes);
+	size_t slack = buf_slack(buf);
 
-	if (new_size > buf_slack(buf))
-		buf_extend(buf, bytes);
+	if (bytes > slack)
+		buf_extend(buf, __ALIGN((bytes - slack)));
 
 	strncpy(buf->buf_tail, str, bytes);
 
@@ -187,6 +188,14 @@ buf_append_ex(buf_t *buf, char *str, size_t bytes)
 void
 buf_snip(buf_t *buf, size_t how_much)
 {
+	off_t tail_off = (buf->buf_tail - buf->data);
+
+	if (how_much > tail_off)
+		how_much = (size_t)tail_off;
+	else
+	if (how_much > buf->buf_size)
+		how_much = buf->buf_size;
+
 	__buf_push_tail(buf, how_much);
 	memset(buf->buf_tail, 0, how_much);
 
@@ -196,6 +205,9 @@ buf_snip(buf_t *buf, size_t how_much)
 int
 buf_init(buf_t *buf, size_t bufsize)
 {
+	if (buf->magic == BUFFER_MAGIC) /* already initialised */
+		return 0;
+
 	memset(buf, 0, sizeof(*buf));
 
 	if (!(buf->data = calloc(bufsize, 1)))
@@ -217,6 +229,7 @@ void
 buf_destroy(buf_t *buf)
 {
 	assert(buf);
+	assert(buf->magic == BUFFER_MAGIC);
 
 	if (buf->data)
 	{
@@ -240,18 +253,19 @@ buf_read_fd(int fd, buf_t *buf, size_t bytes)
 	ssize_t n = 0;
 	ssize_t total_read = 0;
 	size_t buf_size = buf->buf_size;
-	char *p = buf->data;
-	int slack = buf_slack(buf);
+	int slack;
 
 	if (bytes <= 0)
 		return 0;
 
 	if (bytes > buf_size)
-		buf_extend(buf, (bytes - buf_size));
+		buf_extend(buf, __ALIGN((bytes - buf_size)));
+
+	slack = buf_slack(buf);
 
 	while (toread > 0)
 	{
-		n = read(fd, p, toread);
+		n = read(fd, buf->buf_tail, toread);
 
 		if (n < 0)
 		{
@@ -261,12 +275,20 @@ buf_read_fd(int fd, buf_t *buf, size_t bytes)
 				goto fail;
 		}
 
-		p += n;
+		__buf_pull_tail(buf, (size_t)n);
+
 		toread -= n;
 		total_read += n;
 		slack -= n;
 
-		__buf_pull_tail(buf, (size_t)n);
+#define __ALIGN(size) (((size) + 0xf) & ~(0xf))
+
+		if (!slack && toread)
+		{
+			buf_extend(buf, __ALIGN(toread));
+			slack = buf_slack(buf);
+		}
+
 	}
 
 	return total_read;
@@ -303,7 +325,7 @@ buf_read_socket(int sock, buf_t *buf, size_t toread)
 
 		if (toread > slack)
 		{
-			buf_extend(buf, ((toread - slack)+1));
+			buf_extend(buf, __ALIGN((toread - slack)));
 			slack = buf_slack(buf);
 		}
 
@@ -347,7 +369,7 @@ buf_read_socket(int sock, buf_t *buf, size_t toread)
 				/* Just in case */
 				if (!slack)
 				{
-					buf_extend(buf, buf->buf_size);
+					buf_extend(buf, __ALIGN(toread));
 					slack = buf_slack(buf);
 				}
 			}
@@ -431,14 +453,11 @@ buf_read_tls(SSL *ssl, buf_t *buf, size_t toread)
 
 	slack = buf_slack(buf);
 
-	if (toread > buf->buf_size)
-		buf_extend(buf, (toread - buf->buf_size));
-
 	if (toread)
 	{
 		if (toread > slack)
 		{
-			buf_extend(buf, ((toread - slack)+1));
+			buf_extend(buf, __ALIGN((toread - slack)));
 			slack = buf_slack(buf);
 		}
 
@@ -502,9 +521,12 @@ buf_read_tls(SSL *ssl, buf_t *buf, size_t toread)
 				total += n;
 				slack -= n;
 
+				if (!toread)
+					break;
+
 				if (!slack)
 				{
-					buf_extend(buf, buf->buf_size);
+					buf_extend(buf, __ALIGN(toread));
 					slack = buf_slack(buf);
 				}
 			}
@@ -734,6 +756,7 @@ buf_dup(buf_t *copy)
 
 	new->data = wr_calloc(copy->buf_size, 1);
 	memcpy(new->data, copy->data, copy->buf_size);
+	new->buf_end = (new->data + copy->buf_size);
 	new->buf_head = (new->data + (copy->buf_head - copy->data));
 	new->buf_tail = (new->data + (copy->buf_tail - copy->data));
 	new->data_len = copy->data_len;
@@ -748,12 +771,14 @@ buf_copy(buf_t *to, buf_t *from)
 	assert(from);
 
 	if (to->buf_size < from->buf_size)
-		buf_extend(to, (from->buf_size - to->buf_size));
+		buf_extend(to, __ALIGN((from->buf_size - to->buf_size)));
 
 	memcpy(to->data, from->data, from->buf_size);
+	to->buf_end = (to->data + from->buf_size);
 	to->buf_head = (to->data + (from->buf_head - from->data));
 	to->buf_tail = (to->data + (from->buf_tail - from->data));
 	to->data_len = from->data_len;
+	to->magic = from->magic;
 
 	return;
 }
