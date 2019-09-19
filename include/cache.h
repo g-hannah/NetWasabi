@@ -8,6 +8,7 @@
  *   cache nr     obj nr
  */
 #define WR_CACHE_SIZE 4096
+#define WR_CACHE_MAX_NAME 64
 
 #define WR_CACHE_INC_FREE(c) ++((c)->nr_free)
 #define WR_CACHE_DEC_FREE(c) --((c)->nr_free)
