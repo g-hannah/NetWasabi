@@ -13,11 +13,6 @@
 #include "buffer.h"
 #include "malloc.h"
 
-#ifdef DEBUG
-	static void *__old;
-	static void *__new;
-#endif
-
 static inline void
 __buf_reset_head(buf_t *buf)
 {
@@ -129,24 +124,11 @@ buf_extend(buf_t *buf, size_t by)
 	tail_off = buf->buf_tail - buf->data;
 	head_off = buf->buf_head - buf->data;
 
-#ifdef DEBUG
-	__old = buf->data;
-#endif
-
 	if (!(buf->data = realloc(buf->data, new_size)))
 	{
 		fprintf(stderr, "buf_extend: realloc error (%s)\n", strerror(errno));
 		return -1;
 	}
-
-#ifdef DEBUG
-	__new = buf->data;
-
-	if (__old != __new)
-	{
-		fprintf(stderr, "MEMORY WAS MOVED TO ANOTHER LOCATION ON HEAP (OLD=%p ; NEW=%p)\n", __old, __new);
-	}
-#endif
 
 	buf->buf_end = (buf->data + new_size);
 	buf->buf_head = (buf->data + head_off);
@@ -434,11 +416,11 @@ buf_read_tls(SSL *ssl, buf_t *buf, size_t toread)
 	//ssize_t n;
 	int n;
 	ssize_t total = 0;
-	int ssl_error = 0;
+	//int ssl_error = 0;
 	int read_socket = 0;
-	int slept_for = 0;
-	struct timeval timeout = {0};
-	fd_set rdfds;
+	//int slept_for = 0;
+	//struct timeval timeout = {0};
+	//fd_set rdfds;
 	int sock_flags;
 
 	read_socket = SSL_get_rfd(ssl);
@@ -477,6 +459,8 @@ buf_read_tls(SSL *ssl, buf_t *buf, size_t toread)
 				}
 				else
 				{
+					return total;
+#if 0
 					ssl_error = SSL_get_error(ssl, n);
 
 					switch(ssl_error)
@@ -507,6 +491,7 @@ buf_read_tls(SSL *ssl, buf_t *buf, size_t toread)
 						default:
 							goto fail;
 					}
+#endif
 				}
 			}
 			else
@@ -546,6 +531,8 @@ buf_read_tls(SSL *ssl, buf_t *buf, size_t toread)
 				}
 				else
 				{
+					return total;
+#if 0
 					ssl_error = SSL_get_error(ssl, n);
 
 					switch(ssl_error)
@@ -575,6 +562,7 @@ buf_read_tls(SSL *ssl, buf_t *buf, size_t toread)
 						default:
 							goto fail;
 					}
+#endif
 				}
 			}
 			else
@@ -598,7 +586,7 @@ buf_read_tls(SSL *ssl, buf_t *buf, size_t toread)
 	BUF_NULL_TERMINATE(buf);
 	return total;
 
-	fail:
+	//fail:
 	return -1;
 	
 }
