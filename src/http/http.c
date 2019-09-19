@@ -316,7 +316,6 @@ __http_do_chunked_recv(connection_t *conn)
 
 	char *p;
 	char *e;
-	char *t;
 	char *chunk_start;
 	char *__next_size;
 	off_t chunk_offset;
@@ -325,10 +324,18 @@ __http_do_chunked_recv(connection_t *conn)
 	size_t save_size;
 	size_t overread;
 	size_t total;
+#ifndef DEBUG
+	size_t range;
+	char *t;
+#endif
+	size_t torecv;
 	ssize_t bytes_read;
 	static char tmp[HTTP_MAX_CHUNK_STR];
+#ifdef DEBUG
+	int chunk_nr = 0;
+#endif
 
-	p = strstr(buf->buf_head, HTTP_EOH_SENTINEL);
+	p = HTTP_EOH(buf);
 
 	if (!p)
 	{
@@ -336,19 +343,24 @@ __http_do_chunked_recv(connection_t *conn)
 		return -1;
 	}
 
-	p += strlen(HTTP_EOH_SENTINEL);
-
-	t = p;
-	SKIP_CRNL(p);
-
-	if (p - t)
-	{
-		buf_collapse(buf, (off_t)(t - buf->buf_head), (p - t));
-		p = t;
-	}
-
 	while (1)
 	{
+#ifndef DEBUG
+		t = p;
+		SKIP_CRNL(p);
+
+		range = (p - t);
+		if (range)
+		{
+			buf_collapse(buf, (off_t)(t - buf->buf_head), range);
+			p = t;
+		}
+#else
+		++chunk_nr;
+		fprintf(stderr, "Chunk #%d\n", chunk_nr);
+		SKIP_CRNL(p);
+#endif
+
 		e = memchr(p, 0x0d, HTTP_MAX_CHUNK_STR);
 
 		if (!e)
@@ -405,10 +417,13 @@ __http_do_chunked_recv(connection_t *conn)
 
 		save_size = chunk_size;
 
-		SKIP_CRNL(e);
+		//SKIP_CRNL(e);
+		e += 2; /* First byte(s) of next chunk could be 0x0d/0x0a */
 
+#ifndef DEBUG
 		buf_collapse(buf, (off_t)(p - buf->buf_head), (e - p));
 		e = p;
+#endif
 
 		chunk_start = e;
 
@@ -417,16 +432,6 @@ __http_do_chunked_recv(connection_t *conn)
 		if (overread >= chunk_size)
 		{
 			p = (e + save_size);
-
-			t = p;
-			SKIP_CRNL(p);
-
-			if (p - t)
-			{
-				buf_collapse(buf, (off_t)(t - buf->buf_head), (p - t));
-				p = t;
-			}
-
 			continue;
 		}
 		else
@@ -443,16 +448,14 @@ __http_do_chunked_recv(connection_t *conn)
  * Restore pointer after receiving data.
  */
 		chunk_offset = (chunk_start - buf->buf_head);
+		torecv = chunk_size;
 
-		while (1)
+		while (torecv > 0)
 		{
-			if (total >= chunk_size)
-				break;
-
 			if (option_set(OPT_USE_TLS))
-				bytes_read = buf_read_tls(conn->ssl, buf, chunk_size);
+				bytes_read = buf_read_tls(conn->ssl, buf, torecv);
 			else
-				bytes_read = buf_read_socket(conn->sock, buf, chunk_size);
+				bytes_read = buf_read_socket(conn->sock, buf, torecv);
 
 			if (bytes_read < 0)
 				return -1;
@@ -460,7 +463,7 @@ __http_do_chunked_recv(connection_t *conn)
 			if (!bytes_read)
 				continue;
 			else
-				total += bytes_read;
+				torecv -= (size_t)bytes_read;
 		}
 
 
@@ -542,17 +545,7 @@ __http_do_chunked_recv(connection_t *conn)
 		}
 
 		chunk_start = (buf->buf_head + chunk_offset);
-
 		p = (chunk_start + save_size);
-
-		t = p;
-		SKIP_CRNL(p);
-
-		if (p - t)
-		{
-			buf_collapse(buf, (off_t)(t - buf->buf_head), (p - t));
-			p = t;
-		}
 	}
 
 	return 0;
