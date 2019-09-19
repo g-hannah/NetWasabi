@@ -113,3 +113,33 @@ is_xdomain(connection_t *conn, buf_t *url)
 
 	return strcmp(tmp_host, conn->primary_host);
 }
+
+int
+local_archive_exists(char *link)
+{
+	buf_t tmp;
+	int exists = 0;
+	char *home;
+	static char tmp_page[1024];
+	static char tmp_host[1024];
+
+	buf_init(&tmp, path_max);
+
+	http_parse_host(link, tmp_host);
+	http_parse_page(link, tmp_page);
+
+	home = getenv("HOME");
+	buf_append(&tmp, home);
+	buf_append(&tmp, "/" WEBREAPER_DIR "/");
+	buf_append(&tmp, tmp_host);
+	buf_append(&tmp, tmp_page);
+
+	exists = access(tmp.buf_head, F_OK);
+
+	buf_destroy(&tmp);
+
+	if (exists == 0)
+		return 1;
+	else
+		return 0;
+}

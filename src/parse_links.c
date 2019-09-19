@@ -62,39 +62,6 @@ static char *__ignore_tokens__[] =
 };
 #endif
 
-static int
-__local_archive_exists(char *link, char *host)
-{
-	buf_t tmp;
-	int path_max = 0;
-	int exists = 0;
-	char *home;
-	static char tmp_page[1024];
-
-	path_max = pathconf("/", _PC_PATH_MAX);
-	if (path_max == 0)
-		path_max = 1024;
-
-	buf_init(&tmp, path_max);
-
-	home = getenv("HOME");
-
-	buf_append(&tmp, home);
-	buf_append(&tmp, "/" WEBREAPER_DIR "/");
-	buf_append(&tmp, host);
-	http_parse_page(link, tmp_page);
-	buf_append(&tmp, tmp_page);
-
-	exists = access(tmp.buf_head, F_OK);
-
-	buf_destroy(&tmp);
-
-	if (exists == 0)
-		return 1;
-	else
-		return 0;
-}
-
 int
 parse_links(wr_cache_t *cachep, connection_t *conn, char *host)
 {
@@ -184,16 +151,12 @@ parse_links(wr_cache_t *cachep, connection_t *conn, char *host)
 		strncpy(url_links[aidx], full_url.buf_head, full_url.data_len);
 		url_links[aidx][full_url.data_len] = 0;
 
-		if (__local_archive_exists(url_links[aidx], host))
+		if (local_archive_exists(url_links[aidx]))
 		{
 			savep = ++p;
 			++nr_already;
 			continue;
 		}
-
-#ifdef DEBUG
-		fprintf(stderr, "in parse_links: url=%s\n", full_url.buf_head);
-#endif
 
 		savep = ++p;
 		++aidx;
@@ -212,6 +175,7 @@ parse_links(wr_cache_t *cachep, connection_t *conn, char *host)
 
 	assert(nr_urls < cur_size);
 
+#ifdef DEBUG
 	fprintf(stderr,
 		"Parsed %d urls\n"
 		"(Removed %d duplicates)\n"
@@ -219,6 +183,7 @@ parse_links(wr_cache_t *cachep, connection_t *conn, char *host)
 		nr_urls,
 		removed,
 		nr_already);
+#endif
 
 	for (i = 0; i < nr_urls; ++i)
 	{
