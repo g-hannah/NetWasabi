@@ -23,8 +23,12 @@ wr_cache_http_header_ctor(void *hh)
 	http_header_t *ch = (http_header_t *)hh;
 	clear_struct(ch);
 
-	ch->name = wr_calloc(HTTP_HNAME_MAX+1, 1);
-	ch->value = wr_calloc(HTTP_COOKIE_MAX+1, 1);
+	if (!(ch->name = wr_calloc(HTTP_HNAME_MAX+1, 1)))
+		goto fail;
+
+	if (!(ch->value = wr_calloc(HTTP_COOKIE_MAX+1, 1)))
+		goto fail;
+
 	ch->nsize = HTTP_HNAME_MAX+1;
 	ch->vsize = HTTP_COOKIE_MAX+1;
 
@@ -32,12 +36,14 @@ wr_cache_http_header_ctor(void *hh)
 	assert(ch->value);
 
 	return 0;
+
+	fail:
+	return -1;
 }
 
 /**
- * wr_cache_http_cookie_dtor - return object back to initialised state in cache
+ * wr_cache_http_cookie_dtor - free memory in http_header_t cache object
  * @hh: pointer to object in cache
- * -- called in wr_cache_dealloc()
  */
 void
 wr_cache_http_header_dtor(void *hh)
@@ -46,10 +52,14 @@ wr_cache_http_header_dtor(void *hh)
 
 	http_header_t *ch = (http_header_t *)hh;
 
-	memset(ch->name, 0, ch->nlen);
-	memset(ch->value, 0, ch->vlen);
+	if (ch->name)
+		free(ch->name);
+	if (ch->value)
+		free(ch->value);
 
-	ch->nlen = ch->vlen = 0;
+	clear_struct(ch);
+
+	return;
 }
 
 #define TIME_STRING_MAX 64
@@ -566,17 +576,21 @@ http_recv_response(connection_t *conn)
 	buf_t *buf = &conn->read_buf;
 
 	content_len = (http_header_t *)wr_cache_alloc(http_hcache);
+
+	if (!content_len)
+		goto fail;
+
 	transfer_enc = (http_header_t *)wr_cache_alloc(http_hcache);
 
-	if (!content_len || !transfer_enc)
-		goto fail;
+	if (!transfer_enc)
+		goto fail_dealloc;
 
 	p = __http_read_until_eoh(conn);
 
 	if (!p)
 	{
 		fprintf(stderr, "http_recv_response: failed to find end of header sentinel\n");
-		goto out_dealloc;
+		goto fail_dealloc;
 	}
 
 /*
@@ -659,14 +673,18 @@ http_recv_response(connection_t *conn)
 
 	out_dealloc:
 	assert(conn->read_buf.magic == BUFFER_MAGIC);
-	wr_cache_dealloc(http_hcache, (void *)content_len);
-	wr_cache_dealloc(http_hcache, (void *)transfer_enc);
+	if (content_len)
+		wr_cache_dealloc(http_hcache, (void *)content_len);
+	if (transfer_enc)
+		wr_cache_dealloc(http_hcache, (void *)transfer_enc);
 
 	return 0;
 
 	fail_dealloc:
-	wr_cache_dealloc(http_hcache, (void *)content_len);
-	wr_cache_dealloc(http_hcache, (void *)transfer_enc);
+	if (content_len)
+		wr_cache_dealloc(http_hcache, (void *)content_len);
+	if (transfer_enc)
+		wr_cache_dealloc(http_hcache, (void *)transfer_enc);
 
 	fail:
 	return -1;
