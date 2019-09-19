@@ -307,6 +307,37 @@ __dump_buf(buf_t *buf)
 }
 #endif
 
+static ssize_t
+__read_bytes(connection_t *conn, size_t toread)
+{
+	assert(conn);
+	assert(toread > 0);
+
+	ssize_t n;
+	SSL *ssl = conn->ssl;
+	int sock = conn->sock;
+	size_t r = toread;
+	buf_t *buf = &conn->read_buf;
+
+	while (r)
+	{
+		if (option_set(OPT_USE_TLS))
+			n = buf_read_tls(ssl, buf, r);
+		else
+			n = buf_read_socket(sock, buf, r);
+
+		if (n < 0)
+			return -1;
+		else
+		if (!n)
+			continue;
+		else
+			r -= n;
+	}
+
+	return toread;
+}
+
 static size_t
 __http_do_chunked_recv(connection_t *conn)
 {
@@ -328,13 +359,19 @@ __http_do_chunked_recv(connection_t *conn)
 	size_t range;
 	char *t;
 #endif
-	size_t torecv;
+	//size_t torecv;
 	ssize_t bytes_read;
 	static char tmp[HTTP_MAX_CHUNK_STR];
 #ifdef DEBUG
 	int chunk_nr = 0;
 #endif
 
+
+/*
+ * Make sure we actually have enough data past
+ * EOH to get the size of the first chunk.
+ */
+	__read_bytes(conn, 8);
 	p = HTTP_EOH(buf);
 
 	if (!p)
@@ -432,7 +469,7 @@ __http_do_chunked_recv(connection_t *conn)
 		if (overread >= chunk_size)
 		{
 			p = (e + save_size);
-			continue;
+			goto read_extra;
 		}
 		else
 		{
@@ -448,8 +485,10 @@ __http_do_chunked_recv(connection_t *conn)
  * Restore pointer after receiving data.
  */
 		chunk_offset = (chunk_start - buf->buf_head);
-		torecv = chunk_size;
+		//torecv = chunk_size;
 
+		__read_bytes(conn, chunk_size);
+#if 0
 		while (torecv > 0)
 		{
 			if (option_set(OPT_USE_TLS))
@@ -465,13 +504,14 @@ __http_do_chunked_recv(connection_t *conn)
 			else
 				torecv -= (size_t)bytes_read;
 		}
+#endif
 
 
 		/*
 		 * Read some extra data to get next chunk size.
 		 */
+		read_extra:
 		total = 0;
-
 		while (1)
 		{
 			if (option_set(OPT_USE_TLS))
@@ -800,6 +840,21 @@ http_parse_host(char *url, char *host)
 		++p;
 
 	endp = memchr(p, ':', ((url + url_len) - p));
+
+/*
+ * Sometimes, a server may send a 301 with a location header
+ * that includes the port (https://website.com:443/page).
+ * However, some pages (such as wiki pages), have a colon
+ * in the page name (https://wiki.website.com/wiki/page_name:more_name)
+ * So actually check to see if there is a port number. If not,
+ * use the '/' as the delimitation.
+ */
+
+	if (endp)
+	{
+		if (strncmp("80", endp+1, 2) && strncmp("443", endp+1, 3))
+			endp = NULL;
+	}
 
 	if (!endp)
 		endp = memchr(p, '/', ((url + url_len) - p));
