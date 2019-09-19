@@ -169,7 +169,7 @@ __check_cookies(connection_t *conn)
 
 	off_t offset = 0;
 	struct http_cookie_t *cookie = NULL;
-	http_header_t *tmp;
+	http_header_t *tmp = (http_header_t *)wr_cache_alloc(http_hcache);
 
 	/*
 	 * If there is a Set-Cookie header, then clear all
@@ -182,8 +182,6 @@ __check_cookies(connection_t *conn)
 		printf("Clearing old cookies\n");
 		wr_cache_clear_all(cookies);
 		offset = 0;
-
-		tmp = (http_header_t *)wr_cache_alloc(http_hcache);
 
 		while(http_check_header(&conn->read_buf, "Set-Cookie", offset, &offset))
 		{
@@ -213,8 +211,6 @@ __check_cookies(connection_t *conn)
 
 		if (!nr_used)
 			return;
-
-		tmp = (http_header_t *)wr_cache_alloc(http_hcache);
 
 		cookie = (struct http_cookie_t *)cookies->cache;
 
@@ -642,15 +638,9 @@ __replace_with_local_urls(connection_t *conn, buf_t *buf)
 		if (range)
 		{
 			make_full_url(conn, &url, &full);
-#ifdef DEBUG
-			fprintf(stderr, "made full url: %s\n", full.buf_head);
-#endif
 
 			if (make_local_url(conn, &full, &path) == 0)
 			{
-#ifdef DEBUG
-				fprintf(stderr, "made local url: %s\n", path.buf_head);
-#endif
 				buf_collapse(buf, (off_t)(url_start - buf->buf_head), range);
 				tail = buf->buf_tail;
 
@@ -761,6 +751,8 @@ __handle301(connection_t *conn)
 
 	memset(conn->host, 0, HTTP_URL_MAX);
 	http_parse_host(location->value, conn->host);
+
+	assert(location->vlen < HTTP_URL_MAX);
 
 	strncpy(conn->full_url, location->value, location->vlen);
 	conn->full_url[location->vlen] = 0;
