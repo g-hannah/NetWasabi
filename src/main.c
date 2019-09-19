@@ -194,15 +194,6 @@ __check_cookies(connection_t *conn)
 			__extract_cookie_info(cookie, tmp);
 
 			++offset;
-#ifdef DEBUG
-			printf("Appended cookie:\n\n"
-				"domain=%s\n"
-				"path=%s\n"
-				"expires=%s\n",
-				cookie->domain,
-				cookie->path,
-				cookie->expires);
-#endif
 		}
 	}
 	else
@@ -215,7 +206,6 @@ __check_cookies(connection_t *conn)
 
 		cookie = (struct http_cookie_t *)cookies->cache;
 
-		printf("Appending %d saved cookies\n", nr_used);
 		for (i = 0; i < nr_used; ++i)
 		{
 			while (!wr_cache_obj_used(cookies, (void *)cookie))
@@ -507,7 +497,6 @@ __check_local_dirs(connection_t *conn, buf_t *filename)
 	char *end;
 	char *name = filename->buf_head;
 	buf_t _tmp;
-	struct stat statb;
 
 	buf_init(&_tmp, pathconf("/", _PC_PATH_MAX));
 
@@ -553,22 +542,9 @@ __check_local_dirs(connection_t *conn, buf_t *filename)
 		}
 
 		buf_append_ex(&_tmp, name, (e - name));
-
 		BUF_NULL_TERMINATE(&_tmp);
 
-		if (access(_tmp.buf_head, F_OK) == 0)
-		{
-			clear_struct(&statb);
-
-			lstat(_tmp.buf_head, &statb);
-			if (S_ISREG(statb.st_mode)) /* remove it; it should be a dir! */
-			{
-				unlink(_tmp.buf_head);
-				mkdir(_tmp.buf_head, S_IRWXU);
-				fprintf(stderr, "%sCreated local dir %s\n", ACTION_DONE_STR, _tmp.buf_head);
-			}
-		}
-		else
+		if(access(_tmp.buf_head, F_OK) != 0)
 		{
 			mkdir(_tmp.buf_head, S_IRWXU);
 			fprintf(stderr, "%sCreated local dir %s\n", ACTION_DONE_STR, _tmp.buf_head);
@@ -579,6 +555,7 @@ __check_local_dirs(connection_t *conn, buf_t *filename)
 	}
 
 	buf_destroy(&_tmp);
+	fprintf(stderr, "Returning ZERO to caller\n");
 	return 0;
 }
 
@@ -661,9 +638,9 @@ __archive_page(connection_t *conn)
 	int fd = -1;
 	buf_t *buf = &conn->read_buf;
 	buf_t tmp;
-	char *home = NULL;
+	buf_t local_url;
 	char *p;
-	size_t page_len;
+	int rv;
 
 	p = HTTP_EOH(buf);
 
@@ -673,51 +650,38 @@ __archive_page(connection_t *conn)
 	__replace_with_local_urls(conn, buf);
 
 	buf_init(&tmp, HTTP_URL_MAX);
+	buf_init(&local_url, 1024);
 
-	home = getenv("HOME");
-	buf_append(&tmp, home);
-	buf_append(&tmp, "/" WEBREAPER_DIR "/");
-	buf_append(&tmp, conn->host);
+	buf_append(&tmp, conn->full_url);
+	make_local_url(conn, &tmp, &local_url);
 
-	if (!strncmp("http", conn->page, 4))
-		http_parse_page(conn->full_url, conn->page);
+/* Now we have "file:///path/to/file.extension" */
+	buf_collapse(&local_url, (off_t)0, strlen("file://"));
 
-	page_len = strlen(conn->page);
+#ifdef DEBUG
+	fprintf(stderr, "Local URL=%s\n", local_url.buf_head);
+#endif
 
-	if (page_len > 1 && conn->page[page_len - 1] == '/')
-		conn->page[--page_len] = 0;
+	rv = __check_local_dirs(conn, &local_url);
 
-	buf_append(&tmp, conn->page);
-
-/*
- * With the main page of a site that is simply the
- * host name itself, we must create a directory
- * with this name but also a file in that directory
- * of the same name. So append "<host>.html" here.
- */
-	if (*(tmp.buf_tail - 1) == '/')
-	{
-		buf_append(&tmp, conn->host);
-		buf_append(&tmp, ".html");
-	}
-
-	/*
-	 * Create local directories as necessary.
-	 */
-	if (__check_local_dirs(conn, &tmp) < 0)
-		goto out_free_bufs;
-
-	if (access(tmp.buf_head, F_OK) == 0)
-	{
-		printf("%s%sAlready archived %s%s\n", COL_RED, ATTENTION_STR, tmp.buf_head, COL_END);
-		goto out_free_bufs;
-	}
-
-	fd = open(tmp.buf_head, O_RDWR|O_CREAT|O_TRUNC, S_IRUSR|S_IWUSR);
-	if (fd == -1)
+	if (rv < 0)
 		goto fail_free_bufs;
 
-	printf("%sCreated file %s\n", ACTION_DONE_STR, tmp.buf_head);
+	if (access(local_url.buf_head, F_OK) == 0)
+	{
+		printf("%s%sAlready archived %s%s\n", COL_RED, ATTENTION_STR, local_url.buf_head, COL_END);
+		goto out_free_bufs;
+	}
+
+	fd = open(local_url.buf_head, O_RDWR|O_CREAT|O_TRUNC, S_IRUSR|S_IWUSR);
+
+	if (fd == -1)
+	{
+		fprintf(stderr, "__archive_page: failed to create file %s (%s)\n", local_url.buf_head, strerror(errno));
+		goto fail_free_bufs;
+	}
+
+	printf("%sCreated file %s\n", ACTION_DONE_STR, local_url.buf_head);
 
 	buf_write_fd(fd, buf);
 	close(fd);
@@ -725,11 +689,13 @@ __archive_page(connection_t *conn)
 
 	out_free_bufs:
 	buf_destroy(&tmp);
+	buf_destroy(&local_url);
 
 	return 0;
 
 	fail_free_bufs:
 	buf_destroy(&tmp);
+	buf_destroy(&local_url);
 
 	return -1;
 }
@@ -1153,31 +1119,20 @@ main(int argc, char *argv[])
 
 		switch(status_code)
 		{
+			fprintf(stdout, "%s%s\n", ACTION_ING_STR, http_status_code_string(status_code));
+
 			case HTTP_OK:
 				break;
 			case HTTP_MOVED_PERMANENTLY:
 			case HTTP_FOUND:
 				__handle301(&conn);
-				if (local_archive_exists(conn.full_url))
-				{
-					do_not_archive = 1;
-					goto extract_urls;
-				}
 				goto loop_start;
 				break;
-			case HTTP_NOT_FOUND:
-				fprintf(stderr, "@@@ 404 Not Found\n");
-				goto out_disconnect;
-			case HTTP_BAD_REQUEST:
-				printf("@@@ 400 Bad Request\n"
-#ifdef DEBUG
-				"\n%.*s\n", (int)conn.write_buf.data_len, conn.write_buf.buf_head);
-#else
-				);
-#endif
-				goto out_disconnect;
+			case HTTP_ALREADY_EXISTS:
+				do_not_archive = 1;
+				goto extract_urls;
+				break;
 			default:
-				fprintf(stderr, "main: received HTTP status code %d\n", status_code);
 				goto out_disconnect;
 		}
 
