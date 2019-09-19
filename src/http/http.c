@@ -764,37 +764,43 @@ http_status_code_string(int code)
 	switch(code)
 	{
 		case HTTP_OK:
-			return "OK";
+			return "200 OK";
 			break;
 		case HTTP_MOVED_PERMANENTLY:
-			return "Moved permanently";
+			return "301 Moved permanently";
 			break;
 		case HTTP_FOUND:
-			return "Found";
+			return "302 Found";
 			break;
 		case HTTP_BAD_REQUEST:
-			return "Bad request";
+			return "400 Bad request";
 			break;
 		case HTTP_UNAUTHORISED:
-			return "Unauthorised";
+			return "401 Unauthorised";
 			break;
 		case HTTP_FORBIDDEN:
-			return "Forbidden";
+			return "403 Forbidden";
 			break;
 		case HTTP_NOT_FOUND:
-			return "Not found";
+			return "404 Not found";
 			break;
 		case HTTP_REQUEST_TIMEOUT:
-			return "Request timeout";
+			return "408 Request timeout";
 			break;
 		case HTTP_INTERNAL_ERROR:
-			return "Internal server error";
+			return "500 Internal server error";
 			break;
 		case HTTP_BAD_GATEWAY:
-			return "Bad gateway";
+			return "502 Bad gateway";
 			break;
 		case HTTP_SERVICE_UNAV:
-			return "Service unavailable";
+			return "503 Service unavailable";
+			break;
+		case HTTP_GATEWAY_TIMEOUT:
+			return "504 Gateway timeout";
+			break;
+		case HTTP_ALREADY_EXISTS:
+			return "0xdeadbeef Local copy already exists";
 			break;
 		default:
 			return "Unknown http status code";
