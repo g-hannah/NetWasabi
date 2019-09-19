@@ -11,7 +11,7 @@
 #include "webreaper.h"
 
 static int
-__remove_dups(char **links, int nr)
+__remove_dups(char **links, const int nr)
 {
 	int i;
 	int j;
@@ -33,7 +33,8 @@ __remove_dups(char **links, int nr)
 				for (k = j; k < (nr - 1); ++k)
 				{
 					copy_len = strlen(links[k+1]);
-					strncpy(links[k], links[k+1], copy_len);
+					memcpy(links[k], links[k+1], copy_len);
+					//strncpy(links[k], links[k+1], copy_len);
 					links[k][copy_len] = 0;
 				}
 
@@ -104,7 +105,8 @@ parse_links(wr_cache_t *cachep, connection_t *conn, char *host)
 	char					*p = NULL;
 	char					*savep = NULL;
 	char					*tail;
-	int						nr = 0;
+	int nr_urls = 0;
+	int nr_already = 0;
 	size_t url_len = 0;
 	size_t cur_size = DEFAULT_MATRIX_SIZE;
 	size_t href_len = strlen("href=\"");
@@ -179,22 +181,23 @@ parse_links(wr_cache_t *cachep, connection_t *conn, char *host)
 
 		BUF_NULL_TERMINATE(&url);
 
-#ifdef DEBUG
-		fprintf(stderr, "in parse_links: url=%s\n", full_url.buf_head);
-#endif
-
 		strncpy(url_links[aidx], full_url.buf_head, full_url.data_len);
 		url_links[aidx][full_url.data_len] = 0;
 
 		if (__local_archive_exists(url_links[aidx], host))
 		{
 			savep = ++p;
+			++nr_already;
 			continue;
 		}
 
+#ifdef DEBUG
+		fprintf(stderr, "in parse_links: url=%s\n", full_url.buf_head);
+#endif
+
 		savep = ++p;
 		++aidx;
-		++nr;
+		++nr_urls;
 	}
 
 	buf_destroy(&url);
@@ -203,13 +206,21 @@ parse_links(wr_cache_t *cachep, connection_t *conn, char *host)
 
 	int removed;
 
-	removed = __remove_dups(url_links, nr);
+	removed = __remove_dups(url_links, (const int)nr_urls);
 
-	nr -= removed;
+	nr_urls -= removed;
 
-	assert(nr < cur_size);
+	assert(nr_urls < cur_size);
 
-	for (i = 0; i < nr; ++i)
+	fprintf(stderr,
+		"Parsed %d urls\n"
+		"(Removed %d duplicates)\n"
+		"(Ignored %d already archived)\n",
+		nr_urls,
+		removed,
+		nr_already);
+
+	for (i = 0; i < nr_urls; ++i)
 	{
 		hl = (http_link_t *)wr_cache_alloc(cachep);
 
@@ -227,7 +238,7 @@ parse_links(wr_cache_t *cachep, connection_t *conn, char *host)
 		hl->nr_requests = 0;
 	}
 
-	assert(nr == wr_cache_nr_used(cachep));
+	assert(nr_urls == wr_cache_nr_used(cachep));
 
 	MATRIX_DESTROY(url_links, cur_size);
 
