@@ -31,6 +31,8 @@ wr_cache_t *http_hcache;
 wr_cache_t *http_lcache;
 wr_cache_t *cookies;
 int TRAILING_SLASH = 0;
+char **user_blacklist;
+int USER_BLACKLIST_NR_TOKENS;
 
 /*
  * When using one ptr var to assign cache objects in a loop
@@ -101,6 +103,7 @@ __noret usage(int exit_status)
 		"-oH/--req-head    show the request header (\"out header\")\n"
 		"-iH/--res-head    show the response header (\"in header\")\n"
 		"-X/--xdomain      follow URLs into other domains\n"
+		"-B/--blacklist    blacklist tokens in URLs\n"
 		"--help/-h         display this information\n");
 
 	exit(exit_status);
@@ -242,6 +245,7 @@ __check_cookies(connection_t *conn)
 			*hc_loop = (struct http_cookie_t *)wr_cache_alloc(cookies, hc_loop);
 
 			__extract_cookie_info(*hc_loop, tmp);
+			fprintf(stderr, "%s\n", (*hc_loop)->data);
 
 			++offset;
 		}
@@ -1067,6 +1071,7 @@ __iterate_cached_links(wr_cache_t *cachep, connection_t *conn, int *choice)
 				break;
 			case HTTP_ALREADY_EXISTS:
 			case HTTP_BAD_REQUEST:
+			case HTTP_FORBIDDEN:
 			case HTTP_NOT_FOUND:
 			/*
 			 * Ignore 302 Found because it is used a lot for obtaining a random
@@ -1415,6 +1420,43 @@ get_opts(int argc, char *argv[])
 			|| !strcmp("-h", argv[i]))
 		{
 			usage(EXIT_SUCCESS);
+		}
+		else
+		if (!strcmp("--blacklist", argv[i])
+		|| !strcmp("-B", argv[i]))
+		{
+			int nr_tokens = 10;
+			int idx = 0;
+			size_t token_len;
+			USER_BLACKLIST_NR_TOKENS = 0;
+
+
+			++i;
+
+			if (i == argc || !strncmp("--", argv[i], 2) || !strncmp("-", argv[i], 1))
+			{
+				fprintf(stderr, "--blacklist/-B requires an argument\n");
+				usage(EXIT_FAILURE);
+			}
+
+			MATRIX_INIT(user_blacklist, nr_tokens, TOKEN_MAX, char);
+
+			while (i < argc && strncmp("--", argv[i], 2) && strncmp("-", argv[i], 1))
+			{
+				token_len = strlen(argv[i]);
+				assert(token_len < TOKEN_MAX);
+
+				MATRIX_CHECK_CAPACITY(user_blacklist, idx, nr_tokens, TOKEN_MAX, char);
+
+				strncpy(user_blacklist[idx], argv[i], token_len);
+				user_blacklist[idx][token_len] = 0;
+
+				++USER_BLACKLIST_NR_TOKENS;
+				++idx;
+				++i;
+			}
+
+			--i;
 		}
 		else
 		if (!strcmp("--xdomain", argv[i])
