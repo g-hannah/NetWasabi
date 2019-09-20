@@ -105,6 +105,10 @@ struct http_cookie_t
 	time_t expires_ts;
 };
 
+http_header_t **hh_loop;
+http_link_t **hl_loop;
+struct http_cookie_t **hc_loop;
+
 extern wr_cache_t *http_hcache;
 
 int http_build_request_header(connection_t *, const char *, const char *) __nonnull((1,2,3)) __wur;
