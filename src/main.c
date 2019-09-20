@@ -180,7 +180,6 @@ __check_cookies(connection_t *conn)
 	 */
 	if (http_check_header(&conn->read_buf, "Set-Cookie", (off_t)0, &offset))
 	{
-		printf("Clearing old cookies\n");
 		wr_cache_clear_all(cookies);
 		offset = 0;
 
@@ -323,10 +322,12 @@ __send_head_request(connection_t *conn)
 	sprintf(tmp_cbuf,
 			"HEAD %s HTTP/%s\r\n"
 			"User-Agent: %s\r\n"
-			"Host: %s%s",
+			"Host: %s"
+			"Connection: keep-alive%s",
 			conn->full_url, HTTP_VERSION,
 			HTTP_USER_AGENT,
-			conn->host, HTTP_EOH_SENTINEL);
+			conn->host,
+			HTTP_EOH_SENTINEL);
 
 	buf_append(wbuf, tmp_cbuf);
 
@@ -831,7 +832,7 @@ __do_request(connection_t *conn)
 	 * terminates the connection since
 	 * only metadata is being requested.
 	 */
-	reconnect(conn);
+	//reconnect(conn);
 
 	status_code &= ~status_code;
 	status_code = __send_get_request(conn);
@@ -855,7 +856,7 @@ __iterate_cached_links(wr_cache_t *cachep, connection_t *conn, int *choice)
 	int nr_links = wr_cache_nr_used(cachep);
 	int status_code = 0;
 	int i;
-	int loops = 0;
+	//int loops = 0;
 	size_t len;
 	http_link_t *link;
 	buf_t *wbuf = &conn->write_buf;
@@ -868,6 +869,7 @@ __iterate_cached_links(wr_cache_t *cachep, connection_t *conn, int *choice)
 		return -1;
 	}
 
+#if 0
 	/*
 	 * Choose a random link that works to follow after
 	 * reaping all of the URLs in the list.
@@ -878,7 +880,7 @@ __iterate_cached_links(wr_cache_t *cachep, connection_t *conn, int *choice)
 
 		if (loops >= nr_links)
 		{
-			fprintf(stderr, "__iterate_cached_links: no working linkes to follow\n");
+			fprintf(stderr, "__iterate_cached_links: no working links to follow\n");
 			return -1;
 		}
 
@@ -909,20 +911,18 @@ __iterate_cached_links(wr_cache_t *cachep, connection_t *conn, int *choice)
 	}
 
 	fprintf(stderr, "FOUND WORKING LINK TO FOLLOW NEXT %s\n", link->url);
+#endif
 
 	link = (http_link_t *)cachep->cache;
+	*choice = -1;
 
 	for (i = 0; i < nr_links; ++i)
 	{
-		if (i == *choice)
-		{
-			++link;
-			continue;
-		}
-
 		sleep(SLEEP_TIME);
 		buf_clear(wbuf);
 		len = strlen(link->url);
+
+		assert(len < HTTP_URL_MAX);
 
 		strncpy(conn->full_url, link->url, len);
 		conn->full_url[len] = 0;
@@ -934,7 +934,7 @@ __iterate_cached_links(wr_cache_t *cachep, connection_t *conn, int *choice)
 		if (link->nr_requests > 2) /* loop */
 		{
 			++link;
-			fprintf(stderr, "Skipping %s%s%s (infinite redirect loop)\n", COL_ORANGE, link->url, COL_END);
+			//fprintf(stderr, "Skipping %s%s%s (infinite redirect loop)\n", COL_ORANGE, link->url, COL_END);
 			continue;
 		}
 
@@ -944,15 +944,16 @@ __iterate_cached_links(wr_cache_t *cachep, connection_t *conn, int *choice)
 		link->status_code = status_code;
 		++(link->nr_requests);
 
+		fprintf(stdout, "%s%s (%s)\n", ACTION_ING_STR, http_status_code_string(status_code), link->url);
+
 		switch(status_code)
 		{
-			fprintf(stdout, "%s%s\n", ACTION_ING_STR, http_status_code_string(status_code));
-
 			case HTTP_OK:
+				if (*choice < 0)
+					*choice = i;
 				link->time_reaped = time(NULL);
 				break;
 			case HTTP_MOVED_PERMANENTLY:
-			case HTTP_FOUND:
 			/*
 			 * Shouldn't get here, because __do_request() first
 			 * sends a HEAD request, and handles 301/302 for us.
@@ -964,13 +965,17 @@ __iterate_cached_links(wr_cache_t *cachep, connection_t *conn, int *choice)
 			case HTTP_ALREADY_EXISTS:
 			case HTTP_BAD_REQUEST:
 			case HTTP_NOT_FOUND:
+			/*
+			 * Ignore 302 Found because it is used a lot for obtaining a random
+			 * link, for example a random wiki article (Special:Random).
+			 */
+			case HTTP_FOUND:
 				goto next;
 			default:
 				fprintf(stderr, "__iterate_cached_links: received HTTP status code %d\n", status_code);
 				goto fail;
 		}
 
-		assert(!strstr(conn->page, "http"));
 		fprintf(stderr, "Archiving %s\n", conn->page);
 		__archive_page(conn);
 
@@ -1051,18 +1056,9 @@ main(int argc, char *argv[])
 		goto fail;
 	}
 
-	if (strlen(argv[1]) >= HTTP_URL_MAX)
-	{
-		fprintf(stderr, "URL too long (>= %d)\n", HTTP_URL_MAX);
-		usage(EXIT_FAILURE);
-	}
 #if 0
-	else
 	if (!valid_url(argv[1]))
-	{
-		fprintf(stderr, "\"%s\" is an invalid URL\n", argv[1]);
-		usage(EXIT_FAILURE);
-	}
+		goto fail;
 #endif
 
 	__print_prog_info();
@@ -1191,10 +1187,10 @@ main(int argc, char *argv[])
 		printf(">>> %s%s%s <<<\n", COL_ORANGE, conn.page, COL_END);
 		status_code = __do_request(&conn);
 
+		fprintf(stdout, "%s%s (%s)\n", ACTION_ING_STR, http_status_code_string(status_code), conn.full_url);
+
 		switch(status_code)
 		{
-			fprintf(stdout, "%s%s\n", ACTION_ING_STR, http_status_code_string(status_code));
-
 			case HTTP_OK:
 				break;
 			case HTTP_MOVED_PERMANENTLY:
@@ -1204,6 +1200,7 @@ main(int argc, char *argv[])
 				break;
 			case HTTP_ALREADY_EXISTS:
 				do_not_archive = 1;
+				__send_get_request(&conn); /* in this case we still need to get it to extract URLs */
 				goto extract_urls;
 				break;
 			default:
@@ -1228,10 +1225,12 @@ main(int argc, char *argv[])
 		 * Choose one of the links at random (rand() MODULO #links)
 		 * to follow and proceed to extract links from its page
 		 */
+		_nr_links = wr_cache_nr_used(http_lcache);
+		fprintf(stderr, "%sIterating over %d parsed URLs\n", ACTION_ING_STR, _nr_links);
+
 		if (__iterate_cached_links(http_lcache, &conn, &choice) < 0)
 			goto out_disconnect;
 
-		_nr_links = wr_cache_nr_used(http_lcache);
 
 		if (choice < 0)
 			goto out_disconnect;
