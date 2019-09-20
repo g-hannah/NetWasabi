@@ -134,6 +134,16 @@ parse_links(wr_cache_t *cachep, connection_t *conn, char *host)
 		}
 
 		buf_append_ex(&url, savep, url_len);
+
+		for (i = 0; i < USER_BLACKLIST_NR_TOKENS; ++i)
+		{
+			if (strstr(url.buf_head, user_blacklist[i]))
+			{
+				savep = ++p;
+				continue;
+			}
+		}
+
 		make_full_url(conn, &url, &full_url);
 
 		if (is_xdomain(conn, &full_url))
