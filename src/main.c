@@ -976,50 +976,6 @@ __iterate_cached_links(wr_cache_t *cachep, connection_t *conn, int *choice)
 		return -1;
 	}
 
-#if 0
-	/*
-	 * Choose a random link that works to follow after
-	 * reaping all of the URLs in the list.
-	 */
-	while (HTTP_OK != status_code)
-	{
-		++loops;
-
-		if (loops >= nr_links)
-		{
-			fprintf(stderr, "__iterate_cached_links: no working links to follow\n");
-			return -1;
-		}
-
-		*choice = (rand() % nr_links);
-
-		link = (http_link_t *)((char *)http_lcache->cache + (*choice * cachep->objsize));
-		len = strlen(link->url);
-
-		strncpy(conn->full_url, link->url, len);
-		conn->full_url[len] = 0;
-
-		http_parse_page(conn->full_url, conn->page);
-
-		status_code = __send_head_request(conn);
-
-		switch (status_code)
-		{
-			case HTTP_OK:
-				break;
-			case HTTP_MOVED_PERMANENTLY:
-			case HTTP_FOUND:
-				__handle301(conn);
-				reconnect(conn);
-				break;
-			default:
-				continue;
-		}
-	}
-
-	fprintf(stderr, "FOUND WORKING LINK TO FOLLOW NEXT %s\n", link->url);
-#endif
-
 	link = (http_link_t *)cachep->cache;
 	*choice = -1;
 
@@ -1069,8 +1025,21 @@ __iterate_cached_links(wr_cache_t *cachep, connection_t *conn, int *choice)
 				buf_clear(wbuf);
 				goto resend;
 				break;
-			case HTTP_ALREADY_EXISTS:
 			case HTTP_BAD_REQUEST:
+				fprintf(stderr,
+					"%s%s%s",
+					COL_RED, wbuf->buf_head, COL_END);
+
+					if (wr_cache_nr_used(cookies) > 0)
+						wr_cache_clear_all(cookies);
+
+					buf_clear(wbuf);
+
+					reconnect(conn);
+
+					goto next;
+					break;
+			case HTTP_ALREADY_EXISTS:
 			case HTTP_FORBIDDEN:
 			case HTTP_NOT_FOUND:
 			/*
@@ -1311,6 +1280,18 @@ main(int argc, char *argv[])
 				__send_get_request(&conn); /* in this case we still need to get it to extract URLs */
 				goto extract_urls;
 				break;
+			case HTTP_BAD_REQUEST:
+				fprintf(stderr,
+					"%s%s%s",
+					COL_RED, wbuf->buf_head, COL_END);
+
+					if (wr_cache_nr_used(cookies) > 0)
+						wr_cache_clear_all(cookies);
+
+					reconnect(&conn);
+
+					goto loop_start;
+					break;
 			default:
 				goto out_disconnect;
 		}
@@ -1407,6 +1388,8 @@ int
 get_opts(int argc, char *argv[])
 {
 	int		i;
+
+	USER_BLACKLIST_NR_TOKENS = 0;
 
 	for (i = 1; i < argc; ++i)
 	{
