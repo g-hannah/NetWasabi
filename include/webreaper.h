@@ -54,11 +54,6 @@ do {\
 			____old_size = (NUM);\
 			(NUM) *= 2;\
 			(PTR) = realloc((PTR), ((NUM) * sizeof(TYPE *)));\
-			fprintf(stderr,\
-				"num=%lu\n"\
-				"old_size=%lu\n",\
-				(NUM),\
-				____old_size);\
 			for (____i = ____old_size; ____i < (NUM); ++____i)\
 			{\
 				(PTR)[____i] = NULL;\
@@ -96,6 +91,10 @@ do {\
 extern uint32_t runtime_options;
 int TRAILING_SLASH;
 int path_max;
+char **user_blacklist;
+int USER_BLACKLIST_NR_TOKENS;
+
+#define TOKEN_MAX 64
 
 #define option_set(o) ((o) & runtime_options)
 #define set_option(o) (runtime_options |= (o))
