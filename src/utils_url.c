@@ -23,7 +23,6 @@ make_full_url(connection_t *conn, buf_t *in, buf_t *out)
 	assert(out);
 
 	char *p = in->buf_head;
-	size_t page_len;
 	static char tmp_page[1024];
 
 	buf_clear(out);
@@ -55,7 +54,6 @@ make_full_url(connection_t *conn, buf_t *in, buf_t *out)
 	if (!strncmp("http", p, 4))
 	{
 		http_parse_page(in->buf_head, tmp_page);
-		page_len = strlen(tmp_page);
 
 		buf_append(out, in->buf_head);
 
@@ -79,7 +77,6 @@ make_full_url(connection_t *conn, buf_t *in, buf_t *out)
 		buf_append(out, p);
 
 		http_parse_page(out->buf_head, tmp_page);
-		page_len = strlen(tmp_page);
 
 		if (*(out->buf_tail - 1) == '/')
 			buf_snip(out, (size_t)1);
@@ -88,7 +85,7 @@ make_full_url(connection_t *conn, buf_t *in, buf_t *out)
 	{
 		buf_append(out, conn->host);
 
-		if (*p == '.' || *p != '/') /* relative to current page */
+		if ((*p == '.' && *(p+1) != '.') && *p != '/') /* relative to current page */
 		{
 			if (*p == '.')
 				p += 2;
@@ -97,21 +94,32 @@ make_full_url(connection_t *conn, buf_t *in, buf_t *out)
 		 * Append the current page first.
 		 */
 			buf_append(out, conn->page);
-			page_len = strlen(conn->page);
 
-			if (conn->page[page_len - 1] != '/')
+			if (*(out->buf_tail - 1) != '/')
 				buf_append(out, "/");
+
+			if (*p == '/')
+				++p;
 
 			buf_append(out, p);
 		}
 		else
 		{
+			if (!strncmp("..", p, 2))
+				p += 2;
+
+			if (*(out->buf_tail - 1) == '/')
+				buf_snip(out, (size_t)1);
+
 			buf_append(out, p);
 		}
 	}
 
-	if (*(out->buf_tail - 1) == '/')
-		buf_snip(out, (size_t)1);
+	if (!TRAILING_SLASH)
+	{
+		if (*(out->buf_tail - 1) == '/')
+			buf_snip(out, (size_t)1);
+	}
 
 	return 0;
 }
@@ -190,13 +198,15 @@ local_archive_exists(char *link)
 	buf_append(&tmp, tmp_host);
 	buf_append(&tmp, tmp_page);
 
+	if (*(tmp.buf_tail - 1) == '/')
+		buf_snip(&tmp, (size_t)1);
+
 	if (!has_extension(tmp_page))
 		buf_append(&tmp, ".html");
 	else
 		buf_replace(&tmp, ".php", ".html");
 
 	exists = access(tmp.buf_head, F_OK);
-
 	buf_destroy(&tmp);
 
 	if (exists == 0)
