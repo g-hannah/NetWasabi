@@ -68,7 +68,6 @@ parse_links(wr_cache_t *cachep, connection_t *conn, char *host)
 	assert(cachep);
 	assert(conn);
 
-	http_link_t		*hl = NULL;
 	char					*p = NULL;
 	char					*savep = NULL;
 	char					*tail;
@@ -187,20 +186,21 @@ parse_links(wr_cache_t *cachep, connection_t *conn, char *host)
 
 	for (i = 0; i < nr_urls; ++i)
 	{
-		hl = (http_link_t *)wr_cache_alloc(cachep);
+#ifdef DEBUG
+		fprintf(stderr, "allocating link obj in HL_LOOP @ %p\n", hl_loop);
+#endif
+		*hl_loop = (http_link_t *)wr_cache_alloc(cachep, hl_loop);
 
-		assert(hl);
-		assert(hl->url);
-		assert(wr_cache_obj_used(cachep, (void *)hl));
+		assert(*hl_loop);
 
-		if (!hl)
+		if (!(*hl_loop))
 			goto fail_free_links;
 
 		url_len = strlen(url_links[i]);
 		assert(url_len < HTTP_URL_MAX);
-		strncpy(hl->url, url_links[i], url_len);
-		hl->url[url_len] = 0;
-		hl->nr_requests = 0;
+		strncpy((*hl_loop)->url, url_links[i], url_len);
+		(*hl_loop)->url[url_len] = 0;
+		(*hl_loop)->nr_requests = 0;
 	}
 
 	assert(nr_urls == wr_cache_nr_used(cachep));
