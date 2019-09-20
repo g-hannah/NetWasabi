@@ -62,11 +62,6 @@ make_full_url(connection_t *conn, buf_t *in, buf_t *out)
 		if (*(out->buf_tail - 1) == '/')
 			buf_snip(out, (size_t)1);
 
-		if (!has_extension(tmp_page))
-			buf_append(out, ".html");
-		else
-			buf_replace(out, ".php", ".html");
-
 		return 0;
 	}
 
@@ -88,11 +83,6 @@ make_full_url(connection_t *conn, buf_t *in, buf_t *out)
 
 		if (*(out->buf_tail - 1) == '/')
 			buf_snip(out, (size_t)1);
-
-		if (!has_extension(tmp_page))
-			buf_append(out, ".html");
-		else
-			buf_replace(out, ".php", ".html");
 	}
 	else
 	{
@@ -122,11 +112,6 @@ make_full_url(connection_t *conn, buf_t *in, buf_t *out)
 
 	if (*(out->buf_tail - 1) == '/')
 		buf_snip(out, (size_t)1);
-
-	if (!has_extension(tmp_page))
-		buf_append(out, ".html");
-	else
-		buf_replace(out, ".php", ".html");
 
 	return 0;
 }
