@@ -927,8 +927,6 @@ __do_request(connection_t *conn)
 			return status_code;
 	}
 
-	if (local_archive_exists(conn->full_url))
-		return HTTP_ALREADY_EXISTS;
 	/*
 	 * We only get here if 200 OK.
 	 *
