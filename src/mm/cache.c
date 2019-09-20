@@ -84,16 +84,14 @@ inline int wr_cache_capacity(wr_cache_t *cachep)
 inline int
 wr_cache_obj_used(wr_cache_t *cachep, void *obj)
 {
-	off_t offset;
-	int capacity;
+	int obj_idx;
+	int capacity = cachep->capacity;
 	size_t objsize = cachep->objsize;
-	wr_cache_t *ptr = cachep;
 	unsigned char *bm = cachep->free_bitmap;
 
-	capacity = cachep->capacity;
-	offset = (((char *)obj - (char *)ptr->cache) / objsize);
+	obj_idx = (((char *)obj - (char *)cachep->cache) / objsize);
 
-	if (offset > (off_t)capacity)
+	if (obj_idx > capacity)
 		return -1;
 
 	/*
@@ -102,9 +100,9 @@ wr_cache_obj_used(wr_cache_t *cachep, void *obj)
 	 * 9/8 bytes = 1 byte; then move up the
 	 * remaining bit.
 	 */
-	bm += (offset >> 3);
+	bm += (obj_idx >> 3);
 
-	return (*bm & (1 << (offset & 7))) ? 1 : 0;
+	return (*bm & (1 << (obj_idx & 7))) ? 1 : 0;
 }
 
 /**
@@ -122,30 +120,35 @@ wr_cache_create(char *name,
 		wr_cache_ctor_t ctor,
 		wr_cache_dtor_t dtor)
 {
+	int capacity = (WR_CACHE_SIZE / size);
+	int bitmap_size;
+	int	i;
+	void *slot;
+
+	bitmap_size = (capacity / 8);
+	if (capacity & 0x7)
+		++bitmap_size;
+
 	wr_cache_t	*cachep = malloc(sizeof(wr_cache_t));
 	clear_struct(cachep);
 
 	cachep->name = wr_calloc(WR_CACHE_MAX_NAME, 1);
 	strcpy(cachep->name, name);
+
 	cachep->cache = wr_calloc(WR_CACHE_SIZE, 1);
 	cachep->objsize = size;
-	int capacity = (WR_CACHE_SIZE / size);
-	int bitmap_size;
-	int	i;
 
-	bitmap_size = (capacity / 8);
-
-	if (capacity & 0x7)
-		++bitmap_size;
+	cachep->assigned_list = wr_calloc(capacity, sizeof(struct wr_cache_obj_ctx));
+	cachep->nr_assigned = 0;
 
 	cachep->free_bitmap = wr_calloc(bitmap_size, 1);
 
 	for (i = 0; i < capacity; ++i)
 	{
-		void *obj = (void *)((char *)cachep->cache + (size * i));
+		slot = (void *)((char *)cachep->cache + (size * i));
 
 		if (ctor)
-			ctor(obj);
+			ctor(slot);
 	}
 
 	cachep->capacity = capacity;
@@ -179,7 +182,7 @@ wr_cache_destroy(wr_cache_t *cachep)
 
 	int	i;
 	int capacity = wr_cache_capacity(cachep);
-	void *obj = NULL;
+	void *slot = NULL;
 	void *cache = NULL;
 	size_t objsize = cachep->objsize;
 
@@ -211,10 +214,16 @@ wr_cache_destroy(wr_cache_t *cachep)
 
 	for (i = 0; i < capacity; ++i)
 	{
-		obj = (void *)((char *)cache + (objsize * i));
+		slot = (void *)((char *)cache + (objsize * i));
 
 		if (cachep->dtor)
-			cachep->dtor(obj);
+			cachep->dtor(slot);
+	}
+
+	if (cachep->assigned_list)
+	{
+		free(cachep->assigned_list);
+		cachep->assigned_list = NULL;
 	}
 
 	if (cachep->free_bitmap)
@@ -223,7 +232,13 @@ wr_cache_destroy(wr_cache_t *cachep)
 		cachep->free_bitmap = NULL;
 	}
 
-	free(cachep->cache);
+	if (cachep->cache)
+	{
+		free(cachep->cache);
+		cachep->cache = NULL;
+	}
+
+	clear_struct(cachep);
 	free(cachep);
 	cachep = NULL;
 
@@ -235,7 +250,7 @@ wr_cache_destroy(wr_cache_t *cachep)
  * @cachep: pointer to the metadata cache structure
  */
 void *
-wr_cache_alloc(wr_cache_t *cachep)
+wr_cache_alloc(wr_cache_t *cachep, void *ptr_addr)
 {
 	assert(cachep);
 
@@ -265,7 +280,9 @@ wr_cache_alloc(wr_cache_t *cachep)
 #endif
 		assert(idx < old_capacity);
 		slot = (void *)((char *)cache + (idx * objsize));
+
 		__wr_cache_mark_used(cachep, idx);
+		WR_CACHE_ASSIGN_PTR(cachep, ptr_addr, slot);
 		WR_CACHE_DEC_FREE(cachep);
 		assert(wr_cache_nr_used(cachep) > 0);
 		return slot;
@@ -296,8 +313,16 @@ wr_cache_alloc(wr_cache_t *cachep)
 			added_capacity);
 #endif
 
+		cachep->assigned_list = wr_realloc(cachep->assigned_list, (new_capacity * sizeof(struct wr_cache_obj_ctx)));
 		cachep->cache = wr_realloc(cachep->cache, cache_size * 2);
 		cachep->free_bitmap = wr_realloc(cachep->free_bitmap, bitmap_size * 2);
+
+/*
+ * Patch all assigned pointers with the new
+ * address in the case of our cache being
+ * copied elsewhere in the heap.
+ */
+		WR_CACHE_ADJUST_PTRS(cachep);
 
 		assert(cachep->cache);
 		assert(cachep->free_bitmap);
@@ -325,7 +350,9 @@ wr_cache_alloc(wr_cache_t *cachep)
 
 		idx = __wr_cache_next_free_idx(cachep);
 		slot = (void *)((char *)cachep->cache + (idx * objsize));
+
 		__wr_cache_mark_used(cachep, idx);
+		WR_CACHE_ASSIGN_PTR(cachep, ptr_addr, slot);
 		WR_CACHE_DEC_FREE(cachep);
 		assert(wr_cache_nr_used(cachep) > 0);
 		return slot;
@@ -340,7 +367,7 @@ wr_cache_alloc(wr_cache_t *cachep)
  * @slot: the object to be returned
  */
 void
-wr_cache_dealloc(wr_cache_t *cachep, void *slot)
+wr_cache_dealloc(wr_cache_t *cachep, void *slot, void *ptr_addr)
 {
 	assert(cachep);
 	assert(slot);
@@ -356,17 +383,44 @@ wr_cache_dealloc(wr_cache_t *cachep, void *slot)
 			obj_idx, cachep->name);
 #endif
 
-	__wr_cache_mark_unused(cachep, obj_idx);
+	if (!ptr_addr)
+		memset(cachep->assigned_list, 0, (cachep->nr_assigned * sizeof(struct wr_cache_obj_ctx)));
+	else
+		WR_CACHE_REMOVE_PTR(cachep, ptr_addr);
+
 	WR_CACHE_INC_FREE(cachep);
+	__wr_cache_mark_unused(cachep, obj_idx);
 	assert(wr_cache_nr_used(cachep) >= 0);
 
 	return;
 }
 
+static void *
+__get_assigned_list_ptr(wr_cache_t *cachep, void *slot)
+{
+	assert(cachep);
+	assert(slot);
+
+	struct wr_cache_obj_ctx *ctx = cachep->assigned_list;
+	int nr_assigned = cachep->nr_assigned;
+	int i;
+
+	for (i = 0; i < nr_assigned; ++i)
+	{
+		if (((unsigned long)ctx->ptr_addr) == (unsigned long)slot)
+			return ctx->ptr_addr;
+
+		++ctx;
+	}
+
+	return NULL;
+}
+
 void
 wr_cache_clear_all(wr_cache_t *cachep)
 {
-	void *obj;
+	void *slot;
+	void *ptr_addr;
 	size_t objsize = cachep->objsize;
 	int capacity = cachep->capacity;
 	int i;
@@ -377,10 +431,11 @@ wr_cache_clear_all(wr_cache_t *cachep)
 #endif
 	for (i = 0; i < capacity; ++i)
 	{
-		obj = (void *)((char *)cachep->cache + (i * objsize));
+		slot = (void *)((char *)cachep->cache + (i * objsize));
+		ptr_addr = __get_assigned_list_ptr(cachep, slot);
 
-		if (wr_cache_obj_used(cachep, obj))
-			wr_cache_dealloc(cachep, obj);
+		if (wr_cache_obj_used(cachep, slot))
+			wr_cache_dealloc(cachep, slot, ptr_addr);
 	}
 
 	return;
