@@ -51,7 +51,7 @@ make_full_url(connection_t *conn, buf_t *in, buf_t *out)
 /*
  * Handle already-full URLs.
  */
-	if (!strncmp("http", p, 4))
+	if (!strncmp("http:", p, 5))
 	{
 		http_parse_page(in->buf_head, tmp_page);
 
@@ -85,7 +85,7 @@ make_full_url(connection_t *conn, buf_t *in, buf_t *out)
 	{
 		buf_append(out, conn->host);
 
-		if ((*p == '.' && *(p+1) != '.') && *p != '/') /* relative to current page */
+		if ((*p == '.' && *(p+1) != '.') || (*p != '.' && *p != '/')) /* relative to current page */
 		{
 			if (*p == '.')
 				p += 2;
@@ -93,6 +93,20 @@ make_full_url(connection_t *conn, buf_t *in, buf_t *out)
 		/*
 		 * Append the current page first.
 		 */
+			if (conn->page[0] != '/' && *(out->buf_tail - 1) != '/')
+				buf_append(out, "/");
+
+			if (has_extension(conn->page))
+			{
+				char *__e;
+
+				__e = (conn->page + strlen(conn->page) - 1);
+				while (*__e != '/')
+					--__e;
+
+				*__e = 0;
+			}
+
 			buf_append(out, conn->page);
 
 			if (*(out->buf_tail - 1) != '/')
@@ -108,8 +122,8 @@ make_full_url(connection_t *conn, buf_t *in, buf_t *out)
 			if (!strncmp("..", p, 2))
 				p += 2;
 
-			if (*(out->buf_tail - 1) == '/')
-				buf_snip(out, (size_t)1);
+			if (*(out->buf_tail - 1) != '/' && *p != '/')
+				buf_append(out, "/");
 
 			buf_append(out, p);
 		}
