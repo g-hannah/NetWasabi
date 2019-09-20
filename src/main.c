@@ -52,6 +52,8 @@ http_header_t **hh_loop;
 http_link_t **hl_loop;
 struct http_cookie_t **hc_loop;
 
+static int REAP_DEPTH = 0xffffffff; /* default = infinite */
+
 int path_max = 1024;
 
 static void
@@ -102,6 +104,7 @@ __noret usage(int exit_status)
 		"-T/--tls          use a TLS connection\n"
 		"-oH/--req-head    show the request header (\"out header\")\n"
 		"-iH/--res-head    show the response header (\"in header\")\n"
+		"-D/--depth        maximum depth (#pages from which to extract URLs)\n"
 		"-X/--xdomain      follow URLs into other domains\n"
 		"-B/--blacklist    blacklist tokens in URLs\n"
 		"--help/-h         display this information\n");
@@ -1410,6 +1413,22 @@ get_opts(int argc, char *argv[])
 			|| !strcmp("-h", argv[i]))
 		{
 			usage(EXIT_SUCCESS);
+		}
+		else
+		if (!strncmp("--depth", argv[i], 2)
+		|| !strncmp("-D", argv[i], 1))
+		{
+			++i;
+
+			if (i == argc)
+			{
+				fprintf(stderr, "-D/--depth requires an argument\n");
+				usage(EXIT_FAILURE);
+			}
+
+			REAP_DEPTH = atoi(argv[i]);
+			assert(REAP_DEPTH > 0);
+			assert(REAP_DEPTH < 0xffffff);
 		}
 		else
 		if (!strcmp("--blacklist", argv[i])
