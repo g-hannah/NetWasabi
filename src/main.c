@@ -32,6 +32,24 @@ wr_cache_t *http_lcache;
 wr_cache_t *cookies;
 int TRAILING_SLASH = 0;
 
+/*
+ * When using one ptr var to assign cache objects in a loop
+ * without concern for keeping a pointer to each object, we
+ * MUST use these global ones to do it. The cache implementation
+ * keeps a list of pointers pointing to cache objects. If the
+ * cache is moved to a new location on the heap after a realloc,
+ * the address of the cache object held at the address of these
+ * pointers is updated with the new address of their cache
+ * object.
+ *
+ * This won't work in a case where we assigned many in a loop,
+ * and then the local object ptr that was allocated on the stack
+ * goes out of scope because we returned from the function.
+ */
+http_header_t **hh_loop;
+http_link_t **hl_loop;
+struct http_cookie_t **hc_loop;
+
 int path_max = 1024;
 
 static void
@@ -41,6 +59,29 @@ __ctor __wr_init(void)
 
 	if (!path_max)
 		path_max = 1024;
+
+	hh_loop = malloc(sizeof(http_header_t *));
+	hl_loop = malloc(sizeof(http_link_t *));
+	hc_loop = malloc(sizeof(struct http_cookie_t *));
+
+	assert(hh_loop);
+	assert(hl_loop);
+	assert(hc_loop);
+
+	return;
+}
+
+static void
+__dtor __wr_fini(void)
+{
+	if (hh_loop)
+		free(hh_loop);
+
+	if (hl_loop)
+		free(hl_loop);
+
+	if (hc_loop)
+		free(hc_loop);
 }
 
 /*
@@ -170,7 +211,12 @@ __check_cookies(connection_t *conn)
 
 	off_t offset = 0;
 	struct http_cookie_t *cookie = NULL;
-	http_header_t *tmp = (http_header_t *)wr_cache_alloc(http_hcache);
+	http_header_t *tmp;
+
+#ifdef DEBUG
+	fprintf(stderr, "allocating header obj to TMP @ %p\n", &tmp);
+#endif
+	tmp = (http_header_t *)wr_cache_alloc(http_hcache, &tmp);
 
 	/*
 	 * If there is a Set-Cookie header, then clear all
@@ -180,7 +226,9 @@ __check_cookies(connection_t *conn)
 	 */
 	if (http_check_header(&conn->read_buf, "Set-Cookie", (off_t)0, &offset))
 	{
-		wr_cache_clear_all(cookies);
+		if (wr_cache_nr_used(cookies) > 0)
+			wr_cache_clear_all(cookies);
+
 		offset = 0;
 
 		while(http_check_header(&conn->read_buf, "Set-Cookie", offset, &offset))
@@ -188,9 +236,12 @@ __check_cookies(connection_t *conn)
 			http_fetch_header(&conn->read_buf, "Set-Cookie", tmp, offset);
 			http_append_header(&conn->write_buf, tmp);
 
-			cookie = (struct http_cookie_t *)wr_cache_alloc(cookies);
+#ifdef DEBUG
+			fprintf(stderr, "allocating cookie obj to HC_LOOP @ %p\n", hc_loop);
+#endif
+			*hc_loop = (struct http_cookie_t *)wr_cache_alloc(cookies, hc_loop);
 
-			__extract_cookie_info(cookie, tmp);
+			__extract_cookie_info(*hc_loop, tmp);
 
 			++offset;
 		}
@@ -201,7 +252,7 @@ __check_cookies(connection_t *conn)
 		int i;
 
 		if (!nr_used)
-			return;
+			goto out_dealloc;
 
 		cookie = (struct http_cookie_t *)cookies->cache;
 
@@ -230,7 +281,11 @@ __check_cookies(connection_t *conn)
 		}
 	}
 
-	wr_cache_dealloc(http_hcache, (void *)tmp);
+	out_dealloc:
+#ifdef DEBUG
+	fprintf(stderr, "deallocating header object TMP @ %p\n", &tmp);
+#endif
+	wr_cache_dealloc(http_hcache, (void *)tmp, &tmp);
 
 	return;
 }
@@ -240,9 +295,15 @@ __connection_closed(connection_t *conn)
 {
 	assert(conn);
 
+	http_header_t *connection;
 	buf_t *buf = &conn->read_buf;
-	http_header_t *connection = wr_cache_alloc(http_hcache);
+	int rv = 0;
 
+#ifdef DEBUG
+	fprintf(stderr, "allocating header obj in CONNECTION @ %p\n", &connection);
+#endif
+
+	connection = wr_cache_alloc(http_hcache, &connection);
 	assert(connection);
 
 	http_fetch_header(buf, "Connection", connection, (off_t)0);
@@ -250,10 +311,15 @@ __connection_closed(connection_t *conn)
 	if (connection->value[0])
 	{
 		if (strncmp("keep-alive", connection->value, connection->vlen))
-			return 1;
+			rv = 1;
 	}
 
-	return 0;
+#ifdef DEBUG
+	fprintf(stderr, "deallocting header obj CONNECTION @ %p\n", &connection);
+#endif
+
+	wr_cache_dealloc(http_hcache, connection, &connection);
+	return rv;
 }
 
 static void
@@ -314,7 +380,9 @@ __check_host(connection_t *conn)
 				conn->page,
 				conn->full_url);
 
-		wr_cache_clear_all(cookies);
+		if (wr_cache_nr_used(cookies) > 0)
+			wr_cache_clear_all(cookies);
+
 		reconnect(conn);
 	}
 
@@ -777,7 +845,11 @@ __handle301(connection_t *conn)
 {
 	http_header_t *location = NULL;
 
-	location = (http_header_t *)wr_cache_alloc(http_hcache);
+#ifdef DEBUG
+	fprintf(stderr, "allocating header obj LOCATION @ %p\n", &location);
+#endif
+
+	location = (http_header_t *)wr_cache_alloc(http_hcache, &location);
 	http_fetch_header(&conn->read_buf, "Location", location, (off_t)0);
 
 #ifdef DEBUG
@@ -804,7 +876,11 @@ __handle301(connection_t *conn)
 
 	assert(!memchr(conn->host, '/', strlen(conn->host)));
 
-	wr_cache_dealloc(http_hcache, (void *)location);
+#ifdef DEBUG
+	fprintf(stderr, "deallocating header obj LOCATION @ %p\n", &location);
+#endif
+
+	wr_cache_dealloc(http_hcache, (void *)location, &location);
 
 	if (!strncmp("https", conn->full_url, 5))
 	{
@@ -824,6 +900,8 @@ __do_request(connection_t *conn)
 
 	int status_code = 0;
 
+	if (local_archive_exists(conn->full_url))
+		return HTTP_ALREADY_EXISTS;
 	/*
 	 * Save bandwidth: send HEAD first.
 	 */
@@ -835,9 +913,12 @@ __do_request(connection_t *conn)
 		case HTTP_FOUND:
 		case HTTP_MOVED_PERMANENTLY:
 			__handle301(conn);
+/*
+ * Check here too because 301 may send different
+ * spelling (upper-case vs lower-case... etc)
+ */
 			if (local_archive_exists(conn->full_url))
 				return HTTP_ALREADY_EXISTS;
-			//reconnect(conn); /* server resets connection after HEAD */
 			goto resend_head;
 			break;
 		case HTTP_OK:
@@ -846,6 +927,8 @@ __do_request(connection_t *conn)
 			return status_code;
 	}
 
+	if (local_archive_exists(conn->full_url))
+		return HTTP_ALREADY_EXISTS;
 	/*
 	 * We only get here if 200 OK.
 	 *
@@ -1267,7 +1350,8 @@ main(int argc, char *argv[])
 		strncpy(conn.page, link->url, strlen(link->url));
 		conn.page[strlen(link->url)] = 0;
 
-		wr_cache_clear_all(http_lcache);
+		if (wr_cache_nr_used(http_lcache) > 0)
+			wr_cache_clear_all(http_lcache);
 
 		TRAILING_SLASH = 0;
 	}
@@ -1278,9 +1362,13 @@ main(int argc, char *argv[])
 	close_connection(&conn);
 	conn_destroy(&conn);
 
-	wr_cache_clear_all(http_lcache);
-	wr_cache_clear_all(http_hcache);
-	wr_cache_clear_all(cookies);
+	if (wr_cache_nr_used(http_lcache) > 0)
+		wr_cache_clear_all(http_lcache);
+	if (wr_cache_nr_used(http_hcache) > 0)
+		wr_cache_clear_all(http_hcache);
+	if (wr_cache_nr_used(cookies) > 0)
+		wr_cache_clear_all(cookies);
+
 	wr_cache_destroy(http_lcache);
 	wr_cache_destroy(http_hcache);
 	wr_cache_destroy(cookies);
@@ -1294,9 +1382,13 @@ main(int argc, char *argv[])
 	close_connection(&conn);
 	conn_destroy(&conn);
 
-	wr_cache_clear_all(http_lcache);
-	wr_cache_clear_all(http_hcache);
-	wr_cache_clear_all(cookies);
+	if (wr_cache_nr_used(http_lcache) > 0)
+		wr_cache_clear_all(http_lcache);
+	if (wr_cache_nr_used(http_hcache) > 0)
+		wr_cache_clear_all(http_hcache);
+	if (wr_cache_nr_used(cookies) > 0)
+		wr_cache_clear_all(cookies);
+
 	wr_cache_destroy(http_lcache);
 	wr_cache_destroy(http_hcache);
 	wr_cache_destroy(cookies);
