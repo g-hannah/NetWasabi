@@ -190,6 +190,11 @@ local_archive_exists(char *link)
 	buf_append(&tmp, tmp_host);
 	buf_append(&tmp, tmp_page);
 
+	if (!has_extension(tmp_page))
+		buf_append(&tmp, ".html");
+	else
+		buf_replace(&tmp, ".php", ".html");
+
 	exists = access(tmp.buf_head, F_OK);
 
 	buf_destroy(&tmp);
