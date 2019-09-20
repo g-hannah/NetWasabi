@@ -462,7 +462,7 @@ __http_do_chunked_recv(connection_t *conn)
 		e = p;
 #endif
 
-		chunk_start = e;
+		chunk_offset = (e - buf->buf_head);
 
 		overread = (buf->buf_tail - e);
 
@@ -484,7 +484,6 @@ __http_do_chunked_recv(connection_t *conn)
  * save the offset of chunk_start from start of buffer.
  * Restore pointer after receiving data.
  */
-		chunk_offset = (chunk_start - buf->buf_head);
 		//torecv = chunk_size;
 
 		__read_bytes(conn, chunk_size);
