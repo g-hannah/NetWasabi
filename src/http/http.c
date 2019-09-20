@@ -607,12 +607,20 @@ http_recv_response(connection_t *conn)
 	http_header_t *transfer_enc = NULL;
 	buf_t *buf = &conn->read_buf;
 
-	content_len = (http_header_t *)wr_cache_alloc(http_hcache);
+#ifdef DEBUG
+	fprintf(stderr, "allocating header obj in CONTENT_LEN @ %p\n", &content_len);
+#endif
+
+	content_len = (http_header_t *)wr_cache_alloc(http_hcache, &content_len);
 
 	if (!content_len)
 		goto fail;
 
-	transfer_enc = (http_header_t *)wr_cache_alloc(http_hcache);
+#ifdef DEBUG
+	fprintf(stderr, "allocating header obj in TRANSFER_ENC @ %p\n", &transfer_enc);
+#endif
+
+	transfer_enc = (http_header_t *)wr_cache_alloc(http_hcache, &transfer_enc);
 
 	if (!transfer_enc)
 		goto fail_dealloc;
@@ -700,18 +708,37 @@ http_recv_response(connection_t *conn)
 
 	out_dealloc:
 	assert(conn->read_buf.magic == BUFFER_MAGIC);
-	if (content_len)
-		wr_cache_dealloc(http_hcache, (void *)content_len);
-	if (transfer_enc)
-		wr_cache_dealloc(http_hcache, (void *)transfer_enc);
+
+#ifdef DEBUG
+	fprintf(stderr, "deallocating header obj CONTENT_LEN @ %p\n", &content_len);
+#endif
+
+	wr_cache_dealloc(http_hcache, (void *)content_len, &content_len);
+
+#ifdef DEBUG
+	fprintf(stderr, "deallocating header obj TRANSFER_ENC @ %p\n", &transfer_enc);
+#endif
+
+	wr_cache_dealloc(http_hcache, (void *)transfer_enc, &transfer_enc);
 
 	return 0;
 
 	fail_dealloc:
 	if (content_len)
-		wr_cache_dealloc(http_hcache, (void *)content_len);
+	{
+#ifdef DEBUG
+		fprintf(stderr, "deallocating header obj CONTENT_LEN @ %p\n", &content_len);
+#endif
+		wr_cache_dealloc(http_hcache, (void *)content_len, &content_len);
+	}
+
 	if (transfer_enc)
-		wr_cache_dealloc(http_hcache, (void *)transfer_enc);
+	{
+#ifdef DEBUG
+	fprintf(stderr, "deallocating header obj TRANSFER_ENC @ %p\n", &transfer_enc);
+#endif
+		wr_cache_dealloc(http_hcache, (void *)transfer_enc, &transfer_enc);
+	}
 
 	fail:
 	return -1;
