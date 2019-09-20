@@ -237,6 +237,13 @@ __check_cookies(connection_t *conn)
 		while(http_check_header(&conn->read_buf, "Set-Cookie", offset, &offset))
 		{
 			http_fetch_header(&conn->read_buf, "Set-Cookie", tmp, offset);
+
+			if (!tmp->name[0] && !tmp->value[0])
+			{
+				fprintf(stderr, "%sEMPTY VALUES FOR COOKIE FROM HEADER...%s\n", COL_ORANGE, COL_END);
+				break;
+			}
+
 			http_append_header(&conn->write_buf, tmp);
 
 #ifdef DEBUG
