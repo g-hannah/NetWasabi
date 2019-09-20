@@ -235,6 +235,27 @@ __check_cookies(connection_t *conn)
 	return;
 }
 
+static int
+__connection_closed(connection_t *conn)
+{
+	assert(conn);
+
+	buf_t *buf = &conn->read_buf;
+	http_header_t *connection = wr_cache_alloc(http_hcache);
+
+	assert(connection);
+
+	http_fetch_header(buf, "Connection", connection, (off_t)0);
+
+	if (connection->value[0])
+	{
+		if (strncmp("keep-alive", connection->value, connection->vlen))
+			return 1;
+	}
+
+	return 0;
+}
+
 static void
 __show_request_header(buf_t *buf)
 {
@@ -322,7 +343,7 @@ __send_head_request(connection_t *conn)
 	sprintf(tmp_cbuf,
 			"HEAD %s HTTP/%s\r\n"
 			"User-Agent: %s\r\n"
-			"Host: %s"
+			"Host: %s\r\n"
 			"Connection: keep-alive%s",
 			conn->full_url, HTTP_VERSION,
 			HTTP_USER_AGENT,
@@ -832,7 +853,8 @@ __do_request(connection_t *conn)
 	 * terminates the connection since
 	 * only metadata is being requested.
 	 */
-	//reconnect(conn);
+	if (__connection_closed(conn))
+		reconnect(conn);
 
 	status_code &= ~status_code;
 	status_code = __send_get_request(conn);
