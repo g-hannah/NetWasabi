@@ -255,7 +255,6 @@ __check_cookies(connection_t *conn)
 			*hc_loop = (struct http_cookie_t *)wr_cache_alloc(cookies, hc_loop);
 
 			__extract_cookie_info(*hc_loop, tmp);
-			fprintf(stderr, "%s\n", (*hc_loop)->data);
 
 			++offset;
 		}
@@ -402,8 +401,6 @@ __send_head_request(connection_t *conn)
 
 	__check_host(conn);
 
-	//__adjust_host_and_page(conn);
-
 	if (!(tmp_cbuf = wr_calloc(8192, 1)))
 		goto fail_free_bufs;
 
@@ -466,8 +463,6 @@ __send_get_request(connection_t *conn)
 	buf_clear(wbuf);
 
 	__check_host(conn);
-
-	//__adjust_host_and_page(conn);
 
 	if (!(tmp_cbuf = wr_calloc(8192, 1)))
 		goto fail_free_bufs;
