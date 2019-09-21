@@ -8,6 +8,53 @@
 #include "utils_url.h"
 #include "webreaper.h"
 
+struct url_encodings
+{
+	char old;
+	char *new;
+};
+
+struct url_encodings url_encodings[] =
+{
+	{ ' ', "%20" },
+	{ '"', "%22" },
+	{ '\'', "%27" },
+	{ '*', "%2c" },
+	{ 0, "" }
+};
+
+void
+encode_url(buf_t *url)
+{
+	assert(url);
+
+	int url_eidx = 0;
+	char *p;
+	char *e;
+	char *tail = url->buf_tail;
+
+	while (url_encodings[url_eidx].old != 0)
+	{
+		e = url->buf_head;
+
+		while (1)
+		{
+			p = memchr(e, url_encodings[url_eidx].old, (tail - e));
+
+			if (!p)
+			{
+				++url_eidx;
+				break;
+			}
+
+			buf_shift(url, (off_t)(p - url->buf_head), (size_t)2);
+			tail = url->buf_tail;
+			strncpy(p, url_encodings[url_eidx].new, (size_t)3);
+			e = (p += 3);
+		}
+	}
+}
+
 /**
  * make_full_url - Take a URL from a page and turn it into
  * a full URL.
@@ -23,8 +70,6 @@ make_full_url(connection_t *conn, buf_t *in, buf_t *out)
 	assert(out);
 
 	char *p = in->buf_head;
-	char *e;
-	char *tail;
 	static char tmp_page[1024];
 
 	buf_clear(out);
@@ -135,18 +180,7 @@ make_full_url(connection_t *conn, buf_t *in, buf_t *out)
 			buf_snip(out, (size_t)1);
 	}
 
-	e = out->buf_head;
-	tail = out->buf_tail;
-
-	while (1)
-	{
-		p = memchr(e, 0x20, (tail - e));
-		if (!p)
-			break;
-
-		*p++ = '+';
-		e = p;
-	}
+	encode_url(out);
 
 	return 0;
 }
@@ -194,6 +228,7 @@ make_local_url(connection_t *conn, buf_t *url, buf_t *path)
 	{
 		buf_replace(path, ".php", ".html");
 		buf_replace(path, ".asp", ".html");
+		buf_replace(path, ".aspx", ".html");
 	}
 
 	buf_destroy(&tmp_full);
@@ -245,6 +280,7 @@ local_archive_exists(char *link)
 	{
 		buf_replace(&tmp, ".php", ".html");
 		buf_replace(&tmp, ".asp", ".html");
+		buf_replace(&tmp, ".aspx", ".html");
 	}
 
 	exists = access(tmp.buf_head, F_OK);
@@ -268,3 +304,4 @@ has_extension(char *page)
 	else
 		return 0;
 }
+
