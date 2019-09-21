@@ -56,6 +56,13 @@ __url_acceptable(connection_t *conn, buf_t *url)
 
 	char *tail = url->buf_tail;
 
+	if (!strncmp("http:", url->buf_head, 5)
+	|| !strncmp("https:", url->buf_head, 6))
+	{
+		if (url->data_len < httplen || url->data_len < httpslen)
+			return 0;
+	}
+
 	if (local_archive_exists(url->buf_head))
 	{
 		++nr_already;
