@@ -67,6 +67,12 @@ __url_acceptable(connection_t *conn, buf_t *url)
 
 	if (strstr(url->buf_head, "javascript:"))
 		return 0;
+
+	if (strstr(url->buf_head, ".exe"))
+		return 0;
+
+	if (strstr(url->buf_head, "cgi-"))
+		return 0;
 	
 	if (is_xdomain(conn, url))
 	{
@@ -100,7 +106,7 @@ struct url_types url_types[] =
 };
 
 int
-parse_links(wr_cache_t *cachep, connection_t *conn, char *host)
+parse_links(wr_cache_t *cachep, connection_t *conn)
 {
 	assert(cachep);
 	assert(conn);
@@ -225,8 +231,6 @@ parse_links(wr_cache_t *cachep, connection_t *conn, char *host)
 		(*hl_loop)->url[url_len] = 0;
 		(*hl_loop)->nr_requests = 0;
 	}
-
-	assert(nr_urls == wr_cache_nr_used(cachep));
 
 	MATRIX_DESTROY(url_links, cur_size);
 
