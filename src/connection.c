@@ -180,8 +180,7 @@ reconnect(connection_t *conn)
 	close(conn->sock);
 	conn->sock = -1;
 
-	fprintf(stdout, "Reconnecting to %s\n", conn->primary_host);
-	strcpy(conn->host, conn->primary_host);
+	fprintf(stdout, "%sReconnecting to %s\n", ACTION_ING_STR, conn->host);
 
 	if (option_set(OPT_USE_TLS))
 	{
@@ -193,7 +192,7 @@ reconnect(connection_t *conn)
 
 	clear_struct(&sock4);
 
-	if (getaddrinfo(conn->primary_host, NULL, NULL, &ainf) < 0)
+	if (getaddrinfo(conn->host, NULL, NULL, &ainf) < 0)
 	{
 		fprintf(stderr, "open_connection: getaddrinfo error (%s)\n", gai_strerror(errno));
 		goto fail;
