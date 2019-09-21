@@ -51,10 +51,8 @@ make_full_url(connection_t *conn, buf_t *in, buf_t *out)
 /*
  * Handle already-full URLs.
  */
-	if (!strncmp("http:", p, 5))
+	if (!strncmp("http://", p, 7) || !strncmp("https://", p, 8))
 	{
-		http_parse_page(in->buf_head, tmp_page);
-
 		buf_append(out, in->buf_head);
 
 		if (*(out->buf_tail - 1) == '/')
@@ -147,10 +145,12 @@ make_local_url(connection_t *conn, buf_t *url, buf_t *path)
 	char *home = getenv("HOME");
 	char *p;
 	static char tmp_page[1024];
+	buf_t tmp_full;
 
+	buf_init(&tmp_full, HTTP_URL_MAX);
 	http_parse_page(url->buf_head, tmp_page);
 
-	if (strncmp("http", url->buf_head, 4))
+	if (strncmp("http:", url->buf_head, 5) && strncmp("https:", url->buf_head, 6))
 	{
 		fprintf(stderr, "make_local_url: not full url (%s)\n", url->buf_head);
 		errno = EPROTO;
@@ -172,9 +172,16 @@ make_local_url(connection_t *conn, buf_t *url, buf_t *path)
 		buf_snip(path, (size_t)1);
 
 	if (!has_extension(tmp_page))
+	{
 		buf_append(path, ".html");
+	}
 	else
+	{
 		buf_replace(path, ".php", ".html");
+		buf_replace(path, ".asp", ".html");
+	}
+
+	buf_destroy(&tmp_full);
 
 	return 0;
 }
@@ -216,9 +223,14 @@ local_archive_exists(char *link)
 		buf_snip(&tmp, (size_t)1);
 
 	if (!has_extension(tmp_page))
+	{
 		buf_append(&tmp, ".html");
+	}
 	else
+	{
 		buf_replace(&tmp, ".php", ".html");
+		buf_replace(&tmp, ".asp", ".html");
+	}
 
 	exists = access(tmp.buf_head, F_OK);
 	buf_destroy(&tmp);
