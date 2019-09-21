@@ -23,6 +23,8 @@ make_full_url(connection_t *conn, buf_t *in, buf_t *out)
 	assert(out);
 
 	char *p = in->buf_head;
+	char *e;
+	char *tail;
 	static char tmp_page[1024];
 
 	buf_clear(out);
@@ -131,6 +133,19 @@ make_full_url(connection_t *conn, buf_t *in, buf_t *out)
 	{
 		if (*(out->buf_tail - 1) == '/')
 			buf_snip(out, (size_t)1);
+	}
+
+	e = out->buf_head;
+	tail = out->buf_tail;
+
+	while (1)
+	{
+		p = memchr(e, 0x20, (tail - e));
+		if (!p)
+			break;
+
+		*p++ = '+';
+		e = p;
 	}
 
 	return 0;
