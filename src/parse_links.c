@@ -48,19 +48,22 @@ __remove_dups(char **links, const int nr)
 
 static char **url_links = NULL;
 
-#if 0
-static char *__ignore_tokens__[] =
+struct url_types
 {
-	"favicon.ico",
-	".png",
-	".jpg",
-	".jpeg",
-	".gif",
-	".pdf",
-	//".php",
-	NULL
+	char *string;
+	char delim;
+	size_t len;
 };
-#endif
+
+#define URL_TYPES_ARRAY_SIZE 4
+
+struct url_types url_types[URL_TYPES_ARRAY_SIZE] =
+{
+	{ "href=\"", '"', 6 },
+	{ "src=\"", '"', 5 },
+	{ "href=\'", '\'', 6 },
+	{ "src=\'", '\'', 5 }
+};
 
 int
 parse_links(wr_cache_t *cachep, connection_t *conn, char *host)
@@ -71,11 +74,12 @@ parse_links(wr_cache_t *cachep, connection_t *conn, char *host)
 	char					*p = NULL;
 	char					*savep = NULL;
 	char					*tail;
+	char delim;
+	int url_type_idx = 0;
 	int nr_urls = 0;
 	int nr_already = 0;
 	size_t url_len = 0;
 	size_t cur_size = DEFAULT_MATRIX_SIZE;
-	size_t href_len = strlen("href=\"");
 	int aidx = 0;
 	int i;
 	buf_t *buf = &conn->read_buf;
@@ -99,16 +103,33 @@ parse_links(wr_cache_t *cachep, connection_t *conn, char *host)
 		buf_clear(&full_url);
 		buf_clear(&path);
 
-		p = strstr(savep, "href=\"");
+		p = strstr(savep, url_types[url_type_idx].string);
+		delim = url_types[url_type_idx].delim;
 
 		if (!p || p >= tail)
-			break;
+		{
+			++url_type_idx;
 
-		savep = (p += href_len);
-		p = memchr(savep, '"', (tail - savep));
+			if (url_type_idx >= URL_TYPES_ARRAY_SIZE)
+				break;
+
+			savep = buf->buf_head;
+			continue;
+		}
+
+		savep = (p += url_types[url_type_idx].len);
+		p = memchr(savep, delim, (tail - savep));
 
 		if (!p)
-			break;
+		{
+			++url_type_idx;
+
+			if (url_type_idx >= URL_TYPES_ARRAY_SIZE)
+				break;
+
+			savep = buf->buf_head;
+			continue;
+		}
 
 		url_len = (p - savep);
 
