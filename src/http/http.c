@@ -856,9 +856,12 @@ http_parse_host(char *url, char *host)
 	host[0] = 0;
 
 	p = url;
+	url_len = strlen(url);
 
-	if (!strncmp("http", url, 4))
+	if (!strncmp("http:", url, 5) || !strncmp("https:", url, 6))
+	{
 		p += strlen("http://");
+	}
 
 	while (*p == '/')
 		++p;
@@ -903,6 +906,11 @@ http_parse_page(char *url, char *page)
 	p = url;
 	q = endp;
 
+	if (!strncmp("http:", url, 5) || !strncmp("https:", url, 6))
+	{
+		p += strlen("http://");
+	}
+
 	if (!TRAILING_SLASH)
 	{
 		if (*(endp - 1) == '/')
@@ -911,9 +919,6 @@ http_parse_page(char *url, char *page)
 			*endp = 0;
 		}
 	}
-
-	if (!strncmp("http", url, 4))
-		p += strlen("http://");
 
 	while (*p == '/')
 		++p;
