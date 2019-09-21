@@ -124,10 +124,9 @@ parse_links(wr_cache_t *cachep, connection_t *conn, char *host)
 		assert(aidx < cur_size);
 
 	/*
-	 * Ignore URLs that refer to part of their own page
-	 * and URLs that have parameters (page.php?id=1234).
+	 * Ignore URLs that refer to part of their own page.
 	 */
-		if (memchr(savep, '#', url_len) || memchr(savep, '?', url_len))
+		if (memchr(savep, '#', url_len))
 		{
 			savep = ++p;
 			continue;
