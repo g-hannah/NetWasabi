@@ -110,6 +110,8 @@ http_link_t **hl_loop;
 struct http_cookie_t **hc_loop;
 
 extern wr_cache_t *http_hcache;
+size_t httplen;
+size_t httpslen;
 
 int http_build_request_header(connection_t *, const char *, const char *) __nonnull((1,2,3)) __wur;
 int http_send_request(connection_t *) __nonnull((1)) __wur;
