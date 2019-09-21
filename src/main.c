@@ -858,6 +858,8 @@ static int
 __handle301(connection_t *conn)
 {
 	http_header_t *location = NULL;
+	buf_t tmp_url;
+	buf_t tmp_full;
 
 #ifdef DEBUG
 	fprintf(stderr, "allocating header obj LOCATION @ %p\n", &location);
@@ -866,27 +868,37 @@ __handle301(connection_t *conn)
 	location = (http_header_t *)wr_cache_alloc(http_hcache, &location);
 	http_fetch_header(&conn->read_buf, "Location", location, (off_t)0);
 
-#ifdef DEBUG
-	printf("301/302 ===> %s%s%s\n", COL_ORANGE, location->value, COL_END);
-#endif
-
-	memset(conn->host, 0, HTTP_URL_MAX);
-	http_parse_host(location->value, conn->host);
+	fprintf(stderr, "%sRedirecting to %s%s%s\n", ACTION_ING_STR, COL_ORANGE, location->value, COL_END);
 
 	assert(location->vlen < HTTP_URL_MAX);
 
-	strncpy(conn->full_url, location->value, location->vlen);
-	conn->full_url[location->vlen] = 0;
+	if (location->value[location->vlen - 1] == '/')
+		TRAILING_SLASH = 1;
 
-	http_parse_page(conn->full_url, conn->page);
+	if (strncmp("http://", location->value, 7) && strncmp("https://", location->value, 8))
+	{
+		buf_init(&tmp_url, HTTP_URL_MAX);
+		buf_init(&tmp_full, HTTP_URL_MAX);
 
-#ifdef DEBUG
-	fprintf(stderr,
-		"PARSED PAGE=%s (location header=%s)\n"
-		"PARSED HOST=%s\n",
-		conn->page, location->value,
-		conn->host);
-#endif
+		buf_append(&tmp_url, location->value);
+		make_full_url(conn, &tmp_url, &tmp_full);
+
+		http_parse_host(tmp_full.buf_head, conn->host);
+		http_parse_page(tmp_full.buf_head, conn->page);
+		strncpy(conn->full_url, tmp_full.buf_head, tmp_full.data_len);
+		conn->full_url[tmp_full.data_len] = 0;
+
+		buf_destroy(&tmp_url);
+		buf_destroy(&tmp_full);
+	}
+	else
+	{
+		http_parse_host(location->value, conn->host);
+		http_parse_page(conn->full_url, conn->page);
+
+		strncpy(conn->full_url, location->value, location->vlen);
+		conn->full_url[location->vlen] = 0;
+	}
 
 	assert(!memchr(conn->host, '/', strlen(conn->host)));
 
@@ -901,8 +913,6 @@ __handle301(connection_t *conn)
 		if (!option_set(OPT_USE_TLS))
 			conn_switch_to_tls(conn);
 	}
-
-	TRAILING_SLASH = 1;
 
 	return 0;
 }
@@ -921,6 +931,21 @@ __do_request(connection_t *conn)
 	 */
 	resend_head:
 	status_code = __send_head_request(conn);
+
+#if 0
+	fprintf(stderr,
+		"__do_request():\n\n"
+		"full_url=%s\n"
+		"page=%s\n"
+		"host=%s\n"
+		"primary_host=%s\n",
+		conn->full_url,
+		conn->page,
+		conn->host,
+		conn->primary_host);
+
+	fprintf(stdout, "%s [HEAD] %s (%s)\n", ACTION_ING_STR, http_status_code_string(status_code), conn->full_url);
+#endif
 
 	switch(status_code)
 	{
@@ -1011,7 +1036,8 @@ __iterate_cached_links(wr_cache_t *cachep, connection_t *conn, int *choice)
 			continue;
 		}
 
-		printf("===> %s%s%s <===\n", COL_ORANGE, conn->page, COL_END);
+		fprintf(stderr, "===> %s%s%s <===\n", COL_ORANGE, conn->page, COL_END);
+
 		status_code = __do_request(conn);
 
 		link->status_code = status_code;
@@ -1063,7 +1089,7 @@ __iterate_cached_links(wr_cache_t *cachep, connection_t *conn, int *choice)
 				goto fail;
 		}
 
-		fprintf(stderr, "Archiving %s\n", conn->page);
+		fprintf(stderr, "%sArchiving %s\n", ACTION_ING_STR, conn->full_url);
 		__archive_page(conn);
 
 		next:
@@ -1180,10 +1206,14 @@ main(int argc, char *argv[])
 	int _nr_links = 0;
 	int do_not_archive = 0;
 	size_t url_len;
-	buf_t *rbuf;
-	buf_t *wbuf;
+	buf_t *rbuf = NULL;
+	buf_t *wbuf = NULL;
+	buf_t tmp_url;
+	buf_t tmp_full;
 
 	conn_init(&conn);
+	buf_init(&tmp_url, HTTP_URL_MAX);
+	buf_init(&tmp_full, HTTP_URL_MAX);
 
 	http_parse_host(argv[1], conn.host);
 	http_parse_page(argv[1], conn.page);
@@ -1201,10 +1231,8 @@ main(int argc, char *argv[])
 	strcpy(conn.primary_host, conn.host);
 
 	fprintf(stderr,
-		"%sReaping site %s%s%s\n"
-		"%sStarting at %s\n",
-		ACTION_ING_STR, COL_ORANGE, conn.full_url, COL_END,
-		ACTION_ING_STR, conn.page);
+		"%sReaping site %s%s%s\n",
+		ACTION_ING_STR, COL_ORANGE, conn.full_url, COL_END);
 
 	/*
 	 * Initialises read/write buffers in conn.
@@ -1316,7 +1344,7 @@ main(int argc, char *argv[])
 
 		if (!do_not_archive)
 		{
-			fprintf(stderr, "%sArchiving %s\n", ACTION_ING_STR, conn.page);
+			fprintf(stderr, "%sArchiving %s\n", ACTION_ING_STR, conn.full_url);
 			__archive_page(&conn);
 		}
 
@@ -1330,7 +1358,6 @@ main(int argc, char *argv[])
 		if (__iterate_cached_links(http_lcache, &conn, &choice) < 0)
 			goto out_disconnect;
 
-
 		if (choice < 0)
 			goto out_disconnect;
 
@@ -1341,8 +1368,14 @@ main(int argc, char *argv[])
 
 		assert(strlen(link->url) < HTTP_URL_MAX);
 
-		strncpy(conn.page, link->url, strlen(link->url));
-		conn.page[strlen(link->url)] = 0;
+		buf_clear(&tmp_url);
+		buf_clear(&tmp_full);
+
+		buf_append(&tmp_url, link->url);
+		make_full_url(&conn, &tmp_url, &tmp_full);
+		assert(tmp_full.data_len < HTTP_URL_MAX);
+
+		http_parse_page(tmp_full.buf_head, conn.page);
 
 		if (wr_cache_nr_used(http_lcache) > 0)
 			wr_cache_clear_all(http_lcache);
@@ -1367,6 +1400,9 @@ main(int argc, char *argv[])
 	wr_cache_destroy(http_hcache);
 	wr_cache_destroy(cookies);
 
+	buf_destroy(&tmp_url);
+	buf_destroy(&tmp_full);
+
 	sigaction(SIGINT, &old_sigint, NULL);
 	sigaction(SIGQUIT, &old_sigquit, NULL);
 
@@ -1386,6 +1422,9 @@ main(int argc, char *argv[])
 	wr_cache_destroy(http_lcache);
 	wr_cache_destroy(http_hcache);
 	wr_cache_destroy(cookies);
+
+	buf_destroy(&tmp_url);
+	buf_destroy(&tmp_full);
 
 	fail:
 	sigaction(SIGINT, &old_sigint, NULL);
@@ -1415,8 +1454,8 @@ get_opts(int argc, char *argv[])
 			usage(EXIT_SUCCESS);
 		}
 		else
-		if (!strncmp("--depth", argv[i], 2)
-		|| !strncmp("-D", argv[i], 1))
+		if (!strcmp("--depth", argv[i])
+		|| !strcmp("-D", argv[i]))
 		{
 			++i;
 
