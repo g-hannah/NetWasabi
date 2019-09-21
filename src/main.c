@@ -366,37 +366,22 @@ __show_response_header(buf_t *buf)
 	return;
 }
 
-static int
-__new_host(connection_t *conn)
-{
-	static char __host[HTTP_URL_MAX];
-
-	http_parse_host(conn->full_url, __host);
-
-	return strcmp(conn->host, __host);
-}
-
 static void
 __check_host(connection_t *conn)
 {
 	assert(conn);
 
-	if (__new_host(conn))
-	{
-		fprintf(stderr,
-				"Changing Host\n\n"
-				"primary_host=%s\n"
-				"host=%s\n"
-				"page=%s\n"
-				" url=%s\n",
-				conn->primary_host,
-				conn->host,
-				conn->page,
-				conn->full_url);
+	static char old_host[HTTP_URL_MAX];
 
+	strcpy(old_host, conn->host);
+	http_parse_host(conn->full_url, conn->host);
+
+	if (strcmp(conn->host, old_host))
+	{
 		if (wr_cache_nr_used(cookies) > 0)
 			wr_cache_clear_all(cookies);
 
+		fprintf(stderr, "%sChanging host (%s ==> %s)\n", ACTION_ING_STR, old_host, conn->host);
 		reconnect(conn);
 	}
 
@@ -974,7 +959,10 @@ __do_request(connection_t *conn)
 	 * only metadata is being requested.
 	 */
 	if (__connection_closed(conn))
+	{
+		fprintf(stdout, "%s%sRemote peer closed connection%s\n", COL_RED, ACTION_DONE_STR, COL_END);
 		reconnect(conn);
+	}
 
 	status_code &= ~status_code;
 	status_code = __send_get_request(conn);
