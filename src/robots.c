@@ -13,7 +13,6 @@
 #include "webreaper.h"
 
 #define GLOB_CHAR '*'
-#define GLOB_LITERAL "\*"
 
 static inline void __blacklist_token(const char *token);
 
@@ -119,35 +118,11 @@ parse_robots(buf_t *buf)
 {
 	//assert(buf);
 
-	char *p = buf->buf_head;
-	char *savep = NULL;
+	char *p;
+	char *savep;
 	char *tail = buf->buf_tail;
-	static char *robots_file = "/home/oppa/Projects/WebReaper/robots.txt";
-	buf_t _buf;
 
-	struct stat statb;
-
-	clear_struct(&statb);
-
-	lstat(robots_file, &statb);
-
-	buf_init(&_buf, statb.st_size);
-
-	int fd = open(robots_file, O_RDONLY);
-
-	if (fd < 0)
-	{
-		fprintf(stderr, "%s\n", strerror(errno));
-		return -1;
-	}
-
-	buf_read_fd(fd, &_buf, statb.st_size);
-
-	assert(_buf.buf_head != _buf.buf_tail);
-
-	tail = _buf.buf_tail;
-
-	savep = p = _buf.data;
+	savep = p = buf->buf_head;
 
 	FIND_TOKEN("User-agent", p, savep, tail);
 
