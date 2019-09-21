@@ -34,6 +34,8 @@ wr_cache_t *http_lcache;
 wr_cache_t *http_lcache2;
 wr_cache_t *cookies;
 int TRAILING_SLASH = 0;
+size_t httplen;
+size_t httpslen;
 char **user_blacklist;
 int USER_BLACKLIST_NR_TOKENS;
 volatile int cache_switch = 0;
@@ -77,6 +79,9 @@ __ctor __wr_init(void)
 	assert(hh_loop);
 	assert(hl_loop);
 	assert(hc_loop);
+
+	httplen = strlen("http://");
+	httpslen = strlen("https://");
 
 	return;
 }
@@ -720,6 +725,12 @@ do {\
 
 		range = (url_end - url_start);
 
+		if (!strncmp("http://", url_start, range) || !strncmp("https://", url_start, range))
+		{
+			savep = ++url_end;
+			continue;
+		}
+		else
 		if (range >= HTTP_URL_MAX)
 		{
 			savep = ++url_end;
@@ -1039,7 +1050,9 @@ while (1)
 		strncpy(conn->full_url, link->url, len);
 		conn->full_url[len] = 0;
 
-		http_parse_page(conn->full_url, conn->page);
+		if (!http_parse_page(conn->full_url, conn->page))
+			continue;
+
 		__check_host(conn);
 
 		resend:
@@ -1095,6 +1108,10 @@ while (1)
 			 * link, for example a random wiki article (Special:Random).
 			 */
 			case HTTP_FOUND:
+			case HTTP_INTERNAL_ERROR:
+			case HTTP_BAD_GATEWAY:
+			case HTTP_SERVICE_UNAV:
+			case HTTP_GATEWAY_TIMEOUT:
 				goto next;
 			default:
 				fprintf(stderr, "__iterate_cached_links: received HTTP status code %d\n", status_code);
