@@ -46,6 +46,37 @@ __remove_dups(char **links, const int nr)
 	return nr_removed;
 }
 
+static int nr_already = 0;
+
+static int
+__url_acceptable(connection_t *conn, buf_t *url)
+{
+	assert(conn);
+	assert(url);
+
+	char *tail = url->buf_tail;
+
+	if (local_archive_exists(url->buf_head))
+	{
+		++nr_already;
+		return 0;
+	}
+
+	if (memchr(url->buf_head, '#', tail - url->buf_head))
+		return 0;
+
+	if (strstr(url->buf_head, "javascript:"))
+		return 0;
+	
+	if (is_xdomain(conn, url))
+	{
+		if (!option_set(OPT_ALLOW_XDOMAIN))
+			return 0;
+	}
+
+	return 1;
+}
+
 static char **url_links = NULL;
 
 struct url_types
@@ -55,14 +86,17 @@ struct url_types
 	size_t len;
 };
 
-#define URL_TYPES_ARRAY_SIZE 4
-
-struct url_types url_types[URL_TYPES_ARRAY_SIZE] =
+struct url_types url_types[] =
 {
 	{ "href=\"", '"', 6 },
+	{ "HREF=\"", '"', 6 },
 	{ "src=\"", '"', 5 },
+	{ "SRC=\"", '"', 5 },
 	{ "href=\'", '\'', 6 },
-	{ "src=\'", '\'', 5 }
+	{ "HREF=\'", '\'', 6 },
+	{ "src=\'", '\'', 5 },
+	{ "SRC=\'", '\'', 5 },
+	{ "", 0, 0 }
 };
 
 int
@@ -77,7 +111,6 @@ parse_links(wr_cache_t *cachep, connection_t *conn, char *host)
 	char delim;
 	int url_type_idx = 0;
 	int nr_urls = 0;
-	int nr_already = 0;
 	size_t url_len = 0;
 	size_t cur_size = DEFAULT_MATRIX_SIZE;
 	int aidx = 0;
@@ -110,7 +143,7 @@ parse_links(wr_cache_t *cachep, connection_t *conn, char *host)
 		{
 			++url_type_idx;
 
-			if (url_type_idx >= URL_TYPES_ARRAY_SIZE)
+			if (url_types[url_type_idx].delim == 0)
 				break;
 
 			savep = buf->buf_head;
@@ -124,7 +157,7 @@ parse_links(wr_cache_t *cachep, connection_t *conn, char *host)
 		{
 			++url_type_idx;
 
-			if (url_type_idx >= URL_TYPES_ARRAY_SIZE)
+			if (url_types[url_type_idx].delim == 0)
 				break;
 
 			savep = buf->buf_head;
@@ -133,63 +166,27 @@ parse_links(wr_cache_t *cachep, connection_t *conn, char *host)
 
 		url_len = (p - savep);
 
-		if (url_len >= HTTP_URL_MAX || url_len < 5)
+		if (url_len >= HTTP_URL_MAX)
+		{
+			savep = ++p;
+			continue;
+		}
+
+		assert(url_len < HTTP_URL_MAX);
+		assert(aidx < cur_size);
+
+		buf_append_ex(&url, savep, url_len);
+		make_full_url(conn, &url, &full_url);
+
+		if (!__url_acceptable(conn, &full_url))
 		{
 			savep = ++p;
 			continue;
 		}
 
 		MATRIX_CHECK_CAPACITY(url_links, aidx, cur_size, HTTP_URL_MAX, char);
-
-		assert(url_len < HTTP_URL_MAX);
-		assert(aidx < cur_size);
-
-	/*
-	 * Ignore URLs that refer to part of their own page.
-	 */
-		if (memchr(savep, '#', url_len))
-		{
-			savep = ++p;
-			continue;
-		}
-
-		buf_append_ex(&url, savep, url_len);
-
-		for (i = 0; i < USER_BLACKLIST_NR_TOKENS; ++i)
-		{
-			if (strstr(url.buf_head, user_blacklist[i]))
-			{
-				savep = ++p;
-				continue;
-			}
-		}
-
-		make_full_url(conn, &url, &full_url);
-
-		if (strstr(full_url.buf_head, "javascript:"))
-		{
-			savep = ++p;
-			continue;
-		}
-
-		if (is_xdomain(conn, &full_url))
-		{
-			if (!option_set(OPT_ALLOW_XDOMAIN))
-			{
-				savep = ++p;
-				continue;
-			}
-		}
-
 		strncpy(url_links[aidx], full_url.buf_head, full_url.data_len);
 		url_links[aidx][full_url.data_len] = 0;
-
-		if (local_archive_exists(url_links[aidx]))
-		{
-			savep = ++p;
-			++nr_already;
-			continue;
-		}
 
 		savep = ++p;
 		++aidx;
@@ -203,20 +200,12 @@ parse_links(wr_cache_t *cachep, connection_t *conn, char *host)
 	int removed;
 
 	removed = __remove_dups(url_links, (const int)nr_urls);
-
 	nr_urls -= removed;
 
 	assert(nr_urls < cur_size);
 
-#ifdef DEBUG
-	fprintf(stderr,
-		"Parsed %d urls\n"
-		"(Removed %d duplicates)\n"
-		"(Ignored %d already archived)\n",
-		nr_urls,
-		removed,
-		nr_already);
-#endif
+	fprintf(stdout, "%sParsed %d URLs (removed %d dups, %d already archived)\n",
+		ACTION_DONE_STR, nr_urls, removed, nr_already);
 
 	for (i = 0; i < nr_urls; ++i)
 	{
