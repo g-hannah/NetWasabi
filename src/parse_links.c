@@ -146,6 +146,12 @@ parse_links(wr_cache_t *cachep, connection_t *conn, char *host)
 
 		make_full_url(conn, &url, &full_url);
 
+		if (strstr(full_url.buf_head, "javascript:"))
+		{
+			savep = ++p;
+			continue;
+		}
+
 		if (is_xdomain(conn, &full_url))
 		{
 			if (!option_set(OPT_ALLOW_XDOMAIN))
@@ -154,8 +160,6 @@ parse_links(wr_cache_t *cachep, connection_t *conn, char *host)
 				continue;
 			}
 		}
-
-		BUF_NULL_TERMINATE(&url);
 
 		strncpy(url_links[aidx], full_url.buf_head, full_url.data_len);
 		url_links[aidx][full_url.data_len] = 0;
