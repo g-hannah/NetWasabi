@@ -1,1 +1,3 @@
 Improve cookie storage implementation (current wr_cache_t is overkill)
+
+Parsed image URLs
