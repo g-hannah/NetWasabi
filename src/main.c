@@ -19,7 +19,9 @@
 #include "utils_url.h"
 #include "webreaper.h"
 
-#define SLEEP_TIME	3
+#define CRAWL_DELAY 3
+#define CRAWL_DEPTH 5
+#define NR_LINKS_THRESHOLD 50
 
 static int get_opts(int, char *[]) __nonnull((2)) __wur;
 
@@ -29,10 +31,14 @@ static int get_opts(int, char *[]) __nonnull((2)) __wur;
 uint32_t runtime_options = 0;
 wr_cache_t *http_hcache;
 wr_cache_t *http_lcache;
+wr_cache_t *http_lcache2;
 wr_cache_t *cookies;
 int TRAILING_SLASH = 0;
 char **user_blacklist;
 int USER_BLACKLIST_NR_TOKENS;
+volatile int cache_switch = 0;
+static int nr_reaped = 0;
+static int depth = 0;
 
 /*
  * When using one ptr var to assign cache objects in a loop
@@ -52,7 +58,7 @@ http_header_t **hh_loop;
 http_link_t **hl_loop;
 struct http_cookie_t **hc_loop;
 
-static int REAP_DEPTH = 0xffffffff; /* default = infinite */
+static int REAP_DEPTH = UINT_MAX; /* default = infinite */
 
 int path_max = 1024;
 
@@ -788,10 +794,6 @@ __archive_page(connection_t *conn)
 /* Now we have "file:///path/to/file.extension" */
 	buf_collapse(&local_url, (off_t)0, strlen("file://"));
 
-#ifdef DEBUG
-	fprintf(stderr, "Local URL=%s\n", local_url.buf_head);
-#endif
-
 	rv = __check_local_dirs(conn, &local_url);
 
 	if (rv < 0)
@@ -812,6 +814,7 @@ __archive_page(connection_t *conn)
 	}
 
 	printf("%sCreated file %s\n", ACTION_DONE_STR, local_url.buf_head);
+	++nr_reaped;
 
 	buf_write_fd(fd, buf);
 	close(fd);
@@ -973,33 +976,61 @@ __do_request(connection_t *conn)
  * @conn: our struct with connection context
  */
 static int
-__iterate_cached_links(wr_cache_t *cachep, connection_t *conn, int *choice)
+__iterate_cached_links(wr_cache_t *cachep, wr_cache_t *cachep2, connection_t *conn)
 {
 	assert(cachep);
+	assert(cachep2);
 	assert(conn);
 
-	int nr_links = wr_cache_nr_used(cachep);
+	int nr_links = 0;
+	int nr_links_sibling;
+	int fill = 1;
 	int status_code = 0;
 	int i;
-	//int loops = 0;
 	size_t len;
 	http_link_t *link;
 	buf_t *wbuf = &conn->write_buf;
 
 	TRAILING_SLASH = 0;
+/*
+ * As we archive the pages from URLs stored in one cache,
+ * we fill the sibling cache with URLs to follow in the next
+ * iteration of the while loop. We use the CACHE_SWITCH flag
+ * for using one while filling the other. Fill until we pass
+ * a threshold number of URLs we wish to have for archiving
+ * next. Stop filling when FILL == 0.
+ *
+ * Base case for the loop is our 'crawl depth' being equal
+ * to CRAWL_DEPTH (#iterations of while loop).
+ */
 
-	if (!nr_links)
+while (1)
+{
+	if (!cache_switch)
 	{
-		fprintf(stderr, "__iterate_cached_links: no links\n");
-		return -1;
+		link = (http_link_t *)cachep->cache;
+		nr_links = wr_cache_nr_used(cachep);
+
+		if (wr_cache_nr_used(cachep2) > 0)
+			wr_cache_clear_all(cachep2);
+	}
+	else
+	{
+		link = (http_link_t *)cachep2->cache;
+		nr_links = wr_cache_nr_used(cachep2);
+
+		if (wr_cache_nr_used(cachep) > 0)
+			wr_cache_clear_all(cachep);
 	}
 
-	link = (http_link_t *)cachep->cache;
-	*choice = -1;
+	if (!nr_links)
+		break;
+
+	fill = 1;
 
 	for (i = 0; i < nr_links; ++i)
 	{
-		sleep(SLEEP_TIME);
+		sleep(CRAWL_DELAY);
 		buf_clear(wbuf);
 		len = strlen(link->url);
 
@@ -1031,8 +1062,6 @@ __iterate_cached_links(wr_cache_t *cachep, connection_t *conn, int *choice)
 		switch(status_code)
 		{
 			case HTTP_OK:
-				if (*choice < 0)
-					*choice = i;
 				link->time_reaped = time(NULL);
 				break;
 			case HTTP_MOVED_PERMANENTLY:
@@ -1072,6 +1101,23 @@ __iterate_cached_links(wr_cache_t *cachep, connection_t *conn, int *choice)
 				goto fail;
 		}
 
+		if (fill)
+		{
+			if (!cache_switch)
+			{
+				parse_links(cachep2, conn);
+				nr_links_sibling = wr_cache_nr_used(cachep2);
+			}
+			else
+			{
+				parse_links(cachep, conn);
+				nr_links_sibling = wr_cache_nr_used(cachep);
+			}
+
+			if (nr_links_sibling >= NR_LINKS_THRESHOLD)
+				fill = 0;
+		}
+
 		fprintf(stderr, "%sArchiving %s\n", ACTION_ING_STR, conn->full_url);
 		__archive_page(conn);
 
@@ -1079,6 +1125,17 @@ __iterate_cached_links(wr_cache_t *cachep, connection_t *conn, int *choice)
 		++link;
 		TRAILING_SLASH = 0;
 	}
+
+	++depth;
+
+	if (cache_switch)
+		cache_switch = 0;
+	else
+		cache_switch = 1;
+
+	if (depth >= CRAWL_DEPTH)
+		break;
+}
 
 	return 0;
 
@@ -1183,20 +1240,13 @@ main(int argc, char *argv[])
 	__check_directory();
 
 	connection_t conn;
-	http_link_t *link = NULL;
 	int status_code;
-	int choice = 0;
-	int _nr_links = 0;
 	int do_not_archive = 0;
 	size_t url_len;
 	buf_t *rbuf = NULL;
 	buf_t *wbuf = NULL;
-	buf_t tmp_url;
-	buf_t tmp_full;
 
 	conn_init(&conn);
-	buf_init(&tmp_url, HTTP_URL_MAX);
-	buf_init(&tmp_full, HTTP_URL_MAX);
 
 	http_parse_host(argv[1], conn.host);
 	http_parse_page(argv[1], conn.page);
@@ -1236,6 +1286,13 @@ main(int argc, char *argv[])
 			wr_cache_http_link_ctor,
 			wr_cache_http_link_dtor);
 
+	http_lcache2 = wr_cache_create(
+			"http_link_cache2",
+			sizeof(http_link_t),
+			0,
+			wr_cache_http_link_ctor,
+			wr_cache_http_link_dtor);
+
 	/*
 	 * Create a cache for HTTP header fields.
 	 */
@@ -1268,128 +1325,63 @@ main(int argc, char *argv[])
 		goto out_disconnect;
 	}
 
-	while (1)
+	buf_clear(rbuf);
+	buf_clear(wbuf);
+
+	printf(">>> %s%s%s <<<\n", COL_ORANGE, conn.page, COL_END);
+
+	resend:
+	status_code = __do_request(&conn);
+
+	fprintf(stdout, "%s%s (%s)\n", ACTION_ING_STR, http_status_code_string(status_code), conn.full_url);
+
+	switch(status_code)
 	{
-		loop_start:
+		case HTTP_OK:
+			break;
+		case HTTP_MOVED_PERMANENTLY:
+		case HTTP_FOUND:
+			__handle301(&conn);
+			goto resend;
+			break;
+		case HTTP_ALREADY_EXISTS:
+			do_not_archive = 1;
+			__send_get_request(&conn); /* in this case we still need to get it to extract URLs */
+			break;
+		case HTTP_BAD_REQUEST:
+			fprintf(stderr,
+				"%s%s%s",
+				COL_RED, wbuf->buf_head, COL_END);
 
-		/*
-		 * Would rather sleep between requests to avoid
-		 * having IP address banned by the server.
-		 */
-		sleep(SLEEP_TIME);
+				if (wr_cache_nr_used(cookies) > 0)
+					wr_cache_clear_all(cookies);
 
-		buf_clear(rbuf);
-		buf_clear(wbuf);
+				reconnect(&conn);
 
-		do_not_archive = 0;
-		printf(">>> %s%s%s <<<\n", COL_ORANGE, conn.page, COL_END);
-		status_code = __do_request(&conn);
-
-		fprintf(stdout, "%s%s (%s)\n", ACTION_ING_STR, http_status_code_string(status_code), conn.full_url);
-
-		switch(status_code)
-		{
-			case HTTP_OK:
+				goto resend;
 				break;
-			case HTTP_MOVED_PERMANENTLY:
-			case HTTP_FOUND:
-				__handle301(&conn);
-				goto loop_start;
-				break;
-			case HTTP_ALREADY_EXISTS:
-				do_not_archive = 1;
-				__send_get_request(&conn); /* in this case we still need to get it to extract URLs */
-				goto extract_urls;
-				break;
-			case HTTP_BAD_REQUEST:
-				fprintf(stderr,
-					"%s%s%s",
-					COL_RED, wbuf->buf_head, COL_END);
-
-					if (wr_cache_nr_used(cookies) > 0)
-						wr_cache_clear_all(cookies);
-
-					reconnect(&conn);
-
-					goto loop_start;
-					break;
 			default:
 				goto out_disconnect;
-		}
-
-	/*
-	 * Extract the URLs first, because __archive_page()
-	 * replaces the URLs with local ones ("file:///...")
-	 */
-		extract_urls:
-		fprintf(stderr, "%sExtracting URLs\n", ACTION_ING_STR);
-		parse_links(http_lcache, &conn, conn.host);
-
-		if (!do_not_archive)
-		{
-			fprintf(stderr, "%sArchiving %s\n", ACTION_ING_STR, conn.full_url);
-			__archive_page(&conn);
-		}
-
-		/*
-		 * Choose one of the links at random (rand() MODULO #links)
-		 * to follow and proceed to extract links from its page
-		 */
-		_nr_links = wr_cache_nr_used(http_lcache);
-		fprintf(stderr, "%sIterating over %d parsed URLs\n", ACTION_ING_STR, _nr_links);
-
-		if (__iterate_cached_links(http_lcache, &conn, &choice) < 0)
-			goto out_disconnect;
-
-		if (choice < 0)
-			goto out_disconnect;
-
-		assert(_nr_links > 0);
-		assert(choice < _nr_links);
-
-		link = (http_link_t *)((char *)http_lcache->cache + (choice * http_lcache->objsize));
-
-		assert(strlen(link->url) < HTTP_URL_MAX);
-
-		buf_clear(&tmp_url);
-		buf_clear(&tmp_full);
-
-		buf_append(&tmp_url, link->url);
-		make_full_url(&conn, &tmp_url, &tmp_full);
-		assert(tmp_full.data_len < HTTP_URL_MAX);
-
-		http_parse_page(tmp_full.buf_head, conn.page);
-
-		if (wr_cache_nr_used(http_lcache) > 0)
-			wr_cache_clear_all(http_lcache);
-
-		TRAILING_SLASH = 0;
 	}
 
-	/*
-	 * Destroys the read/write buffers in conn.
-	 */
-	close_connection(&conn);
-	conn_destroy(&conn);
+	parse_links(http_lcache, &conn);
 
-	if (wr_cache_nr_used(http_lcache) > 0)
-		wr_cache_clear_all(http_lcache);
-	if (wr_cache_nr_used(http_hcache) > 0)
-		wr_cache_clear_all(http_hcache);
-	if (wr_cache_nr_used(cookies) > 0)
-		wr_cache_clear_all(cookies);
+	if (!do_not_archive)
+	{
+		fprintf(stderr, "%sArchiving %s\n", ACTION_ING_STR, conn.full_url);
+		__archive_page(&conn);
+	}
 
-	wr_cache_destroy(http_lcache);
-	wr_cache_destroy(http_hcache);
-	wr_cache_destroy(cookies);
+	if (!wr_cache_nr_used(http_lcache))
+	{
+		fprintf(stderr, "%sParsed zero pages from URL %s\n", ACTION_DONE_STR, conn.full_url);
+		goto out_disconnect;
+	}
 
-	buf_destroy(&tmp_url);
-	buf_destroy(&tmp_full);
+	if (__iterate_cached_links(http_lcache, http_lcache2, &conn) < 0)
+		goto fail_disconnect;
 
-	sigaction(SIGINT, &old_sigint, NULL);
-	sigaction(SIGQUIT, &old_sigquit, NULL);
-
-	exit(EXIT_SUCCESS);
+	fprintf(stdout, "%sFinished reaping %d total pages (depth=%d)\n", ACTION_DONE_STR, nr_reaped, CRAWL_DEPTH);
 
 	out_disconnect:
 	close_connection(&conn);
@@ -1397,17 +1389,40 @@ main(int argc, char *argv[])
 
 	if (wr_cache_nr_used(http_lcache) > 0)
 		wr_cache_clear_all(http_lcache);
+	if (wr_cache_nr_used(http_lcache2) > 0)
+		wr_cache_clear_all(http_lcache2);
 	if (wr_cache_nr_used(http_hcache) > 0)
 		wr_cache_clear_all(http_hcache);
 	if (wr_cache_nr_used(cookies) > 0)
 		wr_cache_clear_all(cookies);
 
 	wr_cache_destroy(http_lcache);
+	wr_cache_destroy(http_lcache2);
 	wr_cache_destroy(http_hcache);
 	wr_cache_destroy(cookies);
 
-	buf_destroy(&tmp_url);
-	buf_destroy(&tmp_full);
+	sigaction(SIGINT, &old_sigint, NULL);
+	sigaction(SIGQUIT, &old_sigquit, NULL);
+
+	exit(EXIT_SUCCESS);
+
+	fail_disconnect:
+	close_connection(&conn);
+	conn_destroy(&conn);
+
+	if (wr_cache_nr_used(http_lcache) > 0)
+		wr_cache_clear_all(http_lcache);
+	if (wr_cache_nr_used(http_lcache2) > 0)
+		wr_cache_clear_all(http_lcache2);
+	if (wr_cache_nr_used(http_hcache) > 0)
+		wr_cache_clear_all(http_hcache);
+	if (wr_cache_nr_used(cookies) > 0)
+		wr_cache_clear_all(cookies);
+
+	wr_cache_destroy(http_lcache);
+	wr_cache_destroy(http_lcache2);
+	wr_cache_destroy(http_hcache);
+	wr_cache_destroy(cookies);
 
 	fail:
 	sigaction(SIGINT, &old_sigint, NULL);
