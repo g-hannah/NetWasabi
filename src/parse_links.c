@@ -137,11 +137,12 @@ parse_links(wr_cache_t *cachep, connection_t *conn)
 	buf_init(&full_url, HTTP_URL_MAX);
 	buf_init(&path, path_max);
 
-	tail = buf->buf_tail;
 
 	MATRIX_INIT(url_links, cur_size, HTTP_URL_MAX, char);
 
+	tail = buf->buf_tail;
 	savep = buf->buf_head;
+	nr_already = 0;
 
 	while (1)
 	{
