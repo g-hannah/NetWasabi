@@ -239,7 +239,7 @@ parse_links(wr_cache_t *e_cache, wr_cache_t *f_cache, connection_t *conn)
 
 	assert(nr_urls < cur_size);
 
-	fprintf(stdout, "%sParsed %d new URLs (%d dups, %d already archived, %d siblings)\n",
+	fprintf(stdout, "%sParsed %d more URLs (after %d dups, %d already archived, %d twins removed)\n",
 		ACTION_DONE_STR, nr_urls, removed, nr_already, nr_sibling);
 
 	for (i = 0; i < nr_urls; ++i)
