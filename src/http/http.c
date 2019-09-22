@@ -338,6 +338,43 @@ __read_bytes(connection_t *conn, size_t toread)
 	return toread;
 }
 
+static int
+__must_read_extra(char *ptr, char *tail)
+{
+	if (!(tail - ptr))
+	{
+		//fprintf(stderr, "ptr == tail\n");
+		return 1;
+	}
+
+	if (*ptr != 0x0d)
+	{
+		//fprintf(stderr, "*ptr != 0x0d\n");
+		return 1;
+	}
+
+	SKIP_CRNL(ptr);
+
+	if (ptr >= tail)
+	{
+		//fprintf(stderr, "ptr >= tail\n");
+		return 1;
+	}
+
+	char *save = ptr;
+	ptr = memchr(save, 0x0d, (tail - save));
+
+	if (!ptr)
+	{
+		//fprintf(stderr, "didn't find next CR\n");
+		return 1;
+	}
+
+	//fprintf(stderr, "NO NEED TO READ MORE\n");
+	//fprintf(stderr, "%.*s\n", (int)4, save);
+	return 0;
+}
+
 static size_t
 __http_do_chunked_recv(connection_t *conn)
 {
@@ -469,7 +506,10 @@ __http_do_chunked_recv(connection_t *conn)
 		if (overread >= chunk_size)
 		{
 			p = (e + save_size);
-			goto read_extra;
+			if (__must_read_extra(p, buf->buf_tail))
+				goto read_extra;
+			else
+				continue;
 		}
 		else
 		{
