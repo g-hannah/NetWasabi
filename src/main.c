@@ -371,7 +371,7 @@ __show_response_header(buf_t *buf)
 		return;
 	}
 
-	fprintf(stderr, "%.*s", (int)(p - buf->buf_head), buf->buf_head);
+	fprintf(stderr, "%s%.*s%s", COL_RED, (int)(p - buf->buf_head), buf->buf_head, COL_END);
 
 	return;
 }
@@ -1001,6 +1001,7 @@ __iterate_cached_links(wr_cache_t *cachep, wr_cache_t *cachep2, connection_t *co
 	size_t len;
 	http_link_t *link;
 	buf_t *wbuf = &conn->write_buf;
+	buf_t *rbuf = &conn->read_buf;
 
 	TRAILING_SLASH = 0;
 /*
@@ -1087,9 +1088,12 @@ while (1)
 				goto resend;
 				break;
 			case HTTP_BAD_REQUEST:
-				fprintf(stderr,
-					"%s%s%s",
-					COL_RED, wbuf->buf_head, COL_END);
+			case HTTP_FORBIDDEN:
+			case HTTP_INTERNAL_ERROR:
+			case HTTP_BAD_GATEWAY:
+			case HTTP_SERVICE_UNAV:
+			case HTTP_GATEWAY_TIMEOUT:
+				__show_response_header(rbuf);
 
 					if (wr_cache_nr_used(cookies) > 0)
 						wr_cache_clear_all(cookies);
@@ -1101,17 +1105,12 @@ while (1)
 					goto next;
 					break;
 			case HTTP_ALREADY_EXISTS:
-			case HTTP_FORBIDDEN:
 			case HTTP_NOT_FOUND:
 			/*
 			 * Ignore 302 Found because it is used a lot for obtaining a random
 			 * link, for example a random wiki article (Special:Random).
 			 */
 			case HTTP_FOUND:
-			case HTTP_INTERNAL_ERROR:
-			case HTTP_BAD_GATEWAY:
-			case HTTP_SERVICE_UNAV:
-			case HTTP_GATEWAY_TIMEOUT:
 				goto next;
 			default:
 				fprintf(stderr, "__iterate_cached_links: received HTTP status code %d\n", status_code);
@@ -1365,10 +1364,9 @@ main(int argc, char *argv[])
 			do_not_archive = 1;
 			__send_get_request(&conn); /* in this case we still need to get it to extract URLs */
 			break;
+		case HTTP_FORBIDDEN:
 		case HTTP_BAD_REQUEST:
-			fprintf(stderr,
-				"%s%s%s",
-				COL_RED, wbuf->buf_head, COL_END);
+			__show_response_header(rbuf);
 
 				if (wr_cache_nr_used(cookies) > 0)
 					wr_cache_clear_all(cookies);
@@ -1377,6 +1375,10 @@ main(int argc, char *argv[])
 
 				goto resend;
 				break;
+		case HTTP_GATEWAY_TIMEOUT:
+		case HTTP_BAD_GATEWAY:
+		case HTTP_INTERNAL_ERROR:
+			__show_response_header(rbuf);
 			default:
 				goto out_disconnect;
 	}
