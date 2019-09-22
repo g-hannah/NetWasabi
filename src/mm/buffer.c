@@ -17,19 +17,13 @@
 #include "malloc.h"
 #include "webreaper.h"
 
+static int SET_SOCK_FLAG_ONCE = 0;
+static int SET_SSL_SOCK_FLAG_ONCE = 0;
+
+#if 0
 static sigjmp_buf __TIMEOUT__;
 static struct sigaction siga_old;
 static struct sigaction siga_new;
-static int SET_SOCK_FLAG_ONCE = 0;
-
-void
-handle_timeout(int signo)
-{
-	if (signo != SIGALRM)
-		return;
-
-	siglongjmp(__TIMEOUT__, 1);
-}
 
 #define __SET_ALARM(s, r)\
 do {\
@@ -38,16 +32,15 @@ do {\
 	siga_new.sa_handler = handle_timeout;\
 	siga_new.sa_flags = 0;\
 	sigemptyset(&siga_new.sa_mask);\
-	sigaction(SIGALRM, &siga_new, &siga_old);\
+	if (sigaction(SIGALRM, &siga_new, &siga_old) < 0)\
+		fprintf(stderr, "%s%sFailed to set signal handler for SIGALRM%s\n", COL_RED, ATTENTION_STR, COL_END);\
 	if (sigsetjmp(__TIMEOUT__, 0) != 0)\
 	{\
-		printf("timeout!!!!!!!!!!!!!!!!!\n");\
-		return (r) ? FL_RSOCK_TIMEOUT : -1;\
+		return (r) ? FL_OPERATION_TIMEOUT : -1;\
 	}\
 	alarm((s));\
 } while (0)
 
-#if 0
 #define __RESET_ALARM()\
 do {\
 	alarm(0);\
@@ -387,11 +380,13 @@ buf_read_socket(int sock, buf_t *buf, size_t toread)
 		sock_flags = fcntl(sock, F_GETFL);
 		if (!(sock_flags & O_NONBLOCK))
 		{
-			__SET_ALARM(1, 0);
+			//__SET_ALARM(1, 0);
 			fcntl(sock, F_SETFL, sock_flags | O_NONBLOCK);
 			//__RESET_ALARM();
-			alarm(0);
+			//alarm(0);
 		}
+
+		SET_SOCK_FLAG_ONCE = 1;
 	}
 
 	slack = buf_slack(buf);
@@ -525,20 +520,20 @@ buf_read_tls(SSL *ssl, buf_t *buf, size_t toread)
 	int sock_flags;
 	int read_socket;
 
-	if (!SET_SOCK_FLAG_ONCE)
+	if (!SET_SSL_SOCK_FLAG_ONCE)
 	{
 		read_socket = SSL_get_rfd(ssl);
 		sock_flags = fcntl(read_socket, F_GETFL);
 
 		if (!(sock_flags & O_NONBLOCK))
 		{
-			__SET_ALARM(1, 0);
+			//__SET_ALARM(1, 0);
 			fcntl(read_socket, F_SETFL, sock_flags | O_NONBLOCK);
-			alarm(0);
+			//alarm(0);
 			//__RESET_ALARM();
 		}
 
-		SET_SOCK_FLAG_ONCE = 1;
+		SET_SSL_SOCK_FLAG_ONCE = 1;
 	}
 
 	slack = buf_slack(buf);
@@ -554,7 +549,6 @@ buf_read_tls(SSL *ssl, buf_t *buf, size_t toread)
 		while (1)
 		{
 			n = SSL_read(ssl, buf->buf_tail, toread);
-			//__RESET_ALARM();
 
 			if (!n)
 			{
