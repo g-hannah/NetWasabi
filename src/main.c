@@ -35,6 +35,38 @@ do {\
 
 #define UNBLOCK_SIGNAL(signal) sigprocmask(SIG_SETMASK, &oldset, NULL)
 
+static struct sigaction oact;
+static struct sigaction nact;
+static sigjmp_buf __TIMEOUT__;
+
+static void
+__handle_timeout(int signo)
+{
+	if (signo != SIGALRM)
+		return;
+
+	siglongjmp(__TIMEOUT__, 1);
+}
+
+#define SET_TIMEOUT(s)\
+do {\
+	clear_struct(&oact);\
+	clear_struct(&nact);\
+	nact.sa_flags = 0;\
+	nact.sa_handler = __handle_timeout;\
+	sigemptyset(&nact.sa_mask);\
+	sigaction(SIGALRM, &nact, &oact);\
+	if (sigsetjmp(__TIMEOUT__, 0))\
+		return FL_OPERATION_TIMEOUT;\
+	alarm((s));\
+} while (0)
+
+#define CLEAR_TIMEOUT()\
+do {\
+	alarm(0);\
+	sigaction(SIGALRM, &oact, NULL);\
+} while (0)
+
 static int get_opts(int, char *[]) __nonnull((2)) __wur;
 
 /*
@@ -937,7 +969,9 @@ __do_request(connection_t *conn)
 	 * Save bandwidth: send HEAD first.
 	 */
 	resend_head:
+	SET_TIMEOUT(8);
 	status_code = __send_head_request(conn);
+	CLEAR_TIMEOUT();
 
 #if 0
 	fprintf(stderr,
@@ -987,7 +1021,10 @@ __do_request(connection_t *conn)
 	}
 
 	status_code &= ~status_code;
+
+	SET_TIMEOUT(8);
 	status_code = __send_get_request(conn);
+	CLEAR_TIMEOUT();
 
 	return status_code;
 }
@@ -1148,6 +1185,8 @@ while (1)
 
 					goto next;
 					break;
+			case FL_OPERATION_TIMEOUT:
+				fprintf(stderr, "%s%sTimed out waiting for server response%s\n", COL_RED, ATTENTION_STR, COL_END);
 			case HTTP_ALREADY_EXISTS:
 			case HTTP_NOT_FOUND:
 			/*
