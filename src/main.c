@@ -980,6 +980,32 @@ __do_request(connection_t *conn)
 	return status_code;
 }
 
+char *no_url_files[] =
+{
+	".jpg",
+	".jpeg",
+	".png",
+	".gif",
+	".js",
+	".css",
+	".pdf",
+	NULL
+};
+
+static int
+__url_parseable(char *url)
+{
+	int i;
+
+	for (i = 0; no_url_files[i] != NULL; ++i)
+	{
+		if (strstr(url, no_url_files[i]))
+			return 0;
+	}
+
+	return 1;
+}
+
 /**
  * __iterate_cached_links - archive the pages in the link cache,
  *    choose one at random and return that choice. That will be
@@ -1120,19 +1146,22 @@ while (1)
 
 		if (fill)
 		{
-			if (!cache_switch)
+			if (__url_parseable(conn->full_url))
 			{
-				parse_links(cachep2, conn);
-				nr_links_sibling = wr_cache_nr_used(cachep2);
-			}
-			else
-			{
-				parse_links(cachep, conn);
-				nr_links_sibling = wr_cache_nr_used(cachep);
-			}
+				if (!cache_switch)
+				{
+					parse_links(cachep2, conn);
+					nr_links_sibling = wr_cache_nr_used(cachep2);
+				}
+				else
+				{
+					parse_links(cachep, conn);
+					nr_links_sibling = wr_cache_nr_used(cachep);
+				}
 
-			if (nr_links_sibling >= NR_LINKS_THRESHOLD)
-				fill = 0;
+				if (nr_links_sibling >= NR_LINKS_THRESHOLD)
+					fill = 0;
+			}
 		}
 
 		fprintf(stderr, "%sArchiving %s\n", ACTION_ING_STR, conn->full_url);
@@ -1401,7 +1430,7 @@ main(int argc, char *argv[])
 	if (__iterate_cached_links(http_lcache, http_lcache2, &conn) < 0)
 		goto fail_disconnect;
 
-	fprintf(stdout, "%sFinished reaping %d total pages (depth=%d)\n", ACTION_DONE_STR, nr_reaped, CRAWL_DEPTH);
+	fprintf(stdout, "%sFinished reaping %d total pages (depth=%d)\n", ACTION_DONE_STR, nr_reaped, depth);
 
 	out_disconnect:
 	close_connection(&conn);
