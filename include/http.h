@@ -21,7 +21,7 @@
 #define HTTP_GATEWAY_TIMEOUT 504u
 #define HTTP_ALREADY_EXISTS 0xdeadbeefu
 
-#define HTTP_URL_MAX 512
+#define HTTP_URL_MAX 768
 #define HTTP_COOKIE_MAX 2048 /* Surely this is more than enough */
 #define HTTP_HNAME_MAX 64 /* Header name */
 #define HTTP_HOST_MAX 256
