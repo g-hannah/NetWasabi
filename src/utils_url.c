@@ -130,11 +130,8 @@ make_full_url(connection_t *conn, buf_t *in, buf_t *out)
 	{
 		buf_append(out, conn->host);
 
-		if ((*p == '.' && *(p+1) != '.') || (*p != '.' && *p != '/')) /* relative to current page */
+		if (*p == '.' || *p != '/')
 		{
-			if (*p == '.')
-				p += 2;
-
 		/*
 		 * Append the current page first.
 		 */
@@ -157,16 +154,10 @@ make_full_url(connection_t *conn, buf_t *in, buf_t *out)
 			if (*(out->buf_tail - 1) != '/')
 				buf_append(out, "/");
 
-			if (*p == '/')
-				++p;
-
 			buf_append(out, p);
 		}
 		else
 		{
-			if (!strncmp("..", p, 2))
-				p += 2;
-
 			if (*(out->buf_tail - 1) != '/' && *p != '/')
 				buf_append(out, "/");
 
