@@ -20,8 +20,20 @@
 #include "webreaper.h"
 
 #define CRAWL_DELAY 3
-#define CRAWL_DEPTH 5
-#define NR_LINKS_THRESHOLD 50
+#define CRAWL_DEPTH 50
+#define NR_LINKS_THRESHOLD 500
+
+static sigset_t oldset;
+static sigset_t newset;
+
+#define BLOCK_SIGNAL(signal)\
+do {\
+	sigemptyset(&newset);\
+	sigaddset(&newset, (signal));\
+	sigprocmask(SIG_BLOCK, &newset, &oldset);\
+} while (0)
+
+#define UNBLOCK_SIGNAL(signal) sigprocmask(SIG_SETMASK, &oldset, NULL)
 
 static int get_opts(int, char *[]) __nonnull((2)) __wur;
 
@@ -989,6 +1001,8 @@ char *no_url_files[] =
 	".js",
 	".css",
 	".pdf",
+	".svg",
+	".ico",
 	NULL
 };
 
@@ -1069,7 +1083,10 @@ while (1)
 
 	for (i = 0; i < nr_links; ++i)
 	{
+		BLOCK_SIGNAL(SIGINT);
 		sleep(CRAWL_DELAY);
+		UNBLOCK_SIGNAL(SIGINT);
+
 		buf_clear(wbuf);
 		len = strlen(link->url);
 
