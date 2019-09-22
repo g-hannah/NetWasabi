@@ -9,6 +9,7 @@
 
 #define COL_ORANGE	"\x1b[38;5;208m"
 #define COL_RED			"\x1b[38;5;9m"
+#define COL_LIGHTRED "\x1b[38;5;204m"
 #define COL_GREEN		"\x1b[38;5;40m"
 #define COL_END			"\x1b[m"
 
@@ -103,6 +104,8 @@ int USER_BLACKLIST_NR_TOKENS;
 #define ACTION_ING_STR ">>> "
 #define ACTION_DONE_STR "@@@ "
 #define ATTENTION_STR "!!! "
+
+#define FL_OPERATION_TIMEOUT 0x1
 
 /*
  * For paths that are forbidden as
