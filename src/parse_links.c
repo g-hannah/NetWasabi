@@ -47,9 +47,10 @@ __remove_dups(char **links, const int nr)
 }
 
 static int nr_already = 0;
+static int nr_sibling = 0;
 
 static int
-__url_acceptable(connection_t *conn, buf_t *url)
+__url_acceptable(connection_t *conn, wr_cache_t *f_cache, buf_t *url)
 {
 	assert(conn);
 	assert(url);
@@ -87,6 +88,24 @@ __url_acceptable(connection_t *conn, buf_t *url)
 			return 0;
 	}
 
+	int nr_urls = wr_cache_nr_used(f_cache);
+	int i;
+	http_link_t *link = (http_link_t *)f_cache->cache;
+
+	for (i = 0; i < nr_urls; ++i)
+	{
+		while (!wr_cache_obj_used(f_cache, (void *)link))
+			++link;
+
+		if (!strcmp(link->url, url->buf_head))
+		{
+			++nr_sibling;
+			return 0;
+		}
+
+		++link;
+	}
+
 	return 1;
 }
 
@@ -113,9 +132,10 @@ struct url_types url_types[] =
 };
 
 int
-parse_links(wr_cache_t *cachep, connection_t *conn)
+parse_links(wr_cache_t *e_cache, wr_cache_t *f_cache, connection_t *conn)
 {
-	assert(cachep);
+	assert(e_cache);
+	assert(f_cache);
 	assert(conn);
 
 	char					*p = NULL;
@@ -143,6 +163,7 @@ parse_links(wr_cache_t *cachep, connection_t *conn)
 	tail = buf->buf_tail;
 	savep = buf->buf_head;
 	nr_already = 0;
+	nr_sibling = 0;
 
 	while (1)
 	{
@@ -192,7 +213,7 @@ parse_links(wr_cache_t *cachep, connection_t *conn)
 		buf_append_ex(&url, savep, url_len);
 		make_full_url(conn, &url, &full_url);
 
-		if (!__url_acceptable(conn, &full_url))
+		if (!__url_acceptable(conn, f_cache, &full_url))
 		{
 			savep = ++p;
 			continue;
@@ -218,15 +239,15 @@ parse_links(wr_cache_t *cachep, connection_t *conn)
 
 	assert(nr_urls < cur_size);
 
-	fprintf(stdout, "%sParsed %d URLs (removed %d dups, %d already archived)\n",
-		ACTION_DONE_STR, nr_urls, removed, nr_already);
+	fprintf(stdout, "%sParsed %d new URLs (%d dups, %d already archived, %d siblings)\n",
+		ACTION_DONE_STR, nr_urls, removed, nr_already, nr_sibling);
 
 	for (i = 0; i < nr_urls; ++i)
 	{
 #ifdef DEBUG
 		fprintf(stderr, "allocating link obj in HL_LOOP @ %p\n", hl_loop);
 #endif
-		*hl_loop = (http_link_t *)wr_cache_alloc(cachep, hl_loop);
+		*hl_loop = (http_link_t *)wr_cache_alloc(e_cache, hl_loop);
 
 		assert(*hl_loop);
 

@@ -1150,12 +1150,12 @@ while (1)
 			{
 				if (!cache_switch)
 				{
-					parse_links(cachep2, conn);
+					parse_links(cachep2, cachep, conn);
 					nr_links_sibling = wr_cache_nr_used(cachep2);
 				}
 				else
 				{
-					parse_links(cachep, conn);
+					parse_links(cachep, cachep2, conn);
 					nr_links_sibling = wr_cache_nr_used(cachep);
 				}
 
@@ -1304,8 +1304,8 @@ main(int argc, char *argv[])
 	strncpy(conn.full_url, argv[1], url_len);
 	conn.full_url[url_len] = 0;
 
-	if (conn.full_url[url_len-1] == '/')
-		conn.full_url[--url_len] = 0;
+	//if (conn.full_url[url_len-1] == '/')
+		//conn.full_url[--url_len] = 0;
 
 	strcpy(conn.primary_host, conn.host);
 
@@ -1413,7 +1413,7 @@ main(int argc, char *argv[])
 				goto out_disconnect;
 	}
 
-	parse_links(http_lcache, &conn);
+	parse_links(http_lcache, http_lcache2, &conn);
 
 	if (!do_not_archive)
 	{
