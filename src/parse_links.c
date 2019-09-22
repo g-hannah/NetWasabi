@@ -122,26 +122,6 @@ __url_acceptable(connection_t *conn, wr_cache_t *e_cache, wr_cache_t *f_cache, b
 
 static char **url_links = NULL;
 
-struct url_types
-{
-	char *string;
-	char delim;
-	size_t len;
-};
-
-struct url_types url_types[] =
-{
-	{ "href=\"", '"', 6 },
-	{ "HREF=\"", '"', 6 },
-	{ "src=\"", '"', 5 },
-	{ "SRC=\"", '"', 5 },
-	{ "href=\'", '\'', 6 },
-	{ "HREF=\'", '\'', 6 },
-	{ "src=\'", '\'', 5 },
-	{ "SRC=\'", '\'', 5 },
-	{ "", 0, 0 }
-};
-
 int
 parse_links(wr_cache_t *e_cache, wr_cache_t *f_cache, connection_t *conn)
 {

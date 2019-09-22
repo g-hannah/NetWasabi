@@ -89,6 +89,15 @@ do {\
 #define OPT_SHOW_RES_HEADER 0x4
 #define OPT_ALLOW_XDOMAIN 0x8 /* if not set, ignore URLs that are a different host */
 
+struct url_types
+{
+	char *string;
+	char delim;
+	size_t len;
+};
+
+#define NR_URL_TYPES 9
+struct url_types url_types[NR_URL_TYPES];
 extern uint32_t runtime_options;
 int TRAILING_SLASH;
 int path_max;
@@ -105,7 +114,8 @@ int USER_BLACKLIST_NR_TOKENS;
 #define ACTION_DONE_STR "@@@ "
 #define ATTENTION_STR "!!! "
 
-#define FL_OPERATION_TIMEOUT 0x1
+#define FL_RESET 0x1
+#define FL_OPERATION_TIMEOUT 0x2
 
 /*
  * For paths that are forbidden as
