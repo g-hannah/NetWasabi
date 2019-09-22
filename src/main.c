@@ -22,6 +22,9 @@
 #define CRAWL_DELAY 3
 #define CRAWL_DEPTH 50
 #define NR_LINKS_THRESHOLD 500
+#define MAX_TIME_WAIT 8
+#define MAX_FAILS 10
+#define RESET_DELAY 3
 
 static sigset_t oldset;
 static sigset_t newset;
@@ -35,37 +38,15 @@ do {\
 
 #define UNBLOCK_SIGNAL(signal) sigprocmask(SIG_SETMASK, &oldset, NULL)
 
-static struct sigaction oact;
-static struct sigaction nact;
-static sigjmp_buf __TIMEOUT__;
+static sigjmp_buf __ICL_TIMEOUT__;
 
-static void
-__handle_timeout(int signo)
+static void __handle_icl_timeout(int signo)
 {
 	if (signo != SIGALRM)
 		return;
 
-	siglongjmp(__TIMEOUT__, 1);
+	siglongjmp(__ICL_TIMEOUT__, 1);
 }
-
-#define SET_TIMEOUT(s)\
-do {\
-	clear_struct(&oact);\
-	clear_struct(&nact);\
-	nact.sa_flags = 0;\
-	nact.sa_handler = __handle_timeout;\
-	sigemptyset(&nact.sa_mask);\
-	sigaction(SIGALRM, &nact, &oact);\
-	if (sigsetjmp(__TIMEOUT__, 0))\
-		return FL_OPERATION_TIMEOUT;\
-	alarm((s));\
-} while (0)
-
-#define CLEAR_TIMEOUT()\
-do {\
-	alarm(0);\
-	sigaction(SIGALRM, &oact, NULL);\
-} while (0)
 
 static int get_opts(int, char *[]) __nonnull((2)) __wur;
 
@@ -85,6 +66,19 @@ int USER_BLACKLIST_NR_TOKENS;
 volatile int cache_switch = 0;
 static int nr_reaped = 0;
 static int depth = 0;
+
+struct url_types url_types[] =
+{
+	{ "href=\"", '"', 6 },
+	{ "HREF=\"", '"', 6 },
+	{ "src=\"", '"', 5 },
+	{ "SRC=\"", '"', 5 },
+	{ "href=\'", '\'', 6 },
+	{ "HREF=\'", '\'', 6 },
+	{ "src=\'", '\'', 5 },
+	{ "SRC=\'", '\'', 5 },
+	{ "", 0, 0 }
+};
 
 /*
  * When using one ptr var to assign cache objects in a loop
@@ -713,11 +707,11 @@ __replace_with_local_urls(connection_t *conn, buf_t *buf)
 	off_t url_end_off;
 	off_t savep_off;
 	off_t poff;
-	size_t href_len = strlen("href=\"");
 	size_t range;
 	buf_t url;
 	buf_t path;
 	buf_t full;
+	int url_type_idx;
 
 	buf_init(&url, HTTP_URL_MAX);
 	buf_init(&path, HTTP_URL_MAX);
@@ -740,6 +734,7 @@ do {\
 } while (0)
 
 	savep = buf->buf_head;
+	url_type_idx = 0;
 
 	while (1)
 	{
@@ -748,20 +743,34 @@ do {\
 		assert(buf->buf_tail <= buf->buf_end);
 		assert(buf->buf_head >= buf->data);
 
-		p = strstr(savep, "href=\"");
+		p = strstr(savep, url_types[url_type_idx].string);
 
 		if (!p || p >= tail)
-			break;
-
-		url_start = (p += href_len);
-		url_end = memchr(url_start, '"', (tail - url_start));
-
-		if (!url_end)
 		{
-			savep = ++url_start;
+			++url_type_idx;
+
+			if (url_types[url_type_idx].delim == 0)
+				break;
+
+			savep = buf->buf_head;
 			continue;
 		}
 
+		url_start = (p += url_types[url_type_idx].len);
+		url_end = memchr(url_start, url_types[url_type_idx].delim, (tail - url_start));
+
+		if (!url_end)
+		{
+			++url_type_idx;
+
+			if (url_types[url_type_idx].delim == 0)
+				break;
+
+			savep = buf->buf_head;
+			continue;
+		}
+
+		assert(buf->buf_tail <= buf->buf_end);
 		assert(url_start < buf->buf_tail);
 		assert(url_end < buf->buf_tail);
 		assert(p < buf->buf_tail);
@@ -775,7 +784,7 @@ do {\
 			savep = ++url_end;
 			continue;
 		}
-		else
+
 		if (range >= HTTP_URL_MAX)
 		{
 			savep = ++url_end;
@@ -789,10 +798,13 @@ do {\
 
 		if (range)
 		{
+			fprintf(stderr, "turning %s into full url\n", url.buf_head);
 			make_full_url(conn, &url, &full);
+			fprintf(stderr, "made %s\n", full.buf_head);
 
 			if (make_local_url(conn, &full, &path) == 0)
 			{
+				fprintf(stderr, "made local url %s\n", path.buf_head);
 				buf_collapse(buf, (off_t)(url_start - buf->buf_head), range);
 				tail = buf->buf_tail;
 
@@ -969,9 +981,7 @@ __do_request(connection_t *conn)
 	 * Save bandwidth: send HEAD first.
 	 */
 	resend_head:
-	SET_TIMEOUT(8);
 	status_code = __send_head_request(conn);
-	CLEAR_TIMEOUT();
 
 #if 0
 	fprintf(stderr,
@@ -1022,9 +1032,7 @@ __do_request(connection_t *conn)
 
 	status_code &= ~status_code;
 
-	SET_TIMEOUT(8);
 	status_code = __send_get_request(conn);
-	CLEAR_TIMEOUT();
 
 	return status_code;
 }
@@ -1058,14 +1066,14 @@ __url_parseable(char *url)
 }
 
 /**
- * __iterate_cached_links - archive the pages in the link cache,
+ * reap - archive the pages in the link cache,
  *    choose one at random and return that choice. That will be
  *    our next page from which to parse links.
  * @cachep: the cache of parsed links
  * @conn: our struct with connection context
  */
 static int
-__iterate_cached_links(wr_cache_t *cachep, wr_cache_t *cachep2, connection_t *conn)
+reap(wr_cache_t *cachep, wr_cache_t *cachep2, connection_t *conn)
 {
 	assert(cachep);
 	assert(cachep2);
@@ -1080,6 +1088,9 @@ __iterate_cached_links(wr_cache_t *cachep, wr_cache_t *cachep2, connection_t *co
 	http_link_t *link;
 	buf_t *wbuf = &conn->write_buf;
 	buf_t *rbuf = &conn->read_buf;
+	struct sigaction it_nact;
+	struct sigaction it_oact;
+	sigjmp_buf __ICL_TIMEOUT__;
 
 	TRAILING_SLASH = 0;
 /*
@@ -1093,6 +1104,32 @@ __iterate_cached_links(wr_cache_t *cachep, wr_cache_t *cachep2, connection_t *co
  * Base case for the loop is our 'crawl depth' being equal
  * to CRAWL_DEPTH (#iterations of while loop).
  */
+
+	clear_struct(&it_nact);
+	clear_struct(&it_oact);
+	it_nact.sa_flags = 0;
+	it_nact.sa_handler = __handle_icl_timeout;
+	sigemptyset(&it_nact.sa_mask);
+	if (sigaction(SIGALRM, &it_nact, &it_oact) < 0)
+	{
+		fprintf(stderr, "reap: failed to set signal handler for SIGALRM\n");
+		goto fail;
+	}
+
+	if (sigsetjmp(__ICL_TIMEOUT__, 0) != 0)
+	{
+		fprintf(stderr, "%s%sTimed out getting %s%s\n", COL_RED, ATTENTION_STR, conn->full_url, COL_END);
+
+		buf_clear(rbuf);
+		buf_clear(wbuf);
+
+		return FL_RESET;
+	}
+
+	if (!wr_cache_nr_used(cachep))
+		cache_switch = 1;
+	else
+		cache_switch = 0;
 
 while (1)
 {
@@ -1147,7 +1184,9 @@ while (1)
 
 		fprintf(stderr, "===> %s%s%s <===\n", COL_ORANGE, conn->page, COL_END);
 
+		alarm(MAX_TIME_WAIT);
 		status_code = __do_request(conn);
+		alarm(0);
 
 		link->status_code = status_code;
 		++(link->nr_requests);
@@ -1185,8 +1224,6 @@ while (1)
 
 					goto next;
 					break;
-			case FL_OPERATION_TIMEOUT:
-				fprintf(stderr, "%s%sTimed out waiting for server response%s\n", COL_RED, ATTENTION_STR, COL_END);
 			case HTTP_ALREADY_EXISTS:
 			case HTTP_NOT_FOUND:
 			/*
@@ -1196,7 +1233,7 @@ while (1)
 			case HTTP_FOUND:
 				goto next;
 			default:
-				fprintf(stderr, "__iterate_cached_links: received HTTP status code %d\n", status_code);
+				fprintf(stderr, "reap: received HTTP status code %d\n", status_code);
 				goto fail;
 		}
 
@@ -1344,6 +1381,8 @@ main(int argc, char *argv[])
 	connection_t conn;
 	int status_code;
 	int do_not_archive = 0;
+	int rv;
+	int nr_fails = 0;
 	size_t url_len;
 	buf_t *rbuf = NULL;
 	buf_t *wbuf = NULL;
@@ -1483,8 +1522,35 @@ main(int argc, char *argv[])
 		goto out_disconnect;
 	}
 
-	if (__iterate_cached_links(http_lcache, http_lcache2, &conn) < 0)
+	try_again:
+	rv = reap(http_lcache, http_lcache2, &conn);
+
+	if (rv < 0)
+	{
 		goto fail_disconnect;
+	}
+	else
+	if (FL_RESET == rv)
+	{
+		buf_clear(&conn.read_buf);
+		buf_clear(&conn.write_buf);
+		reconnect(&conn);
+
+		BLOCK_SIGNAL(SIGINT);
+		sleep(RESET_DELAY);
+		UNBLOCK_SIGNAL(SIGINT);
+
+		if (wr_cache_nr_used(http_lcache) >= wr_cache_nr_used(http_lcache2))
+			wr_cache_clear_all(http_lcache2);
+		else
+			wr_cache_clear_all(http_lcache);	
+
+		++nr_fails;
+		if (nr_fails < MAX_FAILS)
+			goto try_again;
+		else
+			goto fail_disconnect;
+	}
 
 	fprintf(stdout, "%sFinished reaping %d total pages (depth=%d)\n", ACTION_DONE_STR, nr_reaped, depth);
 
