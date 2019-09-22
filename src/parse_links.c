@@ -50,7 +50,7 @@ static int nr_already = 0;
 static int nr_sibling = 0;
 
 static int
-__url_acceptable(connection_t *conn, wr_cache_t *f_cache, buf_t *url)
+__url_acceptable(connection_t *conn, wr_cache_t *e_cache, wr_cache_t *f_cache, buf_t *url)
 {
 	assert(conn);
 	assert(url);
@@ -106,6 +106,17 @@ __url_acceptable(connection_t *conn, wr_cache_t *f_cache, buf_t *url)
 		++link;
 	}
 
+	link = (http_link_t *)e_cache->cache;
+	nr_urls = wr_cache_nr_used(e_cache);
+	for (i = 0; i < nr_urls; ++i)
+	{
+		while (!wr_cache_obj_used(e_cache, (void *)link))
+			++link;
+
+		if (!strcmp(link->url, url->buf_head))
+			return 0;
+	}
+
 	return 1;
 }
 
@@ -157,7 +168,6 @@ parse_links(wr_cache_t *e_cache, wr_cache_t *f_cache, connection_t *conn)
 	buf_init(&full_url, HTTP_URL_MAX);
 	buf_init(&path, path_max);
 
-
 	MATRIX_INIT(url_links, cur_size, HTTP_URL_MAX, char);
 
 	tail = buf->buf_tail;
@@ -208,12 +218,12 @@ parse_links(wr_cache_t *e_cache, wr_cache_t *f_cache, connection_t *conn)
 		}
 
 		assert(url_len < HTTP_URL_MAX);
-		assert(aidx < cur_size);
+		assert(aidx <= cur_size);
 
 		buf_append_ex(&url, savep, url_len);
 		make_full_url(conn, &url, &full_url);
 
-		if (!__url_acceptable(conn, f_cache, &full_url))
+		if (!__url_acceptable(conn, e_cache, f_cache, &full_url))
 		{
 			savep = ++p;
 			continue;
@@ -237,10 +247,10 @@ parse_links(wr_cache_t *e_cache, wr_cache_t *f_cache, connection_t *conn)
 	removed = __remove_dups(url_links, (const int)nr_urls);
 	nr_urls -= removed;
 
-	assert(nr_urls < cur_size);
+	assert(nr_urls <= cur_size);
 
-	fprintf(stdout, "%sParsed %d more URLs (after %d dups, %d already archived, %d twins removed)\n",
-		ACTION_DONE_STR, nr_urls, removed, nr_already, nr_sibling);
+	fprintf(stdout, "%s%sParsed %d more URLs (after %d dups, %d already archived, %d twins removed)%s\n",
+		COL_LIGHTRED, ACTION_DONE_STR, nr_urls, removed, nr_already, nr_sibling, COL_END);
 
 	for (i = 0; i < nr_urls; ++i)
 	{
@@ -255,6 +265,8 @@ parse_links(wr_cache_t *e_cache, wr_cache_t *f_cache, connection_t *conn)
 			goto fail_free_links;
 
 		url_len = strlen(url_links[i]);
+		if (url_len >= HTTP_URL_MAX)
+			fprintf(stderr, "%s\n", url_links[i]);
 		assert(url_len < HTTP_URL_MAX);
 		strncpy((*hl_loop)->url, url_links[i], url_len);
 		(*hl_loop)->url[url_len] = 0;
