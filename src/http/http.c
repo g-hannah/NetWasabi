@@ -256,33 +256,38 @@ http_send_request(connection_t *conn)
 
 #define HTTP_SMALL_READ_BLOCK 256
 
-static char *
-__http_read_until_eoh(connection_t *conn)
+static int
+__http_read_until_eoh(connection_t *conn, char **p)
 {
 	assert(conn);
 
 	ssize_t n;
-	char *p = NULL;
 	buf_t *buf = &conn->read_buf;
 
-	while (!p)
+	while (!(*p))
 	{
 		if (option_set(OPT_USE_TLS))
 			n = buf_read_tls(conn->ssl, buf, HTTP_SMALL_READ_BLOCK);
 		else
 			n = buf_read_socket(conn->sock, buf, HTTP_SMALL_READ_BLOCK);
 
-		if (!n)
-			continue;
-		else
-		if (n < 0)
-			return NULL;
-		else
-			p = strstr(buf->buf_head, HTTP_EOH_SENTINEL);
+		if (n == -1)
+			return -1;
+
+		switch(n)
+		{
+			case 0:
+				continue;
+				break;
+			default:
+				*p = strstr(buf->buf_head, HTTP_EOH_SENTINEL);
+		}
 	}
 
-	assert(!strncmp(HTTP_EOH_SENTINEL, p, strlen(HTTP_EOH_SENTINEL)));
-	return p + strlen(HTTP_EOH_SENTINEL);
+	assert(!strncmp(HTTP_EOH_SENTINEL, *p, strlen(HTTP_EOH_SENTINEL)));
+	*p += strlen(HTTP_EOH_SENTINEL);
+
+	return 0;
 }
 
 #ifdef DEBUG
@@ -341,37 +346,40 @@ __read_bytes(connection_t *conn, size_t toread)
 static int
 __must_read_extra(char *ptr, char *tail)
 {
+	size_t read_more = 8;
+	char *p = ptr;
+
 	if (!(tail - ptr))
 	{
 		//fprintf(stderr, "ptr == tail\n");
-		return 1;
+		return read_more;
 	}
 
 	if (*ptr != 0x0d)
 	{
 		//fprintf(stderr, "*ptr != 0x0d\n");
-		return 1;
+		return read_more;
 	}
 
-	SKIP_CRNL(ptr);
+	SKIP_CRNL(p);
 
-	if (ptr >= tail)
+	read_more -= (p - ptr);
+
+	if (p >= tail)
 	{
 		//fprintf(stderr, "ptr >= tail\n");
-		return 1;
+		read_more += (p - tail);
+		return read_more;
 	}
 
-	char *save = ptr;
-	ptr = memchr(save, 0x0d, (tail - save));
+	if (*(ptr - 1) != 0x0a)
+		return read_more;
+
+	ptr = memchr(p, 0x0d, (tail - p));
 
 	if (!ptr)
-	{
-		//fprintf(stderr, "didn't find next CR\n");
-		return 1;
-	}
+		return read_more;
 
-	//fprintf(stderr, "NO NEED TO READ MORE\n");
-	//fprintf(stderr, "%.*s\n", (int)4, save);
 	return 0;
 }
 
@@ -380,7 +388,7 @@ __http_do_chunked_recv(connection_t *conn)
 {
 	assert(conn);
 
-#define HTTP_MAX_CHUNK_STR 20
+#define HTTP_MAX_CHUNK_STR 8
 
 	char *p;
 	char *e;
@@ -392,6 +400,7 @@ __http_do_chunked_recv(connection_t *conn)
 	size_t save_size;
 	size_t overread;
 	size_t total;
+	size_t extra;
 #ifndef DEBUG
 	size_t range;
 	char *t;
@@ -408,8 +417,14 @@ __http_do_chunked_recv(connection_t *conn)
  * Make sure we actually have enough data past
  * EOH to get the size of the first chunk.
  */
-	__read_bytes(conn, 8);
+
 	p = HTTP_EOH(buf);
+
+	while (!p)
+	{
+		__read_bytes(conn, 1);
+		p = HTTP_EOH(buf);
+	}
 
 	if (!p)
 	{
@@ -506,10 +521,12 @@ __http_do_chunked_recv(connection_t *conn)
 		if (overread >= chunk_size)
 		{
 			p = (e + save_size);
-			if (__must_read_extra(p, buf->buf_tail))
-				goto read_extra;
-			else
+			extra = 0;
+			extra = __must_read_extra(p, buf->buf_tail);
+			if (!extra)
 				continue;
+			else
+				goto read_extra;
 		}
 		else
 		{
@@ -551,12 +568,14 @@ __http_do_chunked_recv(connection_t *conn)
 		 */
 		read_extra:
 		total = 0;
+		if (!extra)
+			extra = HTTP_MAX_CHUNK_STR;
 		while (1)
 		{
 			if (option_set(OPT_USE_TLS))
-				bytes_read = buf_read_tls(conn->ssl, buf, (HTTP_MAX_CHUNK_STR - total));
+				bytes_read = buf_read_tls(conn->ssl, buf, (extra - total));
 			else
-				bytes_read = buf_read_socket(conn->sock, buf, (HTTP_MAX_CHUNK_STR - total));
+				bytes_read = buf_read_socket(conn->sock, buf, (extra - total));
 
 			if (bytes_read < 0)
 				return -1;
@@ -643,29 +662,25 @@ http_recv_response(connection_t *conn)
 	size_t clen;
 	size_t overread;
 	ssize_t bytes;
+	int rv;
 	http_header_t *content_len = NULL;
 	http_header_t *transfer_enc = NULL;
 	buf_t *buf = &conn->read_buf;
-
-#ifdef DEBUG
-	fprintf(stderr, "allocating header obj in CONTENT_LEN @ %p\n", &content_len);
-#endif
 
 	content_len = (http_header_t *)wr_cache_alloc(http_hcache, &content_len);
 
 	if (!content_len)
 		goto fail;
 
-#ifdef DEBUG
-	fprintf(stderr, "allocating header obj in TRANSFER_ENC @ %p\n", &transfer_enc);
-#endif
-
 	transfer_enc = (http_header_t *)wr_cache_alloc(http_hcache, &transfer_enc);
 
 	if (!transfer_enc)
 		goto fail_dealloc;
 
-	p = __http_read_until_eoh(conn);
+	 rv = __http_read_until_eoh(conn, &p);
+
+	if (rv < 0)
+		goto fail_dealloc;
 
 	if (!p)
 	{
@@ -684,9 +699,6 @@ http_recv_response(connection_t *conn)
 
 	if (http_fetch_header(&conn->read_buf, "Transfer-Encoding", transfer_enc, (off_t)0))
 	{
-#ifdef DEBUG
-		fprintf(stderr, "transfer encoding = %s\n", transfer_enc->value);
-#endif
 		if (!strncmp("chunked", transfer_enc->value, transfer_enc->vlen))
 		{
 			if (__http_do_chunked_recv(conn) == -1)
@@ -713,7 +725,9 @@ http_recv_response(connection_t *conn)
 				else
 					bytes = buf_read_socket(conn->sock, buf, clen);
 
-				if (bytes < 0)
+				rv = bytes;
+
+				if (rv < 0)
 					goto fail_dealloc;
 				else
 				if (!bytes)
@@ -735,7 +749,9 @@ http_recv_response(connection_t *conn)
 		else
 			bytes = buf_read_socket(conn->sock, buf, 0);
 
-		if (bytes < 0)
+		rv = bytes;
+
+		if (rv < 0)
 			goto fail_dealloc;
 
 		p = strstr(buf->buf_head, "</body");
@@ -749,16 +765,7 @@ http_recv_response(connection_t *conn)
 	out_dealloc:
 	assert(conn->read_buf.magic == BUFFER_MAGIC);
 
-#ifdef DEBUG
-	fprintf(stderr, "deallocating header obj CONTENT_LEN @ %p\n", &content_len);
-#endif
-
 	wr_cache_dealloc(http_hcache, (void *)content_len, &content_len);
-
-#ifdef DEBUG
-	fprintf(stderr, "deallocating header obj TRANSFER_ENC @ %p\n", &transfer_enc);
-#endif
-
 	wr_cache_dealloc(http_hcache, (void *)transfer_enc, &transfer_enc);
 
 	return 0;
@@ -766,22 +773,16 @@ http_recv_response(connection_t *conn)
 	fail_dealloc:
 	if (content_len)
 	{
-#ifdef DEBUG
-		fprintf(stderr, "deallocating header obj CONTENT_LEN @ %p\n", &content_len);
-#endif
 		wr_cache_dealloc(http_hcache, (void *)content_len, &content_len);
 	}
 
 	if (transfer_enc)
 	{
-#ifdef DEBUG
-	fprintf(stderr, "deallocating header obj TRANSFER_ENC @ %p\n", &transfer_enc);
-#endif
 		wr_cache_dealloc(http_hcache, (void *)transfer_enc, &transfer_enc);
 	}
 
 	fail:
-	return -1;
+	return rv;
 }
 
 int
