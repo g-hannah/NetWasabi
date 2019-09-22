@@ -4,6 +4,8 @@
 #include <limits.h>
 #include <openssl/err.h>
 #include <openssl/ssl.h>
+#include <setjmp.h>
+#include <signal.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -11,8 +13,47 @@
 #include <sys/stat.h>
 #include <unistd.h>
 #include "buffer.h"
+#include "connection.h"
 #include "malloc.h"
 #include "webreaper.h"
+
+static sigjmp_buf __TIMEOUT__;
+static struct sigaction siga_old;
+static struct sigaction siga_new;
+static int SET_SOCK_FLAG_ONCE = 0;
+
+void
+handle_timeout(int signo)
+{
+	if (signo != SIGALRM)
+		return;
+
+	siglongjmp(__TIMEOUT__, 1);
+}
+
+#define __SET_ALARM(s, r)\
+do {\
+	clear_struct(&siga_old);\
+	clear_struct(&siga_new);\
+	siga_new.sa_handler = handle_timeout;\
+	siga_new.sa_flags = 0;\
+	sigemptyset(&siga_new.sa_mask);\
+	sigaction(SIGALRM, &siga_new, &siga_old);\
+	if (sigsetjmp(__TIMEOUT__, 0) != 0)\
+	{\
+		printf("timeout!!!!!!!!!!!!!!!!!\n");\
+		return (r) ? FL_RSOCK_TIMEOUT : -1;\
+	}\
+	alarm((s));\
+} while (0)
+
+#if 0
+#define __RESET_ALARM()\
+do {\
+	alarm(0);\
+	sigaction(SIGALRM, &siga_old, NULL);\
+} while (0)
+#endif
 
 static inline void
 __buf_reset_head(buf_t *buf)
@@ -332,7 +373,6 @@ buf_read_socket(int sock, buf_t *buf, size_t toread)
 	ssize_t n = 0;
 	ssize_t total = 0;
 	size_t slack;
-	int sock_flags;
 
 	if (toread < 0)
 	{
@@ -340,10 +380,19 @@ buf_read_socket(int sock, buf_t *buf, size_t toread)
 		return -1;
 	}
 
-	sock_flags = fcntl(sock, F_GETFL);
+	int sock_flags;
 
-	if (!(sock_flags & O_NONBLOCK))
-		fcntl(sock, F_SETFL, sock_flags | O_NONBLOCK);
+	if (!SET_SOCK_FLAG_ONCE)
+	{
+		sock_flags = fcntl(sock, F_GETFL);
+		if (!(sock_flags & O_NONBLOCK))
+		{
+			__SET_ALARM(1, 0);
+			fcntl(sock, F_SETFL, sock_flags | O_NONBLOCK);
+			//__RESET_ALARM();
+			alarm(0);
+		}
+	}
 
 	slack = buf_slack(buf);
 
@@ -462,21 +511,35 @@ buf_read_tls(SSL *ssl, buf_t *buf, size_t toread)
 	assert(buf);
 
 	size_t slack;
-	//ssize_t n;
-	int n;
+	ssize_t n;
 	ssize_t total = 0;
-	//int ssl_error = 0;
-	int read_socket = 0;
-	//int slept_for = 0;
-	//struct timeval timeout = {0};
-	//fd_set rdfds;
+
+#if 0
+	int ssl_error = 0;
+	int slept_for = 0;
+	struct timeval timeout = {0};
+	int read_socket;
+	fd_set rdfds;
+#endif
+
 	int sock_flags;
+	int read_socket;
 
-	read_socket = SSL_get_rfd(ssl);
+	if (!SET_SOCK_FLAG_ONCE)
+	{
+		read_socket = SSL_get_rfd(ssl);
+		sock_flags = fcntl(read_socket, F_GETFL);
 
-	sock_flags = fcntl(read_socket, F_GETFL);
-	if (!(sock_flags & O_NONBLOCK))
-		fcntl(read_socket, F_SETFL, sock_flags | O_NONBLOCK);
+		if (!(sock_flags & O_NONBLOCK))
+		{
+			__SET_ALARM(1, 0);
+			fcntl(read_socket, F_SETFL, sock_flags | O_NONBLOCK);
+			alarm(0);
+			//__RESET_ALARM();
+		}
+
+		SET_SOCK_FLAG_ONCE = 1;
+	}
 
 	slack = buf_slack(buf);
 
@@ -491,6 +554,7 @@ buf_read_tls(SSL *ssl, buf_t *buf, size_t toread)
 		while (1)
 		{
 			n = SSL_read(ssl, buf->buf_tail, toread);
+			//__RESET_ALARM();
 
 			if (!n)
 			{
@@ -563,6 +627,9 @@ buf_read_tls(SSL *ssl, buf_t *buf, size_t toread)
 	}
 	else // !toread
 	{
+	read_socket = SSL_get_rfd(ssl);
+	sock_flags = fcntl(read_socket, F_GETFL);
+
 		while (1)
 		{
 			n = SSL_read(ssl, buf->buf_tail, slack);
@@ -728,6 +795,10 @@ buf_write_tls(SSL *ssl, buf_t *buf)
 	size_t towrite = buf->data_len;
 	ssize_t n = 0;
 	ssize_t total = 0;
+	//int write_socket;
+	//fd_set wfds;
+	//struct timeval timeout = {0};
+	//int slept_for = 0;
 
 	while (towrite > 0)
 	{
@@ -740,7 +811,29 @@ buf_write_tls(SSL *ssl, buf_t *buf)
 		if (n < 0)
 		{
 			if (errno == EINTR)
+			{
 				continue;
+			}
+#if 0
+			else
+			if (errno == EAGAIN || errno == EWOULDBLOCK)
+			{
+				write_socket = SSL_get_wfd(ssl);
+				FD_ZERO(&wfds);
+				FD_SET(write_socket, &wfds);
+				timeout.tv_sec = 1;
+				slept_for = select(write_socket+1, NULL, &wfds, NULL, &timeout);
+				if (slept_for < 0)
+				{
+					fprintf(stderr, "buf_write_tls: select error (%s)\n", strerror(errno));
+					return -1;
+				}
+				else
+				{
+					continue;
+				}
+			}
+#endif
 			else
 			{
 				int ssl_error = SSL_get_error(ssl, n);
