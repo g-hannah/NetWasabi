@@ -334,7 +334,7 @@ __connection_closed(connection_t *conn)
 
 	if (connection->value[0])
 	{
-		if (strncmp("keep-alive", connection->value, connection->vlen))
+		if (strncasecmp("keep-alive", connection->value, connection->vlen))
 			rv = 1;
 	}
 
@@ -381,8 +381,9 @@ __check_host(connection_t *conn)
 {
 	assert(conn);
 
-	static char old_host[HTTP_URL_MAX];
+	static char old_host[HTTP_HNAME_MAX];
 
+	assert(strlen(conn->host) < HTTP_HNAME_MAX);
 	strcpy(old_host, conn->host);
 	http_parse_host(conn->full_url, conn->host);
 
