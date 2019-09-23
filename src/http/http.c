@@ -1,6 +1,8 @@
 #include <assert.h>
 #include <errno.h>
 #include <fcntl.h>
+#include <setjmp.h>
+#include <signal.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <sys/stat.h>
@@ -11,6 +13,16 @@
 #include "http.h"
 #include "malloc.h"
 #include "webreaper.h"
+
+static struct sigaction oact;
+static struct sigaction nact;
+static sigjmp_buf TIMEOUT;
+
+static void
+__http_handle_timeout(int signo)
+{
+	siglongjmp(TIMEOUT, 1);
+}
 
 /**
  * wr_cache_http_cookie_ctor - initialise object for the cookie cache
@@ -128,6 +140,10 @@ wr_cache_http_link_ctor(void *http_link)
 		return -1;
 
 	memset(hl->url, 0, HTTP_URL_MAX+1);
+
+	hl->left = NULL;
+	hl->right = NULL;
+
 	return 0;
 }
 
@@ -263,9 +279,35 @@ __http_read_until_eoh(connection_t *conn, char **p)
 
 	ssize_t n;
 	buf_t *buf = &conn->read_buf;
+	//int loop_cnt = 0;
 
+	clear_struct(&oact);
+	clear_struct(&nact);
+	nact.sa_flags = 0;
+	nact.sa_handler = __http_handle_timeout;
+	sigemptyset(&nact.sa_mask);
+
+	if (sigaction(SIGALRM, &nact, &oact) < 0)
+	{
+		fprintf(stderr, "__http_read_until_eoh: failed to set signal handler for SIGALRM\n");
+		return -1;
+	}
+
+	if (sigsetjmp(TIMEOUT, 1) != 0)
+	{
+		fprintf(stderr, "%s%sTimed out waiting for HTTP response from server%s\n", COL_RED, ACTION_DONE_STR, COL_END);
+		sigaction(SIGALRM, &oact, NULL);
+		return FL_OPERATION_TIMEOUT;
+	}
+
+	alarm(8);
 	while (!(*p))
 	{
+#if 0
+		if (++loop_cnt > 10000000)
+			return FL_OPERATION_TIMEOUT;
+#endif
+
 		if (option_set(OPT_USE_TLS))
 			n = buf_read_tls(conn->ssl, buf, HTTP_SMALL_READ_BLOCK);
 		else
@@ -283,10 +325,12 @@ __http_read_until_eoh(connection_t *conn, char **p)
 				*p = strstr(buf->buf_head, HTTP_EOH_SENTINEL);
 		}
 	}
+	alarm(0);
 
 	assert(!strncmp(HTTP_EOH_SENTINEL, *p, strlen(HTTP_EOH_SENTINEL)));
 	*p += strlen(HTTP_EOH_SENTINEL);
 
+	sigaction(SIGALRM, &oact, NULL);
 	return 0;
 }
 
@@ -677,9 +721,9 @@ http_recv_response(connection_t *conn)
 	if (!transfer_enc)
 		goto fail_dealloc;
 
-	 rv = __http_read_until_eoh(conn, &p);
+	rv = __http_read_until_eoh(conn, &p);
 
-	if (rv < 0)
+	if (rv < 0 || FL_OPERATION_TIMEOUT == rv)
 		goto fail_dealloc;
 
 	if (!p)
