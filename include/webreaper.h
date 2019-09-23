@@ -11,6 +11,7 @@
 #define COL_RED			"\x1b[38;5;9m"
 #define COL_LIGHTRED "\x1b[38;5;204m"
 #define COL_GREEN		"\x1b[38;5;40m"
+#define COL_DARKGREY "\x1b[38;5;245m"
 #define COL_END			"\x1b[m"
 
 #define clear_struct(s) memset((s), 0, sizeof(*(s)))
