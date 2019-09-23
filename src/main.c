@@ -1167,6 +1167,7 @@ while (1)
 		link = (http_link_t *)cachep->cache;
 		nr_links = wr_cache_nr_used(cachep);
 
+		fprintf(stderr, "%d URLs in cache 1\n", nr_links);
 		if (wr_cache_nr_used(cachep2) > 0)
 			wr_cache_clear_all(cachep2);
 
@@ -1177,6 +1178,7 @@ while (1)
 		link = (http_link_t *)cachep2->cache;
 		nr_links = wr_cache_nr_used(cachep2);
 
+		fprintf(stderr, "%d URLs in cache 2\n", nr_links);
 		if (wr_cache_nr_used(cachep) > 0)
 			wr_cache_clear_all(cachep);
 
@@ -1190,10 +1192,6 @@ while (1)
 
 	for (i = 0; i < nr_links; ++i)
 	{
-		BLOCK_SIGNAL(SIGINT);
-		sleep(CRAWL_DELAY);
-		UNBLOCK_SIGNAL(SIGINT);
-
 		buf_clear(wbuf);
 		len = strlen(link->url);
 
@@ -1210,6 +1208,10 @@ while (1)
 
 		if (!http_parse_page(conn->full_url, conn->page))
 			continue;
+
+		BLOCK_SIGNAL(SIGINT);
+		sleep(CRAWL_DELAY);
+		UNBLOCK_SIGNAL(SIGINT);
 
 		__check_host(conn);
 
@@ -1233,6 +1235,7 @@ while (1)
 		switch(status_code)
 		{
 			case HTTP_OK:
+			case HTTP_NOT_FOUND: /* don't want to keep requesting the link and getting 404, so just archive it */
 				break;
 			case HTTP_MOVED_PERMANENTLY:
 			/*
@@ -1267,13 +1270,13 @@ while (1)
 						wr_cache_clear_all(cookies);
 
 					buf_clear(wbuf);
+					buf_clear(rbuf);
 
 					reconnect(conn);
 
 					goto next;
 					break;
 			case HTTP_ALREADY_EXISTS:
-			case HTTP_NOT_FOUND:
 			/*
 			 * Ignore 302 Found because it is used a lot for obtaining a random
 			 * link, for example a random wiki article (Special:Random).
@@ -1281,17 +1284,17 @@ while (1)
 			case HTTP_FOUND:
 				goto next;
 			case FL_OPERATION_TIMEOUT:
-				buf_clear(wbuf);
+
+				fprintf(stderr, "%s\n", rbuf->buf_head);
 				buf_clear(rbuf);
 
-				++link;
-				http_parse_host(link->url, conn->host);
-				http_parse_page(link->url, conn->page);
-				strcpy(conn->full_url, link->url);
+				if (!conn->host[0])
+					strcpy(conn->host, conn->primary_host);
 
 				reconnect(conn);
 
 				goto next;
+				break;
 			default:
 				fprintf(stderr, "reap: received HTTP status code %d\n", status_code);
 				goto fail;
