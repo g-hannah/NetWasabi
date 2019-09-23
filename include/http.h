@@ -68,10 +68,10 @@ do {\
 
 typedef struct http_link_t
 {
-	int status_code;
 	char *url;
-	time_t time_reaped;
 	int nr_requests;
+	struct http_link_t *left;
+	struct http_link_t *right;
 } http_link_t;
 
 typedef struct http_state_t
@@ -109,6 +109,9 @@ http_header_t **hh_loop;
 http_link_t **hl_loop;
 struct http_cookie_t **hc_loop;
 
+http_link_t *cache1_url_root;
+http_link_t *cache2_url_root;
+
 extern wr_cache_t *http_hcache;
 size_t httplen;
 size_t httpslen;
@@ -124,7 +127,7 @@ int http_check_header(buf_t *, const char *, off_t, off_t *) __nonnull((1,2,4)) 
 char *http_fetch_header(buf_t *, const char *, http_header_t *, off_t) __nonnull((1,2,3)) __wur;
 char *http_parse_host(char *, char *) __nonnull((1,2)) __wur;
 char *http_parse_page(char *, char *) __nonnull((1,2)) __wur;
-int parse_links(wr_cache_t *, wr_cache_t *, connection_t *) __nonnull((1,2,3)) __wur;
+int parse_links(wr_cache_t *, wr_cache_t *, http_link_t *, connection_t *) __nonnull((1,2,3,4)) __wur;
 int wr_cache_http_link_ctor(void *) __nonnull((1)) __wur;
 void wr_cache_http_link_dtor(void *) __nonnull((1));
 int wr_cache_http_header_ctor(void *) __nonnull((1)) __wur;
