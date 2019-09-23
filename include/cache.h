@@ -16,8 +16,10 @@
 
 struct wr_cache_obj_ctx
 {
-	void *ptr_addr;
-	off_t obj_offset;
+	int in_cache; /* active pointer resides in cache */
+	void *ptr_addr; /* the address of the active pointer (it holds the address of a cache object) */
+	off_t obj_offset; /* offset of cache object from start of cache */
+	off_t ptr_offset; /* offset of the active pointer if it resides in the cache */
 };
 
 /*
@@ -48,9 +50,23 @@ do {\
 	____ctx_p = ((c)->assigned_list + ____nr_);\
 	____ctx_p->ptr_addr = (p);\
 	____ctx_p->obj_offset = (off_t)((char *)(s) - (char *)(c)->cache);\
+	if ((unsigned long)(p) > (unsigned long)(c)->cache && ((char *)(p) - (char *)(c)->cache) < (c)->cache_size)\
+	{\
+		____ctx_p->in_cache = 1;\
+		____ctx_p->ptr_offset = ((char *)(p) - (char *)(c)->cache);\
+	}\
+	else\
+	{\
+		____ctx_p->in_cache = 0;\
+		____ctx_p->ptr_offset = 0;\
+	}\
 	++((c)->nr_assigned);\
 } while (0)
 
+/*
+ * TODO: use a binary tree for the assigned list to make
+ * searching for an active pointer ~ O(log(N))
+ */
 #define WR_CACHE_REMOVE_PTR(c, p)\
 do {\
 	struct wr_cache_obj_ctx *____ctx_p = (c)->assigned_list;\
@@ -81,6 +97,10 @@ do {\
 			____i_d_x < ____nr_;\
 			++____i_d_x)\
 	{\
+		if (____ctx_p->in_cache)\
+		{\
+			____ctx_p->ptr_addr = (void *)((char *)(c)->cache + ____ctx_p->ptr_offset);\
+		}\
 		*((unsigned long *)____ctx_p->ptr_addr) = (unsigned long)((char *)(c)->cache + ____ctx_p->obj_offset);\
 		++____ctx_p;\
 	}\

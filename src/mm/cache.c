@@ -265,7 +265,12 @@ wr_cache_alloc(wr_cache_t *cachep, void *ptr_addr)
 	int new_capacity;
 	int added_capacity;
 	int i;
+	int moved = 0;
+	int in_cache = 0;
 	unsigned char *bm;
+	void *old_addr;
+	void *active_ptr = ptr_addr;
+	off_t active_off;
 
 /*
  * Our bitmap can be deceiving and an index may be return
@@ -314,6 +319,15 @@ wr_cache_alloc(wr_cache_t *cachep, void *ptr_addr)
 #endif
 
 		cachep->assigned_list = wr_realloc(cachep->assigned_list, (new_capacity * sizeof(struct wr_cache_obj_ctx)));
+
+		if ((unsigned long)active_ptr > (unsigned long)cachep->cache
+		&& (((char *)active_ptr - (char *)cachep->cache) < cache_size))
+		{
+			active_off = (off_t)((char *)active_ptr - (char *)cachep->cache);
+			in_cache = 1;
+		}
+
+		old_addr = cachep->cache;
 		cachep->cache = wr_realloc(cachep->cache, cache_size * 2);
 		cachep->free_bitmap = wr_realloc(cachep->free_bitmap, bitmap_size * 2);
 
@@ -322,7 +336,11 @@ wr_cache_alloc(wr_cache_t *cachep, void *ptr_addr)
  * address in the case of our cache being
  * copied elsewhere in the heap.
  */
-		WR_CACHE_ADJUST_PTRS(cachep);
+		if ((unsigned long)cachep->cache != (unsigned long)old_addr)
+		{
+			moved = 1;
+			WR_CACHE_ADJUST_PTRS(cachep);
+		}
 
 		assert(cachep->cache);
 		assert(cachep->free_bitmap);
@@ -352,7 +370,14 @@ wr_cache_alloc(wr_cache_t *cachep, void *ptr_addr)
 		slot = (void *)((char *)cachep->cache + (idx * objsize));
 
 		__wr_cache_mark_used(cachep, idx);
-		WR_CACHE_ASSIGN_PTR(cachep, ptr_addr, slot);
+
+		if (moved)
+		{
+			if (in_cache)
+				active_ptr = (void *)((char *)cachep->cache + active_off);
+		}
+
+		WR_CACHE_ASSIGN_PTR(cachep, active_ptr, slot);
 		WR_CACHE_DEC_FREE(cachep);
 		assert(wr_cache_nr_used(cachep) > 0);
 		return slot;
