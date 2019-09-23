@@ -51,6 +51,8 @@ __remove_dups(char **links, const int nr)
 static int nr_already = 0;
 static int nr_sibling = 0;
 static int nr_dups = 0;
+static int nr_urls_call = 0;
+static int nr_urls_total = 0;
 
 static int
 __url_acceptable(connection_t *conn, wr_cache_t *e_cache, wr_cache_t *f_cache, buf_t *url)
@@ -192,11 +194,26 @@ __do_insert(wr_cache_t *cachep, http_link_t **root, buf_t *url)
 }
 #endif
 
+static void
+__dump_tree(http_link_t *___root)
+{
+	if (___root->left)
+		__dump_tree(___root->left);
+
+	if (___root->right)
+		__dump_tree(___root->right);
+
+	fprintf(stderr, "url == %s\n", ___root->url);
+	return;
+}
+
 static int
 __insert_link(wr_cache_t *cachep, http_link_t **root, buf_t *url)
 {
 	assert(cachep);
 	assert(url);
+
+	int loops = 0;
 
 	if (!(*root))
 	{
@@ -206,6 +223,8 @@ __insert_link(wr_cache_t *cachep, http_link_t **root, buf_t *url)
 
 		strncpy((*root)->url, url->buf_head, url->data_len);
 		(*root)->url[url->data_len] = 0;
+
+		//fprintf(stderr, "%d\n", wr_cache_nr_used(cachep));
 
 		return 0;
 	}
@@ -226,13 +245,25 @@ __insert_link(wr_cache_t *cachep, http_link_t **root, buf_t *url)
 	void *nptr_stack = &nptr;
 	http_link_t *new_addr;
 
+	__dump_tree(*root);
+
 	while (1)
 	{
-		cmp = strcmp(nptr->url, url->buf_head);
+		++loops;
+
+		if (loops > 100)
+		{
+			__dump_tree(*root);
+			assert(0);
+		}
+
+		cmp = strcmp(url->buf_head, nptr->url);
+		fprintf(stderr, "comparing %s with %s\n", url->buf_head, nptr->url);
 
 		if (nptr->url[0] && !cmp)
 		{
 			++nr_dups;
+			--nr_urls_call;
 			break;
 		}
 		else
@@ -248,8 +279,10 @@ __insert_link(wr_cache_t *cachep, http_link_t **root, buf_t *url)
 
 				assert(((char *)nptr - (char *)cachep->cache) < cachep->cache_size);
 				assert(nptr->left);
-				strncpy(nptr->url, url->buf_head, url->data_len);
-				nptr->url[url->data_len] = 0;
+				strncpy(nptr->left->url, url->buf_head, url->data_len);
+				nptr->left->url[url->data_len] = 0;
+
+				//fprintf(stderr, "copied %s to node @ %p (%d)\n", url->buf_head, nptr->left, wr_cache_nr_used(cachep));
 				break;
 			}
 			else
@@ -270,9 +303,10 @@ __insert_link(wr_cache_t *cachep, http_link_t **root, buf_t *url)
 				nptr->right = new_addr;
 
 				assert(nptr->right);
-				assert(nptr->url);
-				strncpy(nptr->url, url->buf_head, url->data_len);
-				nptr->url[url->data_len] = 0;
+				strncpy(nptr->right->url, url->buf_head, url->data_len);
+				nptr->right->url[url->data_len] = 0;
+
+				//fprintf(stderr, "copied %s to node @ %p (%d)\n", url->buf_head, nptr->right, wr_cache_nr_used(cachep));
 				break;
 			}
 			else
@@ -286,6 +320,7 @@ __insert_link(wr_cache_t *cachep, http_link_t **root, buf_t *url)
 	return 0;
 }
 
+
 int
 parse_links(wr_cache_t *e_cache, wr_cache_t *f_cache, http_link_t *tree_root, connection_t *conn)
 {
@@ -298,7 +333,6 @@ parse_links(wr_cache_t *e_cache, wr_cache_t *f_cache, http_link_t *tree_root, co
 	char					*tail;
 	char delim;
 	int url_type_idx = 0;
-	int nr_urls = 0;
 	size_t url_len = 0;
 	//size_t cur_size = DEFAULT_MATRIX_SIZE;
 	//int aidx = 0;
@@ -320,6 +354,8 @@ parse_links(wr_cache_t *e_cache, wr_cache_t *f_cache, http_link_t *tree_root, co
 	nr_already = 0;
 	nr_sibling = 0;
 	nr_dups = 0;
+	nr_urls_call = 0;
+	nr_urls_total = wr_cache_nr_used(e_cache);
 
 	while (1)
 	{
@@ -357,12 +393,13 @@ parse_links(wr_cache_t *e_cache, wr_cache_t *f_cache, http_link_t *tree_root, co
 
 		url_len = (p - savep);
 
-		if (url_len >= HTTP_URL_MAX)
+		if (!url_len || url_len >= HTTP_URL_MAX)
 		{
 			savep = ++p;
 			continue;
 		}
 
+		assert(url_len > 0);
 		assert(url_len < HTTP_URL_MAX);
 		//assert(aidx <= cur_size);
 
@@ -375,6 +412,8 @@ parse_links(wr_cache_t *e_cache, wr_cache_t *f_cache, http_link_t *tree_root, co
 			continue;
 		}
 
+		//fprintf(stderr, "inserting URL %s to tree\n", full_url.buf_head);
+
 		if (__insert_link(e_cache, &tree_root, &full_url) < 0)
 			goto fail_destroy_bufs;
 
@@ -386,7 +425,7 @@ parse_links(wr_cache_t *e_cache, wr_cache_t *f_cache, http_link_t *tree_root, co
 
 		savep = ++p;
 		//++aidx;
-		++nr_urls;
+		++nr_urls_call;
 	}
 
 	buf_destroy(&url);
@@ -402,7 +441,7 @@ parse_links(wr_cache_t *e_cache, wr_cache_t *f_cache, http_link_t *tree_root, co
 #endif
 
 	fprintf(stdout, "%s%sParsed %d more URLs (removed: %d dups, %d already archived, %d twins)%s\n",
-		COL_LIGHTRED, ACTION_DONE_STR, nr_urls, nr_dups, nr_already, nr_sibling, COL_END);
+		COL_DARKGREY, ACTION_DONE_STR, nr_urls_call, nr_dups, nr_already, nr_sibling, COL_END);
 
 #if 0
 	for (i = 0; i < nr_urls; ++i)
