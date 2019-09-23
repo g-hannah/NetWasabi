@@ -38,6 +38,7 @@ do {\
 
 #define UNBLOCK_SIGNAL(signal) sigprocmask(SIG_SETMASK, &oldset, NULL)
 
+#if 0
 static sigjmp_buf __ICL_TIMEOUT__;
 
 static void __handle_icl_timeout(int signo)
@@ -47,6 +48,7 @@ static void __handle_icl_timeout(int signo)
 
 	siglongjmp(__ICL_TIMEOUT__, 1);
 }
+#endif
 
 static int get_opts(int, char *[]) __nonnull((2)) __wur;
 
@@ -66,6 +68,8 @@ int USER_BLACKLIST_NR_TOKENS;
 volatile int cache_switch = 0;
 static int nr_reaped = 0;
 static int depth = 0;
+http_link_t *cache1_url_root;
+http_link_t *cache2_url_root;
 
 struct url_types url_types[] =
 {
@@ -389,7 +393,7 @@ __show_request_header(buf_t *buf)
 {
 	assert(buf);
 
-	fprintf(stderr, "%s", buf->buf_head);
+	fprintf(stderr, "%s%s%s", COL_RED, buf->buf_head, COL_END);
 	return;
 }
 
@@ -421,6 +425,9 @@ __check_host(connection_t *conn)
 
 	static char old_host[HTTP_HNAME_MAX];
 
+	if (!conn->full_url[0])
+		return;
+
 	assert(strlen(conn->host) < HTTP_HNAME_MAX);
 	strcpy(old_host, conn->host);
 	http_parse_host(conn->full_url, conn->host);
@@ -430,7 +437,12 @@ __check_host(connection_t *conn)
 		if (wr_cache_nr_used(cookies) > 0)
 			wr_cache_clear_all(cookies);
 
-		fprintf(stderr, "%sChanging host (%s ==> %s)\n", ACTION_ING_STR, old_host, conn->host);
+		fprintf(stderr,
+			"%sChanging host (%s ==> %s)\n"
+			"(URL: %s)\n",
+			ACTION_ING_STR, old_host, conn->host,
+			conn->full_url);
+
 		reconnect(conn);
 	}
 
@@ -446,6 +458,7 @@ __send_head_request(connection_t *conn)
 	buf_t *rbuf = &conn->read_buf;
 	char *tmp_cbuf = NULL;
 	int status_code = 0;
+	int rv;
 
 	buf_clear(wbuf);
 
@@ -479,7 +492,9 @@ __send_head_request(connection_t *conn)
 	if (http_send_request(conn) < 0)
 		goto fail;
 
-	if (http_recv_response(conn) < 0)
+	rv = http_recv_response(conn);
+
+	if (rv < 0 || FL_OPERATION_TIMEOUT == rv)
 		goto fail;
 
 	if (option_set(OPT_SHOW_RES_HEADER))
@@ -497,7 +512,7 @@ __send_head_request(connection_t *conn)
 	}
 
 	fail:
-	return -1;
+	return rv;
 }
 
 static int
@@ -509,6 +524,7 @@ __send_get_request(connection_t *conn)
 	buf_t *rbuf = &conn->read_buf;
 	char *tmp_cbuf = NULL;
 	int status_code = 0;
+	int rv;
 
 	buf_clear(wbuf);
 
@@ -542,7 +558,9 @@ __send_get_request(connection_t *conn)
 	if (http_send_request(conn) < 0)
 		goto fail;
 
-	if (http_recv_response(conn) < 0)
+	rv = http_recv_response(conn);
+
+	if (rv < 0 || FL_OPERATION_TIMEOUT == rv)
 		goto fail;
 
 	if (option_set(OPT_SHOW_RES_HEADER))
@@ -560,7 +578,7 @@ __send_get_request(connection_t *conn)
 	}
 
 	fail:
-	return -1;
+	return rv;
 }
 
 #if 0
@@ -779,6 +797,12 @@ do {\
 
 		range = (url_end - url_start);
 
+		if (!range)
+		{
+			++savep;
+			continue;
+		}
+
 		if (!strncmp("http://", url_start, range) || !strncmp("https://", url_start, range))
 		{
 			savep = ++url_end;
@@ -798,13 +822,13 @@ do {\
 
 		if (range)
 		{
-			fprintf(stderr, "turning %s into full url\n", url.buf_head);
+			//fprintf(stderr, "turning %s into full url\n", url.buf_head);
 			make_full_url(conn, &url, &full);
-			fprintf(stderr, "made %s\n", full.buf_head);
+			//fprintf(stderr, "made %s\n", full.buf_head);
 
 			if (make_local_url(conn, &full, &path) == 0)
 			{
-				fprintf(stderr, "made local url %s\n", path.buf_head);
+				//fprintf(stderr, "made local url %s\n", path.buf_head);
 				buf_collapse(buf, (off_t)(url_start - buf->buf_head), range);
 				tail = buf->buf_tail;
 
@@ -1027,6 +1051,7 @@ __do_request(connection_t *conn)
 	if (__connection_closed(conn))
 	{
 		fprintf(stdout, "%s%sRemote peer closed connection%s\n", COL_RED, ACTION_DONE_STR, COL_END);
+		__show_response_header(&conn->read_buf);
 		reconnect(conn);
 	}
 
@@ -1088,9 +1113,11 @@ reap(wr_cache_t *cachep, wr_cache_t *cachep2, connection_t *conn)
 	http_link_t *link;
 	buf_t *wbuf = &conn->write_buf;
 	buf_t *rbuf = &conn->read_buf;
+#if 0
 	struct sigaction it_nact;
 	struct sigaction it_oact;
 	sigjmp_buf __ICL_TIMEOUT__;
+#endif
 
 	TRAILING_SLASH = 0;
 /*
@@ -1105,6 +1132,7 @@ reap(wr_cache_t *cachep, wr_cache_t *cachep2, connection_t *conn)
  * to CRAWL_DEPTH (#iterations of while loop).
  */
 
+#if 0
 	clear_struct(&it_nact);
 	clear_struct(&it_oact);
 	it_nact.sa_flags = 0;
@@ -1125,6 +1153,7 @@ reap(wr_cache_t *cachep, wr_cache_t *cachep2, connection_t *conn)
 
 		return FL_RESET;
 	}
+#endif
 
 	if (!wr_cache_nr_used(cachep))
 		cache_switch = 1;
@@ -1140,6 +1169,8 @@ while (1)
 
 		if (wr_cache_nr_used(cachep2) > 0)
 			wr_cache_clear_all(cachep2);
+
+		cache2_url_root = NULL;
 	}
 	else
 	{
@@ -1148,6 +1179,8 @@ while (1)
 
 		if (wr_cache_nr_used(cachep) > 0)
 			wr_cache_clear_all(cachep);
+
+		cache1_url_root = NULL;
 	}
 
 	if (!nr_links)
@@ -1163,6 +1196,12 @@ while (1)
 
 		buf_clear(wbuf);
 		len = strlen(link->url);
+
+		if (!len)
+		{
+			++link;
+			continue;
+		}
 
 		assert(len < HTTP_URL_MAX);
 
@@ -1184,19 +1223,16 @@ while (1)
 
 		fprintf(stderr, "===> %s%s%s <===\n", COL_ORANGE, conn->page, COL_END);
 
-		alarm(MAX_TIME_WAIT);
 		status_code = __do_request(conn);
-		alarm(0);
 
-		link->status_code = status_code;
 		++(link->nr_requests);
 
-		fprintf(stdout, "%s%s (%s)\n", ACTION_ING_STR, http_status_code_string(status_code), link->url);
+		if (FL_OPERATION_TIMEOUT != status_code)
+			fprintf(stdout, "%s%s (%s)\n", ACTION_ING_STR, http_status_code_string(status_code), link->url);
 
 		switch(status_code)
 		{
 			case HTTP_OK:
-				link->time_reaped = time(NULL);
 				break;
 			case HTTP_MOVED_PERMANENTLY:
 			/*
@@ -1208,6 +1244,18 @@ while (1)
 				goto resend;
 				break;
 			case HTTP_BAD_REQUEST:
+				__show_request_header(wbuf);
+
+				if (wr_cache_nr_used(cookies) > 0)
+					wr_cache_clear_all(cookies);
+
+				buf_clear(wbuf);
+				buf_clear(rbuf);
+
+				reconnect(conn);
+
+				goto next;
+				break;
 			case HTTP_FORBIDDEN:
 			case HTTP_INTERNAL_ERROR:
 			case HTTP_BAD_GATEWAY:
@@ -1232,6 +1280,18 @@ while (1)
 			 */
 			case HTTP_FOUND:
 				goto next;
+			case FL_OPERATION_TIMEOUT:
+				buf_clear(wbuf);
+				buf_clear(rbuf);
+
+				++link;
+				http_parse_host(link->url, conn->host);
+				http_parse_page(link->url, conn->page);
+				strcpy(conn->full_url, link->url);
+
+				reconnect(conn);
+
+				goto next;
 			default:
 				fprintf(stderr, "reap: received HTTP status code %d\n", status_code);
 				goto fail;
@@ -1243,12 +1303,12 @@ while (1)
 			{
 				if (!cache_switch)
 				{
-					parse_links(cachep2, cachep, conn);
+					parse_links(cachep2, cachep, cache2_url_root, conn);
 					nr_links_sibling = wr_cache_nr_used(cachep2);
 				}
 				else
 				{
-					parse_links(cachep, cachep2, conn);
+					parse_links(cachep, cachep2, cache1_url_root, conn);
 					nr_links_sibling = wr_cache_nr_used(cachep);
 				}
 
@@ -1489,26 +1549,20 @@ main(int argc, char *argv[])
 			do_not_archive = 1;
 			__send_get_request(&conn); /* in this case we still need to get it to extract URLs */
 			break;
-		case HTTP_FORBIDDEN:
 		case HTTP_BAD_REQUEST:
-			__show_response_header(rbuf);
-
-				if (wr_cache_nr_used(cookies) > 0)
-					wr_cache_clear_all(cookies);
-
-				reconnect(&conn);
-
-				goto resend;
-				break;
+		case HTTP_FORBIDDEN:
 		case HTTP_GATEWAY_TIMEOUT:
 		case HTTP_BAD_GATEWAY:
 		case HTTP_INTERNAL_ERROR:
 			__show_response_header(rbuf);
 			default:
 				goto out_disconnect;
+		case FL_OPERATION_TIMEOUT:
+			fprintf(stderr, "%sOperation timed out%s\n", COL_RED, COL_END);
+			goto out_disconnect;
 	}
 
-	parse_links(http_lcache, http_lcache2, &conn);
+	parse_links(http_lcache, http_lcache2, cache1_url_root, &conn);
 
 	if (!do_not_archive)
 	{
