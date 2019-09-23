@@ -34,22 +34,22 @@ do {\
 #define BTREE_ADD_NEW_NODE(ROOT, TYPE, ELEM_NAME, NUM, SIZE, DATA, DATA_TYPE)\
 do {\
 	if (!(ROOT))\
-		BTREE_INIT_NODE(ROOT, TYPE, ELEM_NAME, NUM, SIZE);\
+		BTREE_INIT_NODE((ROOT), TYPE, ELEM_NAME, (NUM), (SIZE));\
 	(TYPE *)NPTR;\
-	NPTR = ROOT;\
+	NPTR = (ROOT);\
 	int CMP;\
 	size_t DATA_LEN = strlen((char *)DATA);\
 	while (1)\
 	{\
 		if (DATA[0] && NPTR-> ## ELEM_NAME[0])\
 		{\
-			CMP = strcmp(DATA, NPTR-> ## ELEM_NAME);\
+			CMP = memcmp(DATA, NPTR-> ## ELEM_NAME, DATA_LEN);\
 			if (CMP < 0)\
 			{\
 				if (!NPTR->left)\
 				{\
-					NPTR->left = BTREE_INIT_NODE(NPTR->left, TYPE, ELEM_NAME, NUM, SIZE);\
-					memcpy((void *)NPTR->left-> ## ELEM_NAME, (void *)DATA, DATA_LEN);\
+					NPTR->left = BTREE_INIT_NODE(NPTR->left, TYPE, ELEM_NAME, (NUM), (SIZE));\
+					memcpy((void *)NPTR->left-> ## ELEM_NAME, (void *)(DATA), DATA_LEN);\
 					((char *)NPTR->left-> ## ELEM_NAME + DATA_LEN)[0] = 0;\
 				}\
 				else\
@@ -63,8 +63,8 @@ do {\
 			{\
 				if (!NPTR->right)\
 				{\
-					NPTR->right = BTREE_INIT_NODE(NPTR->right, TYPE, ELEM_NAME, NUM, SIZE);\
-					memcpy((void *)NPTR->right-> ## ELEM_NAME, (void *)DATA, DATA_LEN);\
+					NPTR->right = BTREE_INIT_NODE(NPTR->right, TYPE, ELEM_NAME, (NUM), (SIZE));\
+					memcpy((void *)NPTR->right-> ## ELEM_NAME, (void *)(DATA), DATA_LEN);\
 					((char *)NPTR->right ## ELEM_NAME + DATA_LEN)[0] = 0;\
 				}\
 				else\
