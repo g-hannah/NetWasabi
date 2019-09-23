@@ -991,8 +991,16 @@ http_parse_page(char *url, char *page)
 	p = url;
 	q = endp;
 
+	page[0] = 0;
+
+	if (!url_len)
+		return NULL;
+
 	if (!strncmp("http:", url, 5) || !strncmp("https:", url, 6))
 	{
+		if (url_len < httplen || url_len < httpslen)
+			return NULL;
+
 		p += strlen("http://");
 	}
 
