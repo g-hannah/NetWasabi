@@ -82,6 +82,7 @@ __url_acceptable(connection_t *conn, wr_cache_t *e_cache, wr_cache_t *f_cache, b
 	return 1;
 }
 
+#if 0
 static unsigned long *visited_list;
 static int visited_num = 0;
 
@@ -134,7 +135,9 @@ __check_tree_integrity(http_link_t *___root)
 
 	return rv;
 }
+#endif
 
+#if 0
 static int rdepth = 0;
 
 static void
@@ -200,6 +203,7 @@ __dump_tree(http_link_t *___root)
 
 	return;
 }
+#endif
 
 static int
 __insert_link(wr_cache_t *cachep, http_link_t **root, buf_t *url)
@@ -352,9 +356,6 @@ parse_links(wr_cache_t *e_cache, wr_cache_t *f_cache, http_link_t **tree_root, c
 	nr_urls_call = 0;
 	nr_urls_total = wr_cache_nr_used(e_cache);
 
-	if (*tree_root)
-		__check_tree_integrity(*tree_root);
-
 	while (1)
 	{
 		buf_clear(&url);
@@ -424,8 +425,6 @@ parse_links(wr_cache_t *e_cache, wr_cache_t *f_cache, http_link_t **tree_root, c
 
 	fprintf(stdout, "%s%sParsed %d more URLs (removed: %d dups, %d already archived, %d twins ; total = %d)%s\n",
 		COL_DARKGREY, ACTION_DONE_STR, nr_urls_call, nr_dups, nr_already, nr_sibling, wr_cache_nr_used(e_cache), COL_END);
-
-	__dump_tree(*tree_root);
 
 	return 0;
 
