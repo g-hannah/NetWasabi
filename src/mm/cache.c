@@ -408,7 +408,7 @@ wr_cache_dealloc(wr_cache_t *cachep, void *slot, void *ptr_addr)
 			obj_idx, cachep->name);
 #endif
 
-	if (!ptr_addr)
+	if (!ptr_addr) /* only NULL when called from wr_cache_clear_all() */
 		memset(cachep->assigned_list, 0, (cachep->nr_assigned * sizeof(struct wr_cache_obj_ctx)));
 	else
 		WR_CACHE_REMOVE_PTR(cachep, ptr_addr);
@@ -462,8 +462,6 @@ wr_cache_clear_all(wr_cache_t *cachep)
 		if (wr_cache_obj_used(cachep, slot))
 			wr_cache_dealloc(cachep, slot, ptr_addr);
 	}
-
-	memset(cachep->assigned_list, 0, (cachep->capacity * sizeof(struct wr_cache_obj_ctx)));
 
 	return;
 }
