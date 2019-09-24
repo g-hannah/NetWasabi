@@ -138,7 +138,7 @@ wr_cache_create(char *name,
 	cachep->cache = wr_calloc(WR_CACHE_SIZE, 1);
 	cachep->objsize = size;
 
-	cachep->assigned_list = wr_calloc(capacity, sizeof(struct wr_cache_obj_ctx));
+	cachep->assigned_list = wr_calloc(capacity * 2, sizeof(struct wr_cache_obj_ctx));
 	cachep->nr_assigned = 0;
 
 	cachep->free_bitmap = wr_calloc(bitmap_size, 1);
@@ -279,7 +279,7 @@ wr_cache_alloc(wr_cache_t *cachep, void *ptr_addr)
  */
 	if (idx != -1 && idx < old_capacity)
 	{
-#ifdef DEBUG
+#if 0
 		fprintf(stderr,
 			"Allocating object #%d from cache \"%s\"\n", idx, cachep->name);
 #endif
@@ -318,7 +318,10 @@ wr_cache_alloc(wr_cache_t *cachep, void *ptr_addr)
 			added_capacity);
 #endif
 
-		cachep->assigned_list = wr_realloc(cachep->assigned_list, (new_capacity * sizeof(struct wr_cache_obj_ctx)));
+		fprintf(stderr, "%sExtending ->assigned_list (adding %lu bytes)%s\n",
+			COL_RED, (added_capacity * sizeof(struct wr_cache_obj_ctx)), COL_END);
+
+		cachep->assigned_list = wr_realloc(cachep->assigned_list, ((new_capacity * 2) * sizeof(struct wr_cache_obj_ctx)));
 
 		if ((unsigned long)active_ptr > (unsigned long)cachep->cache
 		&& (((char *)active_ptr - (char *)cachep->cache) < cache_size))
@@ -328,7 +331,9 @@ wr_cache_alloc(wr_cache_t *cachep, void *ptr_addr)
 		}
 
 		old_addr = cachep->cache;
+		fprintf(stderr, "%sCalling realloc() for ->cache%s\n", COL_RED, COL_END);
 		cachep->cache = wr_realloc(cachep->cache, cache_size * 2);
+		fprintf(stderr, "%sCalling realloc() for ->free_bitmap%s\n", COL_RED, COL_END);
 		cachep->free_bitmap = wr_realloc(cachep->free_bitmap, bitmap_size * 2);
 
 /*
@@ -402,15 +407,13 @@ wr_cache_dealloc(wr_cache_t *cachep, void *slot, void *ptr_addr)
 
 	obj_idx = (int)(((char *)slot - (char *)cachep->cache) / objsize);
 
-#ifdef DEBUG
+/*
 	fprintf(stderr,
 			"Deallocating object #%d from cache \"%s\"\n",
 			obj_idx, cachep->name);
-#endif
+*/
 
-	if (!ptr_addr) /* only NULL when called from wr_cache_clear_all() */
-		memset(cachep->assigned_list, 0, (cachep->nr_assigned * sizeof(struct wr_cache_obj_ctx)));
-	else
+	if (ptr_addr)
 		WR_CACHE_REMOVE_PTR(cachep, ptr_addr);
 
 	WR_CACHE_INC_FREE(cachep);
