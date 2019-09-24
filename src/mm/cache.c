@@ -272,6 +272,18 @@ wr_cache_alloc(wr_cache_t *cachep, void *ptr_addr)
 	void *active_ptr = ptr_addr;
 	off_t active_off;
 
+#ifdef DEBUG
+	fprintf(stderr,
+		"%sCACHE: %s\n"
+		"number of active pointers = %d\n"
+		"number of objects cache can hold = %d%s\n",
+		COL_RED, cachep->name,
+		cachep->nr_assigned,
+		cachep->capacity,
+		COL_END);
+#endif
+
+	assert(cachep->nr_assigned <= cachep->capacity);
 /*
  * Our bitmap can be deceiving and an index may be return
  * because it found a zero-bit but in fact that has gone
@@ -279,10 +291,6 @@ wr_cache_alloc(wr_cache_t *cachep, void *ptr_addr)
  */
 	if (idx != -1 && idx < old_capacity)
 	{
-#if 0
-		fprintf(stderr,
-			"Allocating object #%d from cache \"%s\"\n", idx, cachep->name);
-#endif
 		assert(idx < old_capacity);
 		slot = (void *)((char *)cache + (idx * objsize));
 
@@ -316,12 +324,12 @@ wr_cache_alloc(wr_cache_t *cachep, void *ptr_addr)
 			new_size,
 			new_capacity,
 			added_capacity);
-#endif
 
 		fprintf(stderr, "%sExtending ->assigned_list (adding %lu bytes)%s\n",
 			COL_RED, (added_capacity * sizeof(struct wr_cache_obj_ctx)), COL_END);
+#endif
 
-		cachep->assigned_list = wr_realloc(cachep->assigned_list, ((new_capacity * 2) * sizeof(struct wr_cache_obj_ctx)));
+		cachep->assigned_list = wr_realloc(cachep->assigned_list, (new_capacity * sizeof(struct wr_cache_obj_ctx)));
 
 		if ((unsigned long)active_ptr > (unsigned long)cachep->cache
 		&& (((char *)active_ptr - (char *)cachep->cache) < cache_size))
@@ -331,9 +339,13 @@ wr_cache_alloc(wr_cache_t *cachep, void *ptr_addr)
 		}
 
 		old_addr = cachep->cache;
+#ifdef DEBUG
 		fprintf(stderr, "%sCalling realloc() for ->cache%s\n", COL_RED, COL_END);
+#endif
 		cachep->cache = wr_realloc(cachep->cache, cache_size * 2);
+#ifdef DEBUG
 		fprintf(stderr, "%sCalling realloc() for ->free_bitmap%s\n", COL_RED, COL_END);
+#endif
 		cachep->free_bitmap = wr_realloc(cachep->free_bitmap, bitmap_size * 2);
 
 /*
@@ -403,6 +415,7 @@ wr_cache_dealloc(wr_cache_t *cachep, void *slot, void *ptr_addr)
 	assert(slot);
 
 	int obj_idx;
+	int nr_assigned = cachep->nr_assigned;
 	size_t objsize = cachep->objsize;
 
 	obj_idx = (int)(((char *)slot - (char *)cachep->cache) / objsize);
@@ -414,7 +427,11 @@ wr_cache_dealloc(wr_cache_t *cachep, void *slot, void *ptr_addr)
 */
 
 	if (ptr_addr)
+	{
 		WR_CACHE_REMOVE_PTR(cachep, ptr_addr);
+		assert(cachep->nr_assigned < nr_assigned);
+	}
+
 
 	WR_CACHE_INC_FREE(cachep);
 	__wr_cache_mark_unused(cachep, obj_idx);
@@ -435,7 +452,7 @@ __get_assigned_list_ptr(wr_cache_t *cachep, void *slot)
 
 	for (i = 0; i < nr_assigned; ++i)
 	{
-		if (((unsigned long)ctx->ptr_addr) == (unsigned long)slot)
+		if (*((unsigned long *)ctx->ptr_addr) == (unsigned long)slot)
 			return ctx->ptr_addr;
 
 		++ctx;
@@ -455,8 +472,14 @@ wr_cache_clear_all(wr_cache_t *cachep)
 
 #ifdef DEBUG
 	fprintf(stderr,
-			"Clearing all objects from cache \"%s\"\n", cachep->name);
+			"%sClearing all objects from cache \"%s\"\n"
+			"nr_assigned = %d%s\n",
+			COL_DARKBLUE,
+			cachep->name,
+			cachep->nr_assigned,
+			COL_END);
 #endif
+
 	for (i = 0; i < capacity; ++i)
 	{
 		slot = (void *)((char *)cachep->cache + (i * objsize));
@@ -465,6 +488,15 @@ wr_cache_clear_all(wr_cache_t *cachep)
 		if (wr_cache_obj_used(cachep, slot))
 			wr_cache_dealloc(cachep, slot, ptr_addr);
 	}
+
+#ifdef DEBUG
+	fprintf(stderr,
+		"%sCleared objects\n"
+		"nr_assigned = %d%s\n",
+		COL_DARKBLUE,
+		cachep->nr_assigned,
+		COL_END);
+#endif
 
 	return;
 }
