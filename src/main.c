@@ -572,6 +572,34 @@ __send_get_request(connection_t *conn)
 	return rv;
 }
 
+char *no_url_files[] =
+{
+	".jpg",
+	".jpeg",
+	".png",
+	".gif",
+	".js",
+	".css",
+	".pdf",
+	".svg",
+	".ico",
+	NULL
+};
+
+static int
+__url_parseable(char *url)
+{
+	int i;
+
+	for (i = 0; no_url_files[i] != NULL; ++i)
+	{
+		if (strstr(url, no_url_files[i]))
+			return 0;
+	}
+
+	return 1;
+}
+
 static int
 __check_local_dirs(connection_t *conn, buf_t *filename)
 {
@@ -770,9 +798,9 @@ do {\
 
 				assert(path.data_len < path_max);
 				buf_shift(buf, (off_t)(url_start - buf->buf_head), path.data_len);
+				tail = buf->buf_tail;
 
 				restore_pointers();
-				tail = buf->buf_tail;
 
 				assert((url_start - buf->buf_head) == url_start_off);
 				assert((url_end - buf->buf_head) == url_end_off);
@@ -783,10 +811,11 @@ do {\
 			}
 		}
 
-		assert(url.magic == BUFFER_MAGIC);
-		assert(full.magic == BUFFER_MAGIC);
-		assert(path.magic == BUFFER_MAGIC);
+		assert(buf_integrity(&url));
+		assert(buf_integrity(&full));
+		assert(buf_integrity(&path));
 
+		//++savep;
 		savep = ++url_end;
 
 		if (savep >= tail)
@@ -809,7 +838,8 @@ __archive_page(connection_t *conn)
 	if (p)
 		buf_collapse(buf, (off_t)0, (p - buf->buf_head));
 
-	__replace_with_local_urls(conn, buf);
+	if (__url_parseable(conn->full_url))
+		__replace_with_local_urls(conn, buf);
 
 	buf_init(&tmp, HTTP_URL_MAX);
 	buf_init(&local_url, 1024);
@@ -871,6 +901,8 @@ __handle301(connection_t *conn)
 	buf_t tmp_full;
 	buf_t tmp_local;
 	int fd = -1;
+	char *p;
+	char *q;
 
 	//fprintf(stderr, "allocating header obj LOCATION @ %p\n", &location);
 
@@ -920,11 +952,27 @@ __handle301(connection_t *conn)
 	}
 	else
 	{
-		http_parse_host(location->value, conn->host);
-		http_parse_page(conn->full_url, conn->page);
-
-		strncpy(conn->full_url, location->value, location->vlen);
-		conn->full_url[location->vlen] = 0;
+	/*
+	 * Some servers erroneously send the Location header as such:
+	 *
+	 * Location: https://host-name.comhttps/page-we-requested/host-name.com/page-to-direct-to
+	 *
+	 * Check for this. Find matching "http" after start of header value. Then find next '/'
+ 	 * char, then jump forward strlen(page) bytes.
+	 */
+		q = (location->value + 1);
+		if ((p = strstr(q, "http")))
+		{
+			fprintf(stderr, "%s%sMangled location header! (%s)%s\n", COL_RED, ATTENTION_STR, location->value, COL_END);
+			return -1;
+		}
+		else
+		{
+			http_parse_host(location->value, conn->host);
+			http_parse_page(conn->full_url, conn->page);
+			strncpy(conn->full_url, location->value, location->vlen);
+			conn->full_url[location->vlen] = 0;
+		}
 	}
 
 	assert(!memchr(conn->host, '/', strlen(conn->host)));
@@ -976,7 +1024,8 @@ __do_request(connection_t *conn)
 	{
 		case HTTP_FOUND:
 		case HTTP_MOVED_PERMANENTLY:
-			__handle301(conn);
+			if (__handle301(conn) < 0)
+				return -1;
 /*
  * Check here too because 301 may send different
  * spelling (upper-case vs lower-case... etc)
@@ -1012,33 +1061,6 @@ __do_request(connection_t *conn)
 	return status_code;
 }
 
-char *no_url_files[] =
-{
-	".jpg",
-	".jpeg",
-	".png",
-	".gif",
-	".js",
-	".css",
-	".pdf",
-	".svg",
-	".ico",
-	NULL
-};
-
-static int
-__url_parseable(char *url)
-{
-	int i;
-
-	for (i = 0; no_url_files[i] != NULL; ++i)
-	{
-		if (strstr(url, no_url_files[i]))
-			return 0;
-	}
-
-	return 1;
-}
 
 static void
 deconstruct_btree(http_link_t *root, wr_cache_t *cache)
@@ -1288,6 +1310,7 @@ while (1)
 
 				fprintf(stdout, "%s\n", rbuf->buf_head);
 				buf_clear(rbuf);
+				fprintf(stdout, "%s\n", rbuf->buf_head);
 
 				if (!conn->host[0])
 					strcpy(conn->host, conn->primary_host);
@@ -1561,10 +1584,8 @@ main(int argc, char *argv[])
 		case HTTP_BAD_GATEWAY:
 		case HTTP_INTERNAL_ERROR:
 			__show_response_header(rbuf);
-			default:
-				goto out_disconnect;
-		case FL_OPERATION_TIMEOUT:
-			fprintf(stderr, "%sOperation timed out%s\n", COL_RED, COL_END);
+		default:
+			fprintf(stderr, "%s%sDisconnecting...%s\n", COL_RED, ACTION_ING_STR, COL_END);
 			goto out_disconnect;
 	}
 
