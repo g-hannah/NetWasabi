@@ -109,11 +109,11 @@ __do_check(http_link_t *___root)
 		if (visited_list[i] == (unsigned long)___root)
 		{
 			fprintf(stderr, "already visited node 0x%lx!!!\n", (unsigned long)___root);
-			assert(0);
+			//assert(0);
 		}
 	}
 
-	fprintf(stderr, "visited_num=%d\n", visited_num);
+	//fprintf(stderr, "visited_num=%d\n", visited_num);
 	visited_list[visited_num++] = (unsigned long)___root;
 	return 0;
 }
@@ -140,7 +140,15 @@ static int rdepth = 0;
 static void
 __dump_tree(http_link_t *___root)
 {
-	if (___root->left == ___root->parent || ___root->right == ___root->parent)
+	if (!___root)
+		return;
+
+	/*
+   * Check if the tree has turned into a graph. Compare ->left / ->right with ->parent. Make
+	 * sure ->left / ->right not NULL otherwise the root node, before having any children
+	 * would have ->left / ->right == NULL && ->parent == NULL.
+	 */
+	if ((___root->left && ___root->left  == ___root->parent) || (___root->right && ___root->right == ___root->parent))
 	{
 		fprintf(stderr, "Binary tree has turned into a graph...\n");
 
@@ -199,7 +207,7 @@ __insert_link(wr_cache_t *cachep, http_link_t **root, buf_t *url)
 	assert(cachep);
 	assert(url);
 
-	int loops = 0;
+	//int loops = 0;
 
 	if (!(*root))
 	{
@@ -237,6 +245,7 @@ __insert_link(wr_cache_t *cachep, http_link_t **root, buf_t *url)
 
 	while (1)
 	{
+#if 0
 		++loops;
 
 		if (loops > 100)
@@ -245,6 +254,7 @@ __insert_link(wr_cache_t *cachep, http_link_t **root, buf_t *url)
 			__dump_tree(*root);
 			assert(0);
 		}
+#endif
 
 		cmp = strcmp(url->buf_head, nptr->url);
 		//fprintf(stderr, "comparing %s with %s\n", url->buf_head, nptr->url);
@@ -414,6 +424,8 @@ parse_links(wr_cache_t *e_cache, wr_cache_t *f_cache, http_link_t **tree_root, c
 
 	fprintf(stdout, "%s%sParsed %d more URLs (removed: %d dups, %d already archived, %d twins ; total = %d)%s\n",
 		COL_DARKGREY, ACTION_DONE_STR, nr_urls_call, nr_dups, nr_already, nr_sibling, wr_cache_nr_used(e_cache), COL_END);
+
+	__dump_tree(*tree_root);
 
 	return 0;
 
