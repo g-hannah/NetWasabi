@@ -387,21 +387,17 @@ __read_bytes(connection_t *conn, size_t toread)
 	return toread;
 }
 
+#define HTTP_MAX_CHUNK_STR 10
+
 static int
 __must_read_extra(char *ptr, char *tail)
 {
-	size_t read_more = 8;
+	size_t read_more = HTTP_MAX_CHUNK_STR;
 	char *p = ptr;
 
-	if (!(tail - ptr))
+	if (!(tail - ptr) || *ptr != 0x0d)
 	{
 		//fprintf(stderr, "ptr == tail\n");
-		return read_more;
-	}
-
-	if (*ptr != 0x0d)
-	{
-		//fprintf(stderr, "*ptr != 0x0d\n");
 		return read_more;
 	}
 
@@ -416,13 +412,28 @@ __must_read_extra(char *ptr, char *tail)
 		return read_more;
 	}
 
-	if (*(ptr - 1) != 0x0a)
+	if (*(p - 1) != 0x0a)
 		return read_more;
 
-	ptr = memchr(p, 0x0d, (tail - p));
-
-	if (!ptr)
+	if (!(*p))
 		return read_more;
+
+	ptr = p;
+
+	while (*p != 0x0d && p < tail)
+		++p;
+
+	if (p == ptr)
+		return read_more;
+
+	if (*p != 0x0d)
+	{
+		read_more -= (p - ptr);
+		return read_more;
+	}
+
+	if (*p == 0x0d && *(p+1) != 0x0a)
+		return 1;
 
 	return 0;
 }
@@ -431,8 +442,6 @@ static size_t
 __http_do_chunked_recv(connection_t *conn)
 {
 	assert(conn);
-
-#define HTTP_MAX_CHUNK_STR 8
 
 	char *p;
 	char *e;
