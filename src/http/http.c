@@ -389,6 +389,60 @@ __read_bytes(connection_t *conn, size_t toread)
 
 #define HTTP_MAX_CHUNK_STR 10
 
+static void
+__http_read_until_next_chunk_size(connection_t *conn, buf_t *buf, char **cur_pos)
+{
+	assert(conn);
+	assert(buf);
+	assert(cur_pos);
+	assert(buf_integrity(buf));
+
+	off_t cur_pos_off = (*cur_pos - buf->buf_head);
+	char *q;
+	char *tail = buf->buf_tail;
+
+	if (*cur_pos < tail)
+	{
+		if (**cur_pos == 0x0d)
+		{
+			while ((**cur_pos == 0x0d || **cur_pos == 0x0d) && *cur_pos < tail)
+				++(*cur_pos);
+
+			if (*cur_pos != tail)
+			{
+				while (**cur_pos != 0x0d && *cur_pos < tail)
+					++(*cur_pos);
+
+				if (*cur_pos != tail)
+				{
+					return;
+				}
+			}
+		}
+	}
+
+	__read_bytes(conn, 2);
+	*cur_pos = (buf->buf_head + cur_pos_off);
+	tail = buf->buf_tail;
+	*cur_pos += 2;
+	cur_pos_off += 2;
+
+	while (1)
+	{
+		__read_bytes(conn, 1);
+		tail = buf->buf_tail;
+		*cur_pos = (buf->buf_head + cur_pos_off);
+		q = memchr(*cur_pos, 0x0a, (tail - *cur_pos));
+		if (q)
+		{
+			break;
+		}
+	}
+
+	return;
+}
+
+#if 0
 static int
 __must_read_extra(char *ptr, char *tail)
 {
@@ -437,6 +491,7 @@ __must_read_extra(char *ptr, char *tail)
 
 	return 0;
 }
+#endif
 
 static size_t
 __http_do_chunked_recv(connection_t *conn)
@@ -445,21 +500,19 @@ __http_do_chunked_recv(connection_t *conn)
 
 	char *p;
 	char *e;
-	char *chunk_start;
-	char *__next_size;
+	//char *chunk_start;
+	//char *__next_size;
 	off_t chunk_offset;
 	buf_t *buf = &conn->read_buf;
 	size_t chunk_size;
 	size_t save_size;
 	size_t overread;
-	size_t total;
-	size_t extra;
-#ifndef DEBUG
+	//size_t total;
+	//size_t extra;
 	size_t range;
 	char *t;
-#endif
 	//size_t torecv;
-	ssize_t bytes_read;
+	//ssize_t bytes_read;
 	static char tmp[HTTP_MAX_CHUNK_STR];
 #ifdef DEBUG
 	int chunk_nr = 0;
@@ -487,7 +540,6 @@ __http_do_chunked_recv(connection_t *conn)
 
 	while (1)
 	{
-#ifndef DEBUG
 		t = p;
 		SKIP_CRNL(p);
 
@@ -497,7 +549,8 @@ __http_do_chunked_recv(connection_t *conn)
 			buf_collapse(buf, (off_t)(t - buf->buf_head), range);
 			p = t;
 		}
-#else
+
+#ifdef DEBUG
 		++chunk_nr;
 		fprintf(stderr, "Chunk #%d\n", chunk_nr);
 		SKIP_CRNL(p);
@@ -562,10 +615,8 @@ __http_do_chunked_recv(connection_t *conn)
 		//SKIP_CRNL(e);
 		e += 2; /* First byte(s) of next chunk could be 0x0d/0x0a */
 
-#ifndef DEBUG
 		buf_collapse(buf, (off_t)(p - buf->buf_head), (e - p));
 		e = p;
-#endif
 
 		chunk_offset = (e - buf->buf_head);
 
@@ -574,19 +625,27 @@ __http_do_chunked_recv(connection_t *conn)
 		if (overread >= chunk_size)
 		{
 			p = (e + save_size);
+			__http_read_until_next_chunk_size(conn, buf, &p);
+			p -= 2;
+
+#if 0
 			extra = 0;
 			extra = __must_read_extra(p, buf->buf_tail);
+#ifdef DEBUG
+			fprintf(stderr, "%sMUST READ EXTRA %lu BYTES%s\n", COL_ORANGE, extra, COL_END);
+#endif
 			if (!extra)
 				continue;
 			else
 				goto read_extra;
+#endif
 		}
 		else
 		{
 			chunk_size -= overread;
 		}
 
-		total = 0;
+		//total = 0;
 
 /*
  * Our buffer data could be copied to a new location
@@ -597,6 +656,10 @@ __http_do_chunked_recv(connection_t *conn)
 		//torecv = chunk_size;
 
 		__read_bytes(conn, chunk_size);
+
+		p = (buf->buf_head + chunk_offset + save_size);
+		__http_read_until_next_chunk_size(conn, buf, &p);
+		p -= 2;
 #if 0
 		while (torecv > 0)
 		{
@@ -619,6 +682,7 @@ __http_do_chunked_recv(connection_t *conn)
 		/*
 		 * Read some extra data to get next chunk size.
 		 */
+#if 0
 		read_extra:
 		total = 0;
 		if (!extra)
@@ -697,6 +761,7 @@ __http_do_chunked_recv(connection_t *conn)
 
 		chunk_start = (buf->buf_head + chunk_offset);
 		p = (chunk_start + save_size);
+#endif
 	}
 
 	return 0;
