@@ -47,8 +47,10 @@ struct wr_cache_obj_ctx
 do {\
 	struct wr_cache_obj_ctx *____ctx_p;\
 	int ____nr_ = (c)->nr_assigned;\
-	if ((____nr_ + 1) >= ((c)->capacity * 2));\
-		(c)->assigned_list = realloc((c)->assigned_list, (((c)->capacity * 4) * sizeof(struct wr_cache_obj_ctx)));\
+	if (____nr_ >= (c)->capacity)\
+	{\
+		(c)->assigned_list = realloc((c)->assigned_list, (((c)->capacity * 2) * sizeof(struct wr_cache_obj_ctx)));\
+	}\
 	____ctx_p = ((c)->assigned_list + ____nr_);\
 	____ctx_p->ptr_addr = (p);\
 	____ctx_p->obj_offset = (off_t)((char *)(s) - (char *)(c)->cache);\
