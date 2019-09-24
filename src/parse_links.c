@@ -43,6 +43,9 @@ __url_acceptable(connection_t *conn, wr_cache_t *e_cache, wr_cache_t *f_cache, b
 	if (strstr(url->buf_head, "javascript:"))
 		return 0;
 
+	if (strstr(url->buf_head, "data:image"))
+		return 0;
+
 	if (strstr(url->buf_head, ".exe"))
 		return 0;
 
