@@ -10,6 +10,7 @@
 #define COL_ORANGE	"\x1b[38;5;208m"
 #define COL_RED			"\x1b[38;5;9m"
 #define COL_LIGHTRED "\x1b[38;5;204m"
+#define COL_DARKRED "\x1b[38;5;160m"
 #define COL_GREEN		"\x1b[38;5;40m"
 #define COL_DARKGREY "\x1b[38;5;239m"
 #define COL_DARKBLUE "\x1b[38;5;20m"
