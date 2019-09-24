@@ -869,11 +869,31 @@ __handle301(connection_t *conn)
 	http_header_t *location = NULL;
 	buf_t tmp_url;
 	buf_t tmp_full;
+	buf_t tmp_local;
+	int fd = -1;
 
 	//fprintf(stderr, "allocating header obj LOCATION @ %p\n", &location);
 
 	location = (http_header_t *)wr_cache_alloc(http_hcache, &location);
 	http_fetch_header(&conn->read_buf, "Location", location, (off_t)0);
+
+	buf_init(&tmp_full, HTTP_URL_MAX);
+	buf_init(&tmp_local, path_max);
+
+/*
+ * Create the file locally anyway in order to avoid
+ * sending requests to the webserver for these same
+ * URLs that get redirected elsewhere.
+ */
+	buf_append(&tmp_full, conn->full_url);
+	make_local_url(conn, &tmp_full, &tmp_local);
+	buf_collapse(&tmp_local, (off_t)0, strlen("file://"));
+	fd = open(tmp_local.buf_head, O_RDWR|O_CREAT|O_TRUNC, S_IRUSR|S_IWUSR);
+	close(fd);
+	fd = -1;
+
+	buf_destroy(&tmp_local);
+	buf_destroy(&tmp_full);
 
 	fprintf(stdout, "%sRedirecting to %s%s%s\n", ACTION_ING_STR, COL_ORANGE, location->value, COL_END);
 
