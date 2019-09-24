@@ -426,8 +426,17 @@ parse_links(wr_cache_t *e_cache, wr_cache_t *f_cache, http_link_t **tree_root, c
 	buf_destroy(&full_url);
 	buf_destroy(&path);
 
-	fprintf(stdout, "%s%sParsed %d more URLs (removed: %d dups, %d already archived, %d twins; total in cache = %d)%s\n",
-		COL_DARKRED, ACTION_DONE_STR, nr_urls_call, nr_dups, nr_already, nr_sibling, wr_cache_nr_used(e_cache), COL_END);
+	fprintf(stdout, "%s[Cache %d] added %d URLs (t:%s%d%s) @@@ Ignored %d dups, %d archived, %d twins)%s\n",
+		COL_DARKBLUE,
+		e_cache == http_lcache ? 1 : 2,
+		nr_urls_call,
+		COL_DARKRED,
+		wr_cache_nr_used(e_cache),
+		COL_END,
+		nr_dups,
+		nr_already,
+		nr_sibling,
+		COL_END);
 
 	return 0;
 
