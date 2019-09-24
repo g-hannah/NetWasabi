@@ -10,44 +10,6 @@
 #include "utils_url.h"
 #include "webreaper.h"
 
-#if 0
-static int
-__remove_dups(char **links, const int nr)
-{
-	int i;
-	int j;
-	int k;
-	int nr_removed = 0;
-	size_t len;
-	size_t copy_len;
-
-	for (i = 0; i < (nr-1); ++i)
-	{
-		len = strlen(links[i]);
-
-		for (j = (nr - 1); j > i; --j)
-		{
-			if (len && !strcmp(links[i], links[j]))
-			{
-				++nr_removed;
-
-				for (k = j; k < (nr - 1); ++k)
-				{
-					copy_len = strlen(links[k+1]);
-					memcpy(links[k], links[k+1], copy_len);
-					//strncpy(links[k], links[k+1], copy_len);
-					links[k][copy_len] = 0;
-				}
-
-				memset(links[k], 0, HTTP_URL_MAX);
-			}
-		}
-	}
-
-	return nr_removed;
-}
-#endif
-
 static int nr_already = 0;
 static int nr_sibling = 0;
 static int nr_dups = 0;
@@ -114,96 +76,117 @@ __url_acceptable(connection_t *conn, wr_cache_t *e_cache, wr_cache_t *f_cache, b
 		++link;
 	}
 
-#if 0
-	link = (http_link_t *)e_cache->cache;
-	nr_urls = wr_cache_nr_used(e_cache);
-	for (i = 0; i < nr_urls; ++i)
-	{
-		while (!wr_cache_obj_used(e_cache, (void *)link))
-			++link;
-
-		if (!strcmp(link->url, url->buf_head))
-			return 0;
-	}
-#endif
-
 	return 1;
 }
 
-//static char **url_links = NULL;
+static unsigned long *visited_list;
+static int visited_num = 0;
 
-#if 0
 static int
-__do_insert(wr_cache_t *cachep, http_link_t **root, buf_t *url)
+__do_check(http_link_t *___root)
 {
-	int cmp = strcmp(url->buf_head, (*root)->url);
+	int rv;
 
-	assert(*root);
+	if (___root->left)
+		rv = __do_check(___root->left);
 
-	if (!url->buf_head[0])
-	{
-		fprintf(stderr, "__do_insert: empty url (%s)\n", url->buf_head);
-		return 0;
-	}
+	if (rv < 0)
+		return rv;
 
-	if ((*root)->url[0] && url->buf_head[0] && !cmp)
+	if (___root->right)
+		rv = __do_check(___root->right);
+
+	if (rv < 0)
+		return rv;
+
+	int i;
+
+	for (i = 0; i < visited_num; ++i)
 	{
-		fprintf(stderr, "did not insert duplicate node\n");
-		++nr_dups;
-		return 0;
-	}
-	else
-	if (cmp < 0)
-	{
-		if (!(*root)->left)
+		if (visited_list[i] == (unsigned long)___root)
 		{
-			(*root)->left = (http_link_t *)wr_cache_alloc(cachep, &(*root)->left);
-			if (!(*root)->left)
-				return -1;
-
-			strncpy((*root)->left->url, url->buf_head, url->data_len);
-			(*root)->left->url[url->data_len] = 0;
-
-			fprintf(stderr, "inserted new URL node to the left @ %p\n", (*root)->left);
-
-			return 0;
+			fprintf(stderr, "already visited node 0x%lx!!!\n", (unsigned long)___root);
+			assert(0);
 		}
-
-		return (__do_insert(cachep, &(*root)->left, url));
-	}
-	else
-	{
-		if (!(*root)->right)
-		{
-			(*root)->right = (http_link_t *)wr_cache_alloc(cachep, &(*root)->right);
-			if (!(*root)->right)
-				return -1;
-
-			strncpy((*root)->right->url, url->buf_head, url->data_len);
-			(*root)->right->url[url->data_len] = 0;
-
-			fprintf(stderr, "inserted new URL node to the right @ %p\n", (*root)->right);
-
-			return 0;
-		}
-
-		return __do_insert(cachep, &(*root)->right, url);
 	}
 
+	fprintf(stderr, "visited_num=%d\n", visited_num);
+	visited_list[visited_num++] = (unsigned long)___root;
 	return 0;
 }
-#endif
+
+static int
+__check_tree_integrity(http_link_t *___root)
+{
+	int rv;
+
+	visited_list = calloc(8192, sizeof(unsigned long));
+	assert(visited_list);
+	visited_num = 0;
+
+	rv = __do_check(___root);
+
+	free(visited_list);
+	visited_list = NULL;
+
+	return rv;
+}
+
+static int rdepth = 0;
 
 static void
 __dump_tree(http_link_t *___root)
 {
+	if (___root->left == ___root->parent || ___root->right == ___root->parent)
+	{
+		fprintf(stderr, "Binary tree has turned into a graph...\n");
+
+		http_link_t *nptr = ___root;
+		while (nptr->parent != NULL)
+		{
+			nptr = nptr->parent;
+			++rdepth;
+			if (rdepth > 100)
+			{
+				fprintf(stderr, "Cannot find root node!!!\n");
+				assert(0);
+			}
+		}
+
+		wr_cache_t *cptr = container_of(nptr, wr_cache_t, cache);
+		/* cptr = (wr_cache_t *)((char *)nptr - (size_t)((wr_cache_t *)0)->cache); */
+		int nr_links = wr_cache_nr_used(cptr);
+		int i;
+
+		fprintf(stderr, "Cache is at %p (contains %d links)\n", cptr, nr_links);
+		for (i = 0; i < nr_links; ++i)
+		{
+			fprintf(stderr,
+				"#%d:\n\n"
+				"   url = %s\n"
+				"  left = %p\n"
+				" right = %p\n"
+				"parent = %p\n",
+				i,
+				nptr->url,
+				nptr->left,
+				nptr->right,
+				nptr->parent);
+
+				++nptr;
+		}
+
+		assert(0);
+	}
+
 	if (___root->left)
 		__dump_tree(___root->left);
 
 	if (___root->right)
 		__dump_tree(___root->right);
 
-	fprintf(stderr, "url == %s\n", ___root->url);
+	fprintf(stdout, "url == %s\n", ___root->url);
+
 	return;
 }
 
@@ -223,6 +206,10 @@ __insert_link(wr_cache_t *cachep, http_link_t **root, buf_t *url)
 
 		strncpy((*root)->url, url->buf_head, url->data_len);
 		(*root)->url[url->data_len] = 0;
+
+		(*root)->left = NULL;
+		(*root)->right = NULL;
+		(*root)->parent = NULL;
 
 		//fprintf(stderr, "%d\n", wr_cache_nr_used(cachep));
 
@@ -245,20 +232,19 @@ __insert_link(wr_cache_t *cachep, http_link_t **root, buf_t *url)
 	void *nptr_stack = &nptr;
 	http_link_t *new_addr;
 
-	__dump_tree(*root);
-
 	while (1)
 	{
 		++loops;
 
 		if (loops > 100)
 		{
+			fprintf(stderr, "loops > 100\n");
 			__dump_tree(*root);
 			assert(0);
 		}
 
 		cmp = strcmp(url->buf_head, nptr->url);
-		fprintf(stderr, "comparing %s with %s\n", url->buf_head, nptr->url);
+		//fprintf(stderr, "comparing %s with %s\n", url->buf_head, nptr->url);
 
 		if (nptr->url[0] && !cmp)
 		{
@@ -281,6 +267,7 @@ __insert_link(wr_cache_t *cachep, http_link_t **root, buf_t *url)
 				assert(nptr->left);
 				strncpy(nptr->left->url, url->buf_head, url->data_len);
 				nptr->left->url[url->data_len] = 0;
+				nptr->left->parent = nptr;
 
 				//fprintf(stderr, "copied %s to node @ %p (%d)\n", url->buf_head, nptr->left, wr_cache_nr_used(cachep));
 				break;
@@ -305,6 +292,7 @@ __insert_link(wr_cache_t *cachep, http_link_t **root, buf_t *url)
 				assert(nptr->right);
 				strncpy(nptr->right->url, url->buf_head, url->data_len);
 				nptr->right->url[url->data_len] = 0;
+				nptr->right->parent = nptr;
 
 				//fprintf(stderr, "copied %s to node @ %p (%d)\n", url->buf_head, nptr->right, wr_cache_nr_used(cachep));
 				break;
@@ -322,7 +310,7 @@ __insert_link(wr_cache_t *cachep, http_link_t **root, buf_t *url)
 
 
 int
-parse_links(wr_cache_t *e_cache, wr_cache_t *f_cache, http_link_t *tree_root, connection_t *conn)
+parse_links(wr_cache_t *e_cache, wr_cache_t *f_cache, http_link_t **tree_root, connection_t *conn)
 {
 	assert(e_cache);
 	assert(f_cache);
@@ -356,6 +344,9 @@ parse_links(wr_cache_t *e_cache, wr_cache_t *f_cache, http_link_t *tree_root, co
 	nr_dups = 0;
 	nr_urls_call = 0;
 	nr_urls_total = wr_cache_nr_used(e_cache);
+
+	if (*tree_root)
+		__check_tree_integrity(*tree_root);
 
 	while (1)
 	{
@@ -414,7 +405,7 @@ parse_links(wr_cache_t *e_cache, wr_cache_t *f_cache, http_link_t *tree_root, co
 
 		//fprintf(stderr, "inserting URL %s to tree\n", full_url.buf_head);
 
-		if (__insert_link(e_cache, &tree_root, &full_url) < 0)
+		if (__insert_link(e_cache, tree_root, &full_url) < 0)
 			goto fail_destroy_bufs;
 
 #if 0
