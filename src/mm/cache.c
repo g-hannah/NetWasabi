@@ -463,5 +463,7 @@ wr_cache_clear_all(wr_cache_t *cachep)
 			wr_cache_dealloc(cachep, slot, ptr_addr);
 	}
 
+	memset(cachep->assigned_list, 0, (cachep->capacity * sizeof(struct wr_cache_obj_ctx)));
+
 	return;
 }
