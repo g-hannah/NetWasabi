@@ -311,7 +311,6 @@ __insert_link(wr_cache_t *cachep, http_link_t **root, buf_t *url)
 	return 0;
 }
 
-
 int
 parse_links(wr_cache_t *e_cache, wr_cache_t *f_cache, http_link_t **tree_root, connection_t *conn)
 {
@@ -325,9 +324,6 @@ parse_links(wr_cache_t *e_cache, wr_cache_t *f_cache, http_link_t **tree_root, c
 	char delim;
 	int url_type_idx = 0;
 	size_t url_len = 0;
-	//size_t cur_size = DEFAULT_MATRIX_SIZE;
-	//int aidx = 0;
-	//int i;
 	buf_t *buf = &conn->read_buf;
 	buf_t url;
 	buf_t full_url;
@@ -336,8 +332,6 @@ parse_links(wr_cache_t *e_cache, wr_cache_t *f_cache, http_link_t **tree_root, c
 	buf_init(&url, HTTP_URL_MAX);
 	buf_init(&full_url, HTTP_URL_MAX);
 	buf_init(&path, path_max);
-
-	//MATRIX_INIT(url_links, cur_size, HTTP_URL_MAX, char);
 
 	tail = buf->buf_tail;
 	savep = buf->buf_head;
@@ -395,7 +389,6 @@ parse_links(wr_cache_t *e_cache, wr_cache_t *f_cache, http_link_t **tree_root, c
 
 		assert(url_len > 0);
 		assert(url_len < HTTP_URL_MAX);
-		//assert(aidx <= cur_size);
 
 		buf_append_ex(&url, savep, url_len);
 		make_full_url(conn, &url, &full_url);
@@ -411,14 +404,7 @@ parse_links(wr_cache_t *e_cache, wr_cache_t *f_cache, http_link_t **tree_root, c
 		if (__insert_link(e_cache, tree_root, &full_url) < 0)
 			goto fail_destroy_bufs;
 
-#if 0
-		MATRIX_CHECK_CAPACITY(url_links, aidx, cur_size, HTTP_URL_MAX, char);
-		strncpy(url_links[aidx], full_url.buf_head, full_url.data_len);
-		url_links[aidx][full_url.data_len] = 0;
-#endif
-
 		savep = ++p;
-		//++aidx;
 		++nr_urls_call;
 	}
 
@@ -426,45 +412,14 @@ parse_links(wr_cache_t *e_cache, wr_cache_t *f_cache, http_link_t **tree_root, c
 	buf_destroy(&full_url);
 	buf_destroy(&path);
 
-#if 0
-	int removed;
-	removed = __remove_dups(url_links, (const int)nr_urls);
-	nr_urls -= removed;
-
-	assert(nr_urls <= cur_size);
-#endif
-
-	fprintf(stdout, "%s%sParsed %d more URLs (removed: %d dups, %d already archived, %d twins)%s\n",
-		COL_DARKGREY, ACTION_DONE_STR, nr_urls_call, nr_dups, nr_already, nr_sibling, COL_END);
-
-#if 0
-	for (i = 0; i < nr_urls; ++i)
-	{
-#ifdef DEBUG
-		fprintf(stderr, "allocating link obj in HL_LOOP @ %p\n", hl_loop);
-#endif
-
-		url_len = strlen(url_links[i]);
-		if (url_len >= HTTP_URL_MAX)
-			fprintf(stderr, "%s\n", url_links[i]);
-		assert(url_len < HTTP_URL_MAX);
-		strncpy((*hl_loop)->url, url_links[i], url_len);
-		(*hl_loop)->url[url_len] = 0;
-		(*hl_loop)->nr_requests = 0;
-	}
-#endif
-
-	//MATRIX_DESTROY(url_links, cur_size);
+	fprintf(stdout, "%s%sParsed %d more URLs (removed: %d dups, %d already archived, %d twins ; total = %d)%s\n",
+		COL_DARKGREY, ACTION_DONE_STR, nr_urls_call, nr_dups, nr_already, nr_sibling, wr_cache_nr_used(e_cache), COL_END);
 
 	return 0;
-
-
-	//fail_free_links:
 
 	fail_destroy_bufs:
 	buf_destroy(&url);
 	buf_destroy(&full_url);
 	buf_destroy(&path);
-	//MATRIX_DESTROY(url_links, cur_size);
 	return -1;
 }
