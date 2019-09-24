@@ -271,6 +271,7 @@ http_send_request(connection_t *conn)
 }
 
 #define HTTP_SMALL_READ_BLOCK 256
+#define MAX_WAIT_TIME 12
 
 static int
 __http_read_until_eoh(connection_t *conn, char **p)
@@ -299,7 +300,7 @@ __http_read_until_eoh(connection_t *conn, char **p)
 		return FL_OPERATION_TIMEOUT;
 	}
 
-	alarm(8);
+	alarm(MAX_WAIT_TIME);
 	while (!(*p))
 	{
 		if (option_set(OPT_USE_TLS))
@@ -317,6 +318,8 @@ __http_read_until_eoh(connection_t *conn, char **p)
 				break;
 			default:
 				*p = strstr(buf->buf_head, HTTP_EOH_SENTINEL);
+				if (*p)
+					break;
 		}
 	}
 	alarm(0);
