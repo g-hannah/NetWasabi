@@ -24,6 +24,9 @@ __url_acceptable(connection_t *conn, wr_cache_t *e_cache, wr_cache_t *f_cache, b
 
 	char *tail = url->buf_tail;
 
+	if (url->data_len >= 256)
+		return 0;
+
 	if (!strncmp("http:", url->buf_head, 5)
 	|| !strncmp("https:", url->buf_head, 6))
 	{
@@ -423,8 +426,8 @@ parse_links(wr_cache_t *e_cache, wr_cache_t *f_cache, http_link_t **tree_root, c
 	buf_destroy(&full_url);
 	buf_destroy(&path);
 
-	fprintf(stdout, "%s%sParsed %d more URLs (removed: %d dups, %d already archived, %d twins ; total = %d)%s\n",
-		COL_DARKGREY, ACTION_DONE_STR, nr_urls_call, nr_dups, nr_already, nr_sibling, wr_cache_nr_used(e_cache), COL_END);
+	fprintf(stdout, "%s%sParsed %d more URLs (removed: %d dups, %d already archived, %d twins; total in cache = %d)%s\n",
+		COL_DARKRED, ACTION_DONE_STR, nr_urls_call, nr_dups, nr_already, nr_sibling, wr_cache_nr_used(e_cache), COL_END);
 
 	return 0;
 
