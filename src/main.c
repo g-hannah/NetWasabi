@@ -1025,33 +1025,43 @@ deconstruct_btree(http_link_t *root, wr_cache_t *cache)
 {
 	if (!root)
 	{
+#ifdef DEBUG
 		fprintf(stderr, "deconstruct_btree: root is NULL\n");
+#endif
 		return;
 	}
 
 	if (((char *)root - (char *)cache->cache) >= cache->cache_size)
 	{
+#ifdef DEBUG
 		fprintf(stderr, "node @ %p is beyond our cache... (cache %p to %p)\n",
 		root,
 		cache->cache,
 		(void *)((char *)cache->cache + cache->cache_size));
+#endif
 
 		assert(0);
 	}
 
 	if (root->left)
 	{
+#ifdef DEBUG
 		fprintf(stderr, "Going left from %p to %p\n", root, root->left);
+#endif
 		deconstruct_btree(root->left, cache);
 	}
 
 	if (root->right)
 	{
+#ifdef DEBUG
 		fprintf(stderr, "Going right from %p to %p\n", root, root->right);
+#endif
 		deconstruct_btree(root->right, cache);
 	}
 
+#ifdef DEBUG
 	fprintf(stderr, "Setting left/right/parent to NULL in node %p\n", root);
+#endif
 	root->left = NULL;
 	root->right = NULL;
 	root->parent = NULL;
@@ -1082,11 +1092,6 @@ reap(wr_cache_t *cachep, wr_cache_t *cachep2, connection_t *conn)
 	http_link_t *link;
 	buf_t *wbuf = &conn->write_buf;
 	buf_t *rbuf = &conn->read_buf;
-#if 0
-	struct sigaction it_nact;
-	struct sigaction it_oact;
-	sigjmp_buf __ICL_TIMEOUT__;
-#endif
 
 	TRAILING_SLASH = 0;
 /*
