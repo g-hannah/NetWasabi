@@ -272,9 +272,8 @@ __check_cookies(connection_t *conn)
 	struct http_cookie_t *cookie = NULL;
 	http_header_t *tmp;
 
-#ifdef DEBUG
-	fprintf(stderr, "allocating header obj to TMP @ %p\n", &tmp);
-#endif
+	//fprintf(stderr, "allocating header obj to TMP @ %p\n", &tmp);
+
 	tmp = (http_header_t *)wr_cache_alloc(http_hcache, &tmp);
 
 	/*
@@ -302,9 +301,7 @@ __check_cookies(connection_t *conn)
 
 			http_append_header(&conn->write_buf, tmp);
 
-#ifdef DEBUG
-			fprintf(stderr, "allocating cookie obj to HC_LOOP @ %p\n", hc_loop);
-#endif
+			//fprintf(stderr, "allocating cookie obj to HC_LOOP @ %p\n", hc_loop);
 			*hc_loop = (struct http_cookie_t *)wr_cache_alloc(cookies, hc_loop);
 
 			__extract_cookie_info(*hc_loop, tmp);
@@ -348,9 +345,7 @@ __check_cookies(connection_t *conn)
 	}
 
 	out_dealloc:
-#ifdef DEBUG
-	fprintf(stderr, "deallocating header object TMP @ %p\n", &tmp);
-#endif
+	//fprintf(stderr, "deallocating header object TMP @ %p\n", &tmp);
 	wr_cache_dealloc(http_hcache, (void *)tmp, &tmp);
 
 	return;
@@ -365,9 +360,7 @@ __connection_closed(connection_t *conn)
 	buf_t *buf = &conn->read_buf;
 	int rv = 0;
 
-#ifdef DEBUG
-	fprintf(stderr, "allocating header obj in CONNECTION @ %p\n", &connection);
-#endif
+	//fprintf(stderr, "allocating header obj in CONNECTION @ %p\n", &connection);
 
 	connection = wr_cache_alloc(http_hcache, &connection);
 	assert(connection);
@@ -380,9 +373,7 @@ __connection_closed(connection_t *conn)
 			rv = 1;
 	}
 
-#ifdef DEBUG
-	fprintf(stderr, "deallocting header obj CONNECTION @ %p\n", &connection);
-#endif
+	//fprintf(stderr, "deallocting header obj CONNECTION @ %p\n", &connection);
 
 	wr_cache_dealloc(http_hcache, connection, &connection);
 	return rv;
@@ -580,63 +571,6 @@ __send_get_request(connection_t *conn)
 	fail:
 	return rv;
 }
-
-#if 0
-static void
-__normalise_filename(char *filename)
-{
-	char *p = filename;
-	size_t len = strlen(filename);
-	char *end = (filename + len);
-	buf_t tmp;
-
-	clear_struct(&tmp);
-	buf_init(&tmp, len);
-
-	buf_append(&tmp, filename);
-
-	if (!strncmp("http", tmp.buf_head, 4))
-	{
-		p = (tmp.buf_head + strlen("http://"));
-
-		if (*p == '/')
-			++p;
-
-		buf_collapse(&tmp, (off_t)0, (p - tmp.buf_head));
-	}
-
-	p = tmp.buf_head;
-	end = tmp.buf_tail;
-
-	while (p < end)
-	{
-		if (*p == 0x20)
-		{
-			*p++ = 0x5f;
-
-			if (*(p-2) == 0x5f)
-			{
-				--p;
-				buf_collapse(&tmp, (off_t)(p - tmp.buf_head), (size_t)1);
-				end = tmp.buf_tail;
-			}
-
-			continue;
-		}
-
-		++p;
-	}
-
-	buf_append(&tmp, ".html");
-
-	strncpy(filename, tmp.buf_head, tmp.data_len);
-	filename[tmp.data_len] = 0;
-
-	buf_destroy(&tmp);
-
-	return;
-}
-#endif
 
 static int
 __check_local_dirs(connection_t *conn, buf_t *filename)
@@ -936,9 +870,7 @@ __handle301(connection_t *conn)
 	buf_t tmp_url;
 	buf_t tmp_full;
 
-#ifdef DEBUG
-	fprintf(stderr, "allocating header obj LOCATION @ %p\n", &location);
-#endif
+	//fprintf(stderr, "allocating header obj LOCATION @ %p\n", &location);
 
 	location = (http_header_t *)wr_cache_alloc(http_hcache, &location);
 	http_fetch_header(&conn->read_buf, "Location", location, (off_t)0);
@@ -977,9 +909,7 @@ __handle301(connection_t *conn)
 
 	assert(!memchr(conn->host, '/', strlen(conn->host)));
 
-#ifdef DEBUG
-	fprintf(stderr, "deallocating header obj LOCATION @ %p\n", &location);
-#endif
+	//fprintf(stderr, "deallocating header obj LOCATION @ %p\n", &location);
 
 	wr_cache_dealloc(http_hcache, (void *)location, &location);
 
@@ -1091,7 +1021,7 @@ __url_parseable(char *url)
 }
 
 static void
-deconstruct_btree(http_link_t *root)
+deconstruct_btree(http_link_t *root, wr_cache_t *cache)
 {
 	if (!root)
 	{
@@ -1099,19 +1029,29 @@ deconstruct_btree(http_link_t *root)
 		return;
 	}
 
+	if (((char *)root - (char *)cache->cache) >= cache->cache_size)
+	{
+		fprintf(stderr, "node @ %p is beyond our cache... (cache %p to %p)\n",
+		root,
+		cache->cache,
+		(void *)((char *)cache->cache + cache->cache_size));
+
+		assert(0);
+	}
+
 	if (root->left)
 	{
-		fprintf(stderr, "Going left from %p to %p\n", root, root->left);
-		deconstruct_btree(root->left);
+		//fprintf(stderr, "Going left from %p to %p\n", root, root->left);
+		deconstruct_btree(root->left, cache);
 	}
 
 	if (root->right)
 	{
-		fprintf(stderr, "Going right from %p to %p\n", root, root->right);
-		deconstruct_btree(root->right);
+		//fprintf(stderr, "Going right from %p to %p\n", root, root->right);
+		deconstruct_btree(root->right, cache);
 	}
 
-	fprintf(stderr, "Setting left and right to NULL in node %p\n", root);
+	//fprintf(stderr, "Setting left and right to NULL in node %p\n", root);
 	root->left = NULL;
 	root->right = NULL;
 
@@ -1160,29 +1100,6 @@ reap(wr_cache_t *cachep, wr_cache_t *cachep2, connection_t *conn)
  * to CRAWL_DEPTH (#iterations of while loop).
  */
 
-#if 0
-	clear_struct(&it_nact);
-	clear_struct(&it_oact);
-	it_nact.sa_flags = 0;
-	it_nact.sa_handler = __handle_icl_timeout;
-	sigemptyset(&it_nact.sa_mask);
-	if (sigaction(SIGALRM, &it_nact, &it_oact) < 0)
-	{
-		fprintf(stderr, "reap: failed to set signal handler for SIGALRM\n");
-		goto fail;
-	}
-
-	if (sigsetjmp(__ICL_TIMEOUT__, 0) != 0)
-	{
-		fprintf(stderr, "%s%sTimed out getting %s%s\n", COL_RED, ATTENTION_STR, conn->full_url, COL_END);
-
-		buf_clear(rbuf);
-		buf_clear(wbuf);
-
-		return FL_RESET;
-	}
-#endif
-
 	if (!wr_cache_nr_used(cachep))
 		cache_switch = 1;
 	else
@@ -1191,23 +1108,28 @@ reap(wr_cache_t *cachep, wr_cache_t *cachep2, connection_t *conn)
 
 while (1)
 {
+#if 0
 	fprintf(stderr,
 		"Cache 1 is at %p\n"
 		"Cache 2 is at %p\n",
 		cache1_url_root,
 		cache2_url_root);
+#endif
 
 	if (!cache_switch)
 	{
 		link = (http_link_t *)cachep->cache;
 		nr_links = wr_cache_nr_used(cachep);
 
-		fprintf(stderr, "Draining %d URLs in cache 1 -- filling cache 2\n", nr_links);
+		fprintf(stderr, "%sDraining %d URLs in cache 1 -- filling cache 2%s\n",
+			COL_ORANGE, nr_links, COL_END);
 
 		fprintf(stderr, "Deconstructing binary tree in cache 2\n");
-		deconstruct_btree(cache2_url_root);
+		deconstruct_btree(cache2_url_root, http_lcache2);
 
 		wr_cache_clear_all(cachep2);
+
+		assert(wr_cache_nr_used(cachep2) == 0);
 
 		cache2_url_root = NULL;
 		
@@ -1217,13 +1139,15 @@ while (1)
 		link = (http_link_t *)cachep2->cache;
 		nr_links = wr_cache_nr_used(cachep2);
 
-		fprintf(stderr, "Draining %d URLs in cache 2 -- filling cache 1\n", nr_links);
+		fprintf(stderr, "%sDraining %d URLs in cache 2 -- filling cache 1%s\n",
+			COL_ORANGE, nr_links, COL_END);
 
 		fprintf(stderr, "Deconstructing binary tree in cache 1\n");
-		deconstruct_btree(cache1_url_root);
+		deconstruct_btree(cache1_url_root, http_lcache);
 
-		if (wr_cache_nr_used(cachep) > 0)
-			wr_cache_clear_all(cachep);
+		wr_cache_clear_all(cachep);
+
+		assert(wr_cache_nr_used(cachep) == 0);
 
 		cache1_url_root = NULL;
 	}
@@ -1596,6 +1520,8 @@ main(int argc, char *argv[])
 			__send_get_request(&conn); /* in this case we still need to get it to extract URLs */
 			break;
 		case HTTP_BAD_REQUEST:
+			__show_request_header(wbuf);
+			break;
 		case HTTP_FORBIDDEN:
 		case HTTP_GATEWAY_TIMEOUT:
 		case HTTP_BAD_GATEWAY:
