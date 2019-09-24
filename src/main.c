@@ -437,7 +437,7 @@ __check_host(connection_t *conn)
 		if (wr_cache_nr_used(cookies) > 0)
 			wr_cache_clear_all(cookies);
 
-		fprintf(stderr,
+		fprintf(stdout,
 			"%sChanging host (%s ==> %s)\n"
 			"(URL: %s)\n",
 			ACTION_ING_STR, old_host, conn->host,
@@ -699,7 +699,7 @@ __check_local_dirs(connection_t *conn, buf_t *filename)
 		if(access(_tmp.buf_head, F_OK) != 0)
 		{
 			mkdir(_tmp.buf_head, S_IRWXU);
-			fprintf(stderr, "%sCreated local dir %s\n", ACTION_DONE_STR, _tmp.buf_head);
+			fprintf(stdout, "%sCreated local dir %s\n", ACTION_DONE_STR, _tmp.buf_head);
 		}
 
 		p = ++e;
@@ -893,7 +893,7 @@ __archive_page(connection_t *conn)
 
 	if (access(local_url.buf_head, F_OK) == 0)
 	{
-		printf("%s%sAlready archived %s%s\n", COL_RED, ATTENTION_STR, local_url.buf_head, COL_END);
+		fprintf(stdout, "%s%sAlready archived %s%s\n", COL_RED, ATTENTION_STR, local_url.buf_head, COL_END);
 		goto out_free_bufs;
 	}
 
@@ -905,7 +905,7 @@ __archive_page(connection_t *conn)
 		goto fail_free_bufs;
 	}
 
-	printf("%sCreated file %s\n", ACTION_DONE_STR, local_url.buf_head);
+	fprintf(stdout, "%sCreated file %s\n", ACTION_DONE_STR, local_url.buf_head);
 	++nr_reaped;
 
 	buf_write_fd(fd, buf);
@@ -943,7 +943,7 @@ __handle301(connection_t *conn)
 	location = (http_header_t *)wr_cache_alloc(http_hcache, &location);
 	http_fetch_header(&conn->read_buf, "Location", location, (off_t)0);
 
-	fprintf(stderr, "%sRedirecting to %s%s%s\n", ACTION_ING_STR, COL_ORANGE, location->value, COL_END);
+	fprintf(stdout, "%sRedirecting to %s%s%s\n", ACTION_ING_STR, COL_ORANGE, location->value, COL_END);
 
 	assert(location->vlen < HTTP_URL_MAX);
 
@@ -1090,6 +1090,34 @@ __url_parseable(char *url)
 	return 1;
 }
 
+static void
+deconstruct_btree(http_link_t *root)
+{
+	if (!root)
+	{
+		fprintf(stderr, "deconstruct_btree: root is NULL\n");
+		return;
+	}
+
+	if (root->left)
+	{
+		fprintf(stderr, "Going left from %p to %p\n", root, root->left);
+		deconstruct_btree(root->left);
+	}
+
+	if (root->right)
+	{
+		fprintf(stderr, "Going right from %p to %p\n", root, root->right);
+		deconstruct_btree(root->right);
+	}
+
+	fprintf(stderr, "Setting left and right to NULL in node %p\n", root);
+	root->left = NULL;
+	root->right = NULL;
+
+	return;
+}
+
 /**
  * reap - archive the pages in the link cache,
  *    choose one at random and return that choice. That will be
@@ -1160,25 +1188,40 @@ reap(wr_cache_t *cachep, wr_cache_t *cachep2, connection_t *conn)
 	else
 		cache_switch = 0;
 
+
 while (1)
 {
+	fprintf(stderr,
+		"Cache 1 is at %p\n"
+		"Cache 2 is at %p\n",
+		cache1_url_root,
+		cache2_url_root);
+
 	if (!cache_switch)
 	{
 		link = (http_link_t *)cachep->cache;
 		nr_links = wr_cache_nr_used(cachep);
 
-		fprintf(stderr, "%d URLs in cache 1\n", nr_links);
-		if (wr_cache_nr_used(cachep2) > 0)
-			wr_cache_clear_all(cachep2);
+		fprintf(stderr, "Draining %d URLs in cache 1 -- filling cache 2\n", nr_links);
+
+		fprintf(stderr, "Deconstructing binary tree in cache 2\n");
+		deconstruct_btree(cache2_url_root);
+
+		wr_cache_clear_all(cachep2);
 
 		cache2_url_root = NULL;
+		
 	}
 	else
 	{
 		link = (http_link_t *)cachep2->cache;
 		nr_links = wr_cache_nr_used(cachep2);
 
-		fprintf(stderr, "%d URLs in cache 2\n", nr_links);
+		fprintf(stderr, "Draining %d URLs in cache 2 -- filling cache 1\n", nr_links);
+
+		fprintf(stderr, "Deconstructing binary tree in cache 1\n");
+		deconstruct_btree(cache1_url_root);
+
 		if (wr_cache_nr_used(cachep) > 0)
 			wr_cache_clear_all(cachep);
 
@@ -1223,7 +1266,7 @@ while (1)
 			continue;
 		}
 
-		fprintf(stderr, "===> %s%s%s <===\n", COL_ORANGE, conn->page, COL_END);
+		fprintf(stdout, "===> %s%s%s <===\n", COL_ORANGE, conn->page, COL_END);
 
 		status_code = __do_request(conn);
 
@@ -1285,7 +1328,7 @@ while (1)
 				goto next;
 			case FL_OPERATION_TIMEOUT:
 
-				fprintf(stderr, "%s\n", rbuf->buf_head);
+				fprintf(stdout, "%s\n", rbuf->buf_head);
 				buf_clear(rbuf);
 
 				if (!conn->host[0])
@@ -1296,7 +1339,7 @@ while (1)
 				goto next;
 				break;
 			default:
-				fprintf(stderr, "reap: received HTTP status code %d\n", status_code);
+				fprintf(stdout, "reap: received HTTP status code %d\n", status_code);
 				goto fail;
 		}
 
@@ -1306,12 +1349,12 @@ while (1)
 			{
 				if (!cache_switch)
 				{
-					parse_links(cachep2, cachep, cache2_url_root, conn);
+					parse_links(cachep2, cachep, &cache2_url_root, conn);
 					nr_links_sibling = wr_cache_nr_used(cachep2);
 				}
 				else
 				{
-					parse_links(cachep, cachep2, cache1_url_root, conn);
+					parse_links(cachep, cachep2, &cache1_url_root, conn);
 					nr_links_sibling = wr_cache_nr_used(cachep);
 				}
 
@@ -1320,7 +1363,7 @@ while (1)
 			}
 		}
 
-		fprintf(stderr, "%sArchiving %s\n", ACTION_ING_STR, conn->full_url);
+		fprintf(stdout, "%sArchiving %s\n", ACTION_ING_STR, conn->full_url);
 		__archive_page(conn);
 
 		next:
@@ -1467,7 +1510,7 @@ main(int argc, char *argv[])
 
 	strcpy(conn.primary_host, conn.host);
 
-	fprintf(stderr,
+	fprintf(stdout,
 		"%sReaping site %s%s%s\n",
 		ACTION_ING_STR, COL_ORANGE, conn.full_url, COL_END);
 
@@ -1565,17 +1608,17 @@ main(int argc, char *argv[])
 			goto out_disconnect;
 	}
 
-	parse_links(http_lcache, http_lcache2, cache1_url_root, &conn);
+	parse_links(http_lcache, http_lcache2, &cache1_url_root, &conn);
 
 	if (!do_not_archive)
 	{
-		fprintf(stderr, "%sArchiving %s\n", ACTION_ING_STR, conn.full_url);
+		fprintf(stdout, "%sArchiving %s\n", ACTION_ING_STR, conn.full_url);
 		__archive_page(&conn);
 	}
 
 	if (!wr_cache_nr_used(http_lcache))
 	{
-		fprintf(stderr, "%sParsed zero pages from URL %s\n", ACTION_DONE_STR, conn.full_url);
+		fprintf(stdout, "%sParsed zero pages from URL %s\n", ACTION_DONE_STR, conn.full_url);
 		goto out_disconnect;
 	}
 
