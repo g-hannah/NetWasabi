@@ -1041,19 +1041,20 @@ deconstruct_btree(http_link_t *root, wr_cache_t *cache)
 
 	if (root->left)
 	{
-		//fprintf(stderr, "Going left from %p to %p\n", root, root->left);
+		fprintf(stderr, "Going left from %p to %p\n", root, root->left);
 		deconstruct_btree(root->left, cache);
 	}
 
 	if (root->right)
 	{
-		//fprintf(stderr, "Going right from %p to %p\n", root, root->right);
+		fprintf(stderr, "Going right from %p to %p\n", root, root->right);
 		deconstruct_btree(root->right, cache);
 	}
 
-	//fprintf(stderr, "Setting left and right to NULL in node %p\n", root);
+	fprintf(stderr, "Setting left/right/parent to NULL in node %p\n", root);
 	root->left = NULL;
 	root->right = NULL;
+	root->parent = NULL;
 
 	return;
 }
@@ -1121,13 +1122,17 @@ while (1)
 		link = (http_link_t *)cachep->cache;
 		nr_links = wr_cache_nr_used(cachep);
 
-		fprintf(stderr, "%sDraining %d URLs in cache 1 -- filling cache 2%s\n",
-			COL_ORANGE, nr_links, COL_END);
+		fprintf(stdout, "%s--- Draining %d URLs in cache 1 ; filling cache 2%s\n",
+			COL_DARKBLUE, nr_links, COL_END);
 
+#ifdef DEBUG
 		fprintf(stderr, "Deconstructing binary tree in cache 2\n");
+#endif
 		deconstruct_btree(cache2_url_root, http_lcache2);
 
 		wr_cache_clear_all(cachep2);
+		if (cachep2->nr_assigned > 0)
+			cachep2->nr_assigned = 0;
 
 		assert(wr_cache_nr_used(cachep2) == 0);
 
@@ -1139,13 +1144,17 @@ while (1)
 		link = (http_link_t *)cachep2->cache;
 		nr_links = wr_cache_nr_used(cachep2);
 
-		fprintf(stderr, "%sDraining %d URLs in cache 2 -- filling cache 1%s\n",
-			COL_ORANGE, nr_links, COL_END);
+		fprintf(stdout, "%s--- Draining %d URLs in cache 2 ; filling cache 1%s\n",
+			COL_DARKBLUE, nr_links, COL_END);
 
+#ifdef DEBUG
 		fprintf(stderr, "Deconstructing binary tree in cache 1\n");
+#endif
 		deconstruct_btree(cache1_url_root, http_lcache);
 
 		wr_cache_clear_all(cachep);
+		if (cachep->nr_assigned > 0)
+			cachep->nr_assigned = 0;
 
 		assert(wr_cache_nr_used(cachep) == 0);
 
