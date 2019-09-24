@@ -1549,7 +1549,7 @@ main(int argc, char *argv[])
 	if (sigsetjmp(main_env, 0) != 0)
 	{
 		fprintf(stderr, "%c%c%c%c%c%c", 0x08, 0x20, 0x08, 0x08, 0x20, 0x08);
-		fprintf(stderr, "Caught signal! Exiting!\n");
+		fprintf(stderr, "%s%sCaught signal! Exiting!%s\n", COL_RED, ACTION_DONE_STR, COL_END);
 		goto out_disconnect;
 	}
 
