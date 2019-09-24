@@ -144,8 +144,8 @@ buf_shift(buf_t *buf, off_t offset, size_t range)
 	size_t slack = buf_slack(buf);
 	size_t bytes;
 
-	if (range > slack)
-		buf_extend(buf, __ALIGN((range - slack)));
+	if (range >= slack)
+		buf_extend(buf, __ALIGN(((range - slack) * 2)));
 
 	from = (buf->buf_head + offset);
 	to = (from + range);
@@ -197,6 +197,8 @@ buf_extend(buf_t *buf, size_t by)
 	buf->buf_tail = (buf->data + tail_off);
 	buf->buf_size = new_size;
 
+	assert(buf->data_len == (buf->buf_tail - buf->buf_head));
+
 	return 0;
 }
 
@@ -212,13 +214,11 @@ int
 buf_append(buf_t *buf, char *str)
 {
 	size_t len = strlen(str);
-	size_t new_size;
+	size_t slack = buf_slack(buf);
 
-	new_size = (buf->buf_size + len);
-
-	if (new_size > buf_slack(buf))
+	if (len >= slack)
 	{
-		buf_extend(buf, __ALIGN(len));
+		buf_extend(buf, __ALIGN(((len - slack) * 2)));
 	}
 
 	strcat(buf->buf_tail, str);
@@ -236,8 +236,8 @@ buf_append_ex(buf_t *buf, char *str, size_t bytes)
 
 	size_t slack = buf_slack(buf);
 
-	if (bytes > slack)
-		buf_extend(buf, __ALIGN((bytes - slack)));
+	if (bytes >= slack)
+		buf_extend(buf, __ALIGN(((bytes - slack) * 2)));
 
 	strncpy(buf->buf_tail, str, bytes);
 
@@ -362,6 +362,8 @@ ssize_t
 buf_read_socket(int sock, buf_t *buf, size_t toread)
 {
 	assert(buf);
+	assert(buf->data);
+	assert(buf_integrity(buf));
 
 	ssize_t n = 0;
 	ssize_t total = 0;
@@ -394,9 +396,9 @@ buf_read_socket(int sock, buf_t *buf, size_t toread)
 	if (toread)
 	{
 
-		if (toread > slack)
+		if (toread >= slack)
 		{
-			buf_extend(buf, __ALIGN((toread - slack)));
+			buf_extend(buf, __ALIGN((toread - slack) * 2));
 			slack = buf_slack(buf);
 		}
 
@@ -437,10 +439,9 @@ buf_read_socket(int sock, buf_t *buf, size_t toread)
 				if (!toread)
 					break;
 
-				/* Just in case */
 				if (!slack)
 				{
-					buf_extend(buf, __ALIGN(toread));
+					buf_extend(buf, __ALIGN((toread * 2)));
 					slack = buf_slack(buf);
 				}
 			}
@@ -450,7 +451,7 @@ buf_read_socket(int sock, buf_t *buf, size_t toread)
 	{
 		while (1)
 		{
-			n = recv(sock, buf->buf_tail, slack, 0);
+			n = recv(sock, buf->buf_tail, slack-1, 0);
 
 			if (!n)
 			{
@@ -483,7 +484,7 @@ buf_read_socket(int sock, buf_t *buf, size_t toread)
 
 				if (!slack)
 				{
-					buf_extend(buf, buf->buf_size);
+					buf_extend(buf, __ALIGN((buf->buf_size / 2)));
 					slack = buf_slack(buf);
 				}
 			}
@@ -504,6 +505,8 @@ buf_read_tls(SSL *ssl, buf_t *buf, size_t toread)
 {
 	assert(ssl);
 	assert(buf);
+	assert(buf->data);
+	assert(buf_integrity(buf));
 
 	size_t slack;
 	ssize_t n;
@@ -540,9 +543,9 @@ buf_read_tls(SSL *ssl, buf_t *buf, size_t toread)
 
 	if (toread)
 	{
-		if (toread > slack)
+		if (toread >= slack)
 		{
-			buf_extend(buf, __ALIGN((toread - slack)));
+			buf_extend(buf, __ALIGN(((toread - slack) * 2)));
 			slack = buf_slack(buf);
 		}
 
@@ -611,7 +614,7 @@ buf_read_tls(SSL *ssl, buf_t *buf, size_t toread)
 
 				if (!slack)
 				{
-					buf_extend(buf, __ALIGN(toread));
+					buf_extend(buf, __ALIGN((toread * 2)));
 					slack = buf_slack(buf);
 				}
 			}
@@ -626,7 +629,7 @@ buf_read_tls(SSL *ssl, buf_t *buf, size_t toread)
 
 		while (1)
 		{
-			n = SSL_read(ssl, buf->buf_tail, slack);
+			n = SSL_read(ssl, buf->buf_tail, slack-1);
 
 			if (n == 0)
 			{
@@ -684,7 +687,7 @@ buf_read_tls(SSL *ssl, buf_t *buf, size_t toread)
 
 				if (!slack)
 				{
-					buf_extend(buf, buf->buf_size);
+					buf_extend(buf, __ALIGN((buf->buf_size / 2)));
 					slack = buf_slack(buf);
 				}
 			}
