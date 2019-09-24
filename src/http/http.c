@@ -279,7 +279,6 @@ __http_read_until_eoh(connection_t *conn, char **p)
 
 	ssize_t n;
 	buf_t *buf = &conn->read_buf;
-	//int loop_cnt = 0;
 
 	clear_struct(&oact);
 	clear_struct(&nact);
@@ -303,11 +302,6 @@ __http_read_until_eoh(connection_t *conn, char **p)
 	alarm(8);
 	while (!(*p))
 	{
-#if 0
-		if (++loop_cnt > 10000000)
-			return FL_OPERATION_TIMEOUT;
-#endif
-
 		if (option_set(OPT_USE_TLS))
 			n = buf_read_tls(conn->ssl, buf, HTTP_SMALL_READ_BLOCK);
 		else
@@ -405,16 +399,19 @@ __http_read_until_next_chunk_size(connection_t *conn, buf_t *buf, char **cur_pos
 	{
 		if (**cur_pos == 0x0d)
 		{
-			while ((**cur_pos == 0x0d || **cur_pos == 0x0d) && *cur_pos < tail)
+			while ((**cur_pos == 0x0d || **cur_pos == 0x0a) && *cur_pos < tail)
 				++(*cur_pos);
 
 			if (*cur_pos != tail)
 			{
-				while (**cur_pos != 0x0d && *cur_pos < tail)
-					++(*cur_pos);
+				q = *cur_pos;
 
-				if (*cur_pos != tail)
+				while (*q != 0x0d && q < tail)
+					++q;
+
+				if (q != tail)
 				{
+					*cur_pos -= 2;
 					return;
 				}
 			}
@@ -435,63 +432,13 @@ __http_read_until_next_chunk_size(connection_t *conn, buf_t *buf, char **cur_pos
 		q = memchr(*cur_pos, 0x0a, (tail - *cur_pos));
 		if (q)
 		{
+			*cur_pos -= 2; /* point it back to START_OF_CHUNK_DATA + CHUNK_SIZE */
 			break;
 		}
 	}
 
 	return;
 }
-
-#if 0
-static int
-__must_read_extra(char *ptr, char *tail)
-{
-	size_t read_more = HTTP_MAX_CHUNK_STR;
-	char *p = ptr;
-
-	if (!(tail - ptr) || *ptr != 0x0d)
-	{
-		//fprintf(stderr, "ptr == tail\n");
-		return read_more;
-	}
-
-	SKIP_CRNL(p);
-
-	read_more -= (p - ptr);
-
-	if (p >= tail)
-	{
-		//fprintf(stderr, "ptr >= tail\n");
-		read_more += (p - tail);
-		return read_more;
-	}
-
-	if (*(p - 1) != 0x0a)
-		return read_more;
-
-	if (!(*p))
-		return read_more;
-
-	ptr = p;
-
-	while (*p != 0x0d && p < tail)
-		++p;
-
-	if (p == ptr)
-		return read_more;
-
-	if (*p != 0x0d)
-	{
-		read_more -= (p - ptr);
-		return read_more;
-	}
-
-	if (*p == 0x0d && *(p+1) != 0x0a)
-		return 1;
-
-	return 0;
-}
-#endif
 
 static size_t
 __http_do_chunked_recv(connection_t *conn)
@@ -500,29 +447,17 @@ __http_do_chunked_recv(connection_t *conn)
 
 	char *p;
 	char *e;
-	//char *chunk_start;
-	//char *__next_size;
 	off_t chunk_offset;
 	buf_t *buf = &conn->read_buf;
 	size_t chunk_size;
 	size_t save_size;
 	size_t overread;
-	//size_t total;
-	//size_t extra;
 	size_t range;
 	char *t;
-	//size_t torecv;
-	//ssize_t bytes_read;
 	static char tmp[HTTP_MAX_CHUNK_STR];
 #ifdef DEBUG
 	int chunk_nr = 0;
 #endif
-
-
-/*
- * Make sure we actually have enough data past
- * EOH to get the size of the first chunk.
- */
 
 	p = HTTP_EOH(buf);
 
@@ -537,6 +472,8 @@ __http_do_chunked_recv(connection_t *conn)
 		fprintf(stderr, "__http_do_chunked_recv: failed to find end of header sentinel\n");
 		return -1;
 	}
+
+	__http_read_until_next_chunk_size(conn, buf, &p);
 
 	while (1)
 	{
@@ -612,8 +549,7 @@ __http_do_chunked_recv(connection_t *conn)
 
 		save_size = chunk_size;
 
-		//SKIP_CRNL(e);
-		e += 2; /* First byte(s) of next chunk could be 0x0d/0x0a */
+		e += 2; /* Skip the \r\n do NOT use SKIP_CRNL(); chunk data could start with these bytes */
 
 		buf_collapse(buf, (off_t)(p - buf->buf_head), (e - p));
 		e = p;
@@ -626,83 +562,18 @@ __http_do_chunked_recv(connection_t *conn)
 		{
 			p = (e + save_size);
 			__http_read_until_next_chunk_size(conn, buf, &p);
-			p -= 2;
-
-#if 0
-			extra = 0;
-			extra = __must_read_extra(p, buf->buf_tail);
-#ifdef DEBUG
-			fprintf(stderr, "%sMUST READ EXTRA %lu BYTES%s\n", COL_ORANGE, extra, COL_END);
-#endif
-			if (!extra)
-				continue;
-			else
-				goto read_extra;
-#endif
 		}
 		else
 		{
 			chunk_size -= overread;
 		}
 
-		//total = 0;
-
-/*
- * Our buffer data could be copied to a new location
- * on the heap with a realloc in buf_extend(). So
- * save the offset of chunk_start from start of buffer.
- * Restore pointer after receiving data.
- */
-		//torecv = chunk_size;
-
 		__read_bytes(conn, chunk_size);
 
 		p = (buf->buf_head + chunk_offset + save_size);
 		__http_read_until_next_chunk_size(conn, buf, &p);
-		p -= 2;
+
 #if 0
-		while (torecv > 0)
-		{
-			if (option_set(OPT_USE_TLS))
-				bytes_read = buf_read_tls(conn->ssl, buf, torecv);
-			else
-				bytes_read = buf_read_socket(conn->sock, buf, torecv);
-
-			if (bytes_read < 0)
-				return -1;
-			else
-			if (!bytes_read)
-				continue;
-			else
-				torecv -= (size_t)bytes_read;
-		}
-#endif
-
-
-		/*
-		 * Read some extra data to get next chunk size.
-		 */
-#if 0
-		read_extra:
-		total = 0;
-		if (!extra)
-			extra = HTTP_MAX_CHUNK_STR;
-		while (1)
-		{
-			if (option_set(OPT_USE_TLS))
-				bytes_read = buf_read_tls(conn->ssl, buf, (extra - total));
-			else
-				bytes_read = buf_read_socket(conn->sock, buf, (extra - total));
-
-			if (bytes_read < 0)
-				return -1;
-			else
-			if (!bytes_read)
-				continue;
-			else
-			{
-				total += (size_t)bytes_read;
-
 /*
  * BS=BUF_START ; CS=CHUNK_START ; CE=CHUNK_END ; b=byte
  *
@@ -722,45 +593,6 @@ __http_do_chunked_recv(connection_t *conn)
  * use SKIP_CRNL to land on the start of the next size string.
  *
  */
-				__next_size = (buf->buf_head + chunk_offset + save_size);
-				SKIP_CRNL(__next_size);
-					
-				if (!memchr(__next_size, '\r', 64))
-					continue;
-				else
-				{
-#ifdef DEBUG
-					if (*(__next_size - 2) != 0x0d)
-						__dump_buf(buf);
-
-					__next_size -= 4;
-					int __i__;
-					for (__i__ = 0; __i__ < 8; ++__i__)
-						fprintf(stderr, "%02hhx ", __next_size[__i__]);
-					fputc(0x0a, stderr);
-					__next_size += 4;
-					SKIP_CRNL(__next_size);
-#endif
-					assert(*__next_size != '\r');
-					assert(*(__next_size - 2) == '\r');
-
-					char *crnl = memchr(__next_size, '\r', 64);
-
-					if (!crnl)
-					{
-						continue;
-					}
-
-					assert(*crnl == 0x0d);
-					assert(__next_size != crnl);
-					assert(crnl > __next_size);
-					break;
-				}
-			}
-		}
-
-		chunk_start = (buf->buf_head + chunk_offset);
-		p = (chunk_start + save_size);
 #endif
 	}
 
