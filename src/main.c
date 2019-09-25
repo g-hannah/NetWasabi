@@ -19,12 +19,16 @@
 #include "utils_url.h"
 #include "webreaper.h"
 
-#define CRAWL_DELAY 3
-#define CRAWL_DEPTH 50
+#define CRAWL_DELAY_DEFAULT 3
+#define MAX_CRAWL_DELAY 30
+#define CRAWL_DEPTH_DEFAULT 50
 #define NR_LINKS_THRESHOLD 500
 #define MAX_TIME_WAIT 8
 #define MAX_FAILS 10
 #define RESET_DELAY 3
+
+int crawl_delay = 0;
+int crawl_depth = 0;
 
 static sigset_t oldset;
 static sigset_t newset;
@@ -67,7 +71,7 @@ char **user_blacklist;
 int USER_BLACKLIST_NR_TOKENS;
 volatile int cache_switch = 0;
 static int nr_reaped = 0;
-static int depth = 0;
+static int current_depth = 0;
 http_link_t *cache1_url_root;
 http_link_t *cache2_url_root;
 
@@ -81,6 +85,8 @@ struct url_types url_types[] =
 	{ "HREF=\'", '\'', 6 },
 	{ "src=\'", '\'', 5 },
 	{ "SRC=\'", '\'', 5 },
+	{ "thumbnail_src\":\"", '"', 16 },
+	{ "src\":\"", '"', 6 },
 	{ "", 0, 0 }
 };
 
@@ -101,8 +107,6 @@ struct url_types url_types[] =
 http_header_t **hh_loop;
 http_link_t **hl_loop;
 struct http_cookie_t **hc_loop;
-
-static int REAP_DEPTH = UINT_MAX; /* default = infinite */
 
 int path_max = 1024;
 
@@ -161,13 +165,16 @@ __noret usage(int exit_status)
 {
 	fprintf(stderr,
 		"webreaper <url> [options]\n\n"
-		"-T/--tls          use a TLS connection\n"
-		"-oH/--req-head    show the request header (\"out header\")\n"
-		"-iH/--res-head    show the response header (\"in header\")\n"
-		"-D/--depth        maximum depth (#pages from which to extract URLs)\n"
-		"-X/--xdomain      follow URLs into other domains\n"
-		"-B/--blacklist    blacklist tokens in URLs\n"
-		"--help/-h         display this information\n");
+		"-T/--tls              use a TLS connection\n"
+		"-oH/--req-head        show the request header (\"out header\")\n"
+		"-iH/--res-head        show the response header (\"in header\")\n"
+		"-D/--depth            maximum crawl-depth\n"
+		"    (each URL cache clear + sibling URL cache (re)fill == 1)\n"
+		"-cD/--crawl-delay     delay (seconds) between each request\n"
+		"    (default is 3 seconds)\n"
+		"-X/--xdomain          follow URLs into other domains\n"
+		"-B/--blacklist        blacklist tokens in URLs\n"
+		"--help/-h             display this information\n");
 
 	exit(exit_status);
 }
@@ -376,7 +383,7 @@ __connection_closed(connection_t *conn)
 
 	if (connection->value[0])
 	{
-		if (strncasecmp("keep-alive", connection->value, connection->vlen))
+		if (!strcasecmp("close", connection->value))
 			rv = 1;
 	}
 
@@ -1044,6 +1051,98 @@ __handle301(connection_t *conn)
 	return 0;
 }
 
+#if 0
+static void
+__check_for_connection_upgrade(connection_t *conn)
+{
+	assert(conn);
+
+	http_header_t *connection = wr_cache_alloc(http_hcache, &connection);
+	http_header_t *keep_alive = wr_cache_alloc(http_hcache, &keep_alive);
+	buf_t *rbuf = &conn->read_buf;
+
+	if (!http_fetch_header(rbuf, "Connection", connection, (off_t)0))
+		goto out_dealloc;
+
+	fprintf(stderr, "%s%s%s\n", COL_LIGHTBLUE, connection->value, COL_END);
+
+	if (!connection->value[0])
+		goto out_dealloc;
+
+	if (!http_fetch_header(rbuf, "Keep-Alive", keep_alive, (off_t)0))
+		goto out_dealloc;
+
+	fprintf(stderr, "%s%s%s\n", COL_LIGHTBLUE, keep_alive->value, COL_END);
+
+	char *p = keep_alive->value;
+	char *e;
+	char *end = keep_alive->value + keep_alive->vlen;
+	static char tmp[16];
+	int old_delay = crawl_delay;
+
+	if (!strncmp("timeout", p, strlen("timeout")))
+	{
+		e = memchr(p, '=', (end - p));
+
+		if (!e)
+			goto out_dealloc;
+
+		p = ++e;
+
+		e = memchr(p, ',', (end - p));
+
+		if (!e)
+			e = memchr(p, ' ', (end - p));
+
+		if (!e)
+			goto out_dealloc;
+
+		strncpy(tmp, p, (e - p));
+		tmp[e - p] = 0;
+
+		int timeout = atoi(tmp);
+
+		assert(timeout > 0);
+
+		if (timeout > MAX_CRAWL_DELAY)
+		{
+			if ((timeout - MAX_CRAWL_DELAY) > MAX_CRAWL_DELAY)
+			{
+				fprintf(stdout, "%s%sServer requested large timeout value: %d seconds! Setting to %d%s\n",
+					COL_RED,
+					ACTION_DONE_STR,
+					timeout,
+					MAX_CRAWL_DELAY,
+					COL_END);
+			}
+
+			crawl_delay = MAX_CRAWL_DELAY;
+		}
+		else
+		{
+			crawl_delay = timeout;
+		}
+	}
+	else
+	{
+		goto out_dealloc;
+	}
+
+	if (crawl_delay != old_delay)
+		fprintf(stdout, "%s%s%s[Crawl-Delay set to %d second%s]\n",
+				COL_ORANGE,
+				STATISTICS_STR,
+				COL_END,
+				crawl_delay,
+				crawl_delay == 1 ? "" : "s");
+
+	out_dealloc:
+	wr_cache_dealloc(http_hcache, (void *)connection, &connection);
+	wr_cache_dealloc(http_hcache, (void *)keep_alive, &keep_alive);
+	return;
+}
+#endif
+
 static int
 __do_request(connection_t *conn)
 {
@@ -1096,18 +1195,12 @@ __do_request(connection_t *conn)
 			goto resend_head;
 			break;
 		case HTTP_OK:
+		case HTTP_METHOD_NOT_ALLOWED:
 			break;
 		default:
 			return status_code;
 	}
 
-	/*
-	 * We only get here if 200 OK.
-	 *
-	 * With a HEAD request, the web server
-	 * terminates the connection since
-	 * only metadata is being requested.
-	 */
 	if (__connection_closed(conn))
 	{
 		fprintf(stdout, "%s%sRemote peer closed connection%s\n", COL_RED, ACTION_DONE_STR, COL_END);
@@ -1116,7 +1209,6 @@ __do_request(connection_t *conn)
 	}
 
 	status_code &= ~status_code;
-
 	status_code = __send_get_request(conn);
 
 	return status_code;
@@ -1297,7 +1389,7 @@ while (1)
 			continue;
 
 		BLOCK_SIGNAL(SIGINT);
-		sleep(CRAWL_DELAY);
+		sleep(crawl_delay);
 		UNBLOCK_SIGNAL(SIGINT);
 
 		__check_host(conn);
@@ -1430,14 +1522,14 @@ while (1)
 		TRAILING_SLASH = 0;
 	} /* for (i = 0; i < nr_links; ++i) */
 
-	++depth;
+	++current_depth;
 
 	if (cache_switch)
 		cache_switch = 0;
 	else
 		cache_switch = 1;
 
-	if (depth >= CRAWL_DEPTH)
+	if (current_depth >= crawl_depth)
 		break;
 } /* while (1) */
 
@@ -1570,7 +1662,18 @@ main(int argc, char *argv[])
 	strcpy(conn.primary_host, conn.host);
 
 	fprintf(stdout, "%s%sReaping site %s%s%s\n", COL_DARKGREY, ACTION_ING_STR, COL_DARKBLUE, conn.full_url, COL_END);
-
+	fprintf(stdout, "%s%s%s[Crawl-Delay=%s%d%s second%s, Crawl-Depth=%s%d%s]\n",
+		COL_ORANGE,
+		STATISTICS_STR,
+		COL_END,
+		COL_LIGHTRED,	
+		crawl_delay,
+		COL_END,
+		crawl_delay == 1 ? "" : "s",
+		COL_LIGHTRED,
+		crawl_depth,
+		COL_END);
+		
 	/*
 	 * Initialises read/write buffers in conn.
 	 */
@@ -1715,7 +1818,7 @@ main(int argc, char *argv[])
 			goto fail_disconnect;
 	}
 
-	fprintf(stdout, "%s%s%s[Reaped %s%d%s pages: depth=%s%d%s]\n",
+	fprintf(stdout, "%s%s%s[Reaped %s%d%s pages: crawl_depth=%s%d%s]\n",
 		COL_DARKORANGE,
 		STATISTICS_STR,
 		COL_END,
@@ -1723,7 +1826,7 @@ main(int argc, char *argv[])
 		nr_reaped,
 		COL_END,
 		COL_LIGHTRED,
-		depth,
+		current_depth,
 		COL_END);
 
 	out_disconnect:
@@ -1800,15 +1903,31 @@ get_opts(int argc, char *argv[])
 		{
 			++i;
 
-			if (i == argc)
+			if (i == argc || argv[i][0] == '-')
 			{
 				fprintf(stderr, "-D/--depth requires an argument\n");
 				usage(EXIT_FAILURE);
 			}
 
-			REAP_DEPTH = atoi(argv[i]);
-			assert(REAP_DEPTH > 0);
-			assert(REAP_DEPTH < 0xffffff);
+			crawl_depth = atoi(argv[i]);
+			assert(crawl_depth > 0);
+			assert(crawl_depth <= INT_MAX);
+		}
+		else
+		if (!strcmp("--crawl-delay", argv[i])
+		|| !strcmp("-cD", argv[i]))
+		{
+			++i;
+
+			if (i == argc || argv[i][0] == '-')
+			{
+				fprintf(stderr, "-cD/--crawl-delay requires an argument\n");
+				usage(EXIT_FAILURE);
+			}
+
+			crawl_delay = atoi(argv[i]);
+			assert(crawl_delay > 0);
+			assert(crawl_delay < MAX_CRAWL_DELAY);
 		}
 		else
 		if (!strcmp("--blacklist", argv[i])
@@ -1876,6 +1995,12 @@ get_opts(int argc, char *argv[])
 			continue;
 		}
 	}
+
+	if (!crawl_delay)
+		crawl_delay = CRAWL_DELAY_DEFAULT;
+
+	if (!crawl_depth)
+		crawl_depth = CRAWL_DEPTH_DEFAULT;
 
 	return 0;
 }
