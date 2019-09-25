@@ -125,6 +125,13 @@ __ctor __wr_init(void)
 	httplen = strlen("http://");
 	httpslen = strlen("https://");
 
+/*
+ * For calling fcntl() once only in buf_read_socket/tls()
+ * to set O_NONBLOCK flag. On a reconnect, reset to zero.
+ */
+	SET_SOCK_FLAG_ONCE = 0;
+	SET_SSL_SOCK_FLAG_ONCE = 0;
+
 	return;
 }
 
@@ -927,7 +934,7 @@ __handle301(connection_t *conn)
 	buf_destroy(&tmp_local);
 	buf_destroy(&tmp_full);
 
-	fprintf(stdout, "%sRedirecting to %s%s%s\n", ACTION_ING_STR, COL_ORANGE, location->value, COL_END);
+	fprintf(stdout, "%sRedirecting to %s\n", ACTION_ING_STR, location->value);
 
 	assert(location->vlen < HTTP_URL_MAX);
 
@@ -1169,8 +1176,15 @@ while (1)
 		link = (http_link_t *)cachep->cache;
 		nr_links = wr_cache_nr_used(cachep);
 
-		fprintf(stdout, "%s--- Draining %d URLs in cache 1 ; filling cache 2%s\n",
-			COL_DARKBLUE, nr_links, COL_END);
+		fprintf(stdout, "%s%sDraining %s%d%s %sURLs in %sCache 1%s\n",
+			COL_DARKBLUE,
+			ACTION_ING_STR,
+			COL_DARKRED,
+			nr_links,
+			COL_END,
+			COL_DARKBLUE,
+			COL_PINK,
+			COL_END);
 
 #ifdef DEBUG
 		fprintf(stderr, "Deconstructing binary tree in cache 2\n");
@@ -1191,8 +1205,15 @@ while (1)
 		link = (http_link_t *)cachep2->cache;
 		nr_links = wr_cache_nr_used(cachep2);
 
-		fprintf(stdout, "%s--- Draining %d URLs in cache 2 ; filling cache 1%s\n",
-			COL_DARKBLUE, nr_links, COL_END);
+		fprintf(stdout, "%s%sDraining %s%d%s %sURLs in %sCache 2%s\n",
+			COL_DARKBLUE,
+			ACTION_ING_STR,
+			COL_DARKRED,
+			nr_links,
+			COL_END,
+			COL_DARKBLUE,
+			COL_PINK,
+			COL_END);
 
 #ifdef DEBUG
 		fprintf(stderr, "Deconstructing binary tree in cache 1\n");
@@ -1246,7 +1267,12 @@ while (1)
 			continue;
 		}
 
-		fprintf(stdout, "===> %s%s%s <===\n", COL_ORANGE, conn->page, COL_END);
+		fprintf(stdout, "\n%s===> %s%s %s<===%s\n\n",
+				COL_RED,
+				COL_LIGHTGREY,
+				conn->page,
+				COL_RED,
+				COL_END);
 
 		status_code = __do_request(conn);
 
@@ -1308,9 +1334,7 @@ while (1)
 				goto next;
 			case FL_OPERATION_TIMEOUT:
 
-				fprintf(stdout, "%s\n", rbuf->buf_head);
 				buf_clear(rbuf);
-				fprintf(stdout, "%s\n", rbuf->buf_head);
 
 				if (!conn->host[0])
 					strcpy(conn->host, conn->primary_host);
@@ -1340,7 +1364,13 @@ while (1)
 				}
 
 				if (nr_links_sibling >= NR_LINKS_THRESHOLD)
+				{
 					fill = 0;
+					fprintf(stdout, "%s%sURL threshold reached%s\n",
+					COL_DARKORANGE,
+					ACTION_DONE_STR,
+					COL_END);
+				}
 			}
 		}
 
@@ -1491,9 +1521,7 @@ main(int argc, char *argv[])
 
 	strcpy(conn.primary_host, conn.host);
 
-	fprintf(stdout,
-		"%sReaping site %s%s%s\n",
-		ACTION_ING_STR, COL_ORANGE, conn.full_url, COL_END);
+	fprintf(stdout, "%s%sReaping site %s%s%s\n", COL_DARKGREY, ACTION_ING_STR, COL_DARKBLUE, conn.full_url, COL_END);
 
 	/*
 	 * Initialises read/write buffers in conn.
@@ -1556,7 +1584,12 @@ main(int argc, char *argv[])
 	buf_clear(rbuf);
 	buf_clear(wbuf);
 
-	printf(">>> %s%s%s <<<\n", COL_ORANGE, conn.page, COL_END);
+	printf("\n%s===> %s%s %s<===%s\n\n",
+			COL_RED,
+			COL_LIGHTGREY,
+			conn.page,
+			COL_RED,
+			COL_END);
 
 	resend:
 	status_code = __do_request(&conn);
