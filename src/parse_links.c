@@ -11,7 +11,7 @@
 #include "webreaper.h"
 
 static int nr_already = 0;
-static int nr_sibling = 0;
+static int nr_twins = 0;
 static int nr_dups = 0;
 static int nr_urls_call = 0;
 static int nr_urls_total = 0;
@@ -73,12 +73,19 @@ __url_acceptable(connection_t *conn, wr_cache_t *e_cache, wr_cache_t *f_cache, b
 		cmp = strcmp(url->buf_head, nptr->url);
 
 		if (url->buf_head[0] && nptr->url[0] && !cmp)
+		{
+			++nr_twins;
 			return 0;
+		}
 		else
 		if (cmp < 0)
+		{
 			nptr = nptr->left;
+		}
 		else
+		{
 			nptr = nptr->right;
+		}
 
 		if (!nptr)
 			break;
@@ -372,7 +379,7 @@ parse_links(wr_cache_t *e_cache, wr_cache_t *f_cache, http_link_t **tree_root, c
 	savep = buf->buf_head;
 
 	nr_already = 0;
-	nr_sibling = 0;
+	nr_twins = 0;
 	nr_dups = 0;
 	nr_urls_call = 0;
 	nr_urls_total = wr_cache_nr_used(e_cache);
@@ -459,7 +466,7 @@ parse_links(wr_cache_t *e_cache, wr_cache_t *f_cache, http_link_t **tree_root, c
 		nr_already,
 		COL_END,
 		COL_LIGHTRED,
-		nr_sibling,
+		nr_twins,
 		COL_END);
 
 	return 0;
