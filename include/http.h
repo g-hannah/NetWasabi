@@ -19,7 +19,10 @@
 #define HTTP_BAD_GATEWAY 502u
 #define HTTP_SERVICE_UNAV 503u
 #define HTTP_GATEWAY_TIMEOUT 504u
-#define HTTP_ALREADY_EXISTS 0xdeadbeefu
+
+/* Custom status codes */
+#define HTTP_ALREADY_EXISTS 702u
+#define HTTP_IS_XDOMAIN 703u
 
 #define HTTP_URL_MAX 768
 #define HTTP_COOKIE_MAX 2048 /* Surely this is more than enough */
