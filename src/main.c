@@ -908,6 +908,7 @@ __handle301(connection_t *conn)
 	buf_t tmp_full;
 	buf_t tmp_local;
 	int fd = -1;
+	int xdomain = 0;
 	char *p;
 	char *q;
 
@@ -975,6 +976,17 @@ __handle301(connection_t *conn)
 		}
 		else
 		{
+			buf_init(&tmp_full, HTTP_URL_MAX);
+			buf_append(&tmp_full, location->value);
+
+			xdomain = is_xdomain(conn, &tmp_full);
+			buf_destroy(&tmp_full);
+
+			if (xdomain && !option_set(OPT_ALLOW_XDOMAIN))
+			{
+				return HTTP_IS_XDOMAIN;
+			}
+
 			http_parse_host(location->value, conn->host);
 			http_parse_page(conn->full_url, conn->page);
 			strncpy(conn->full_url, location->value, location->vlen);
@@ -1003,6 +1015,7 @@ __do_request(connection_t *conn)
 	assert(conn);
 
 	int status_code = 0;
+	int rv;
 
 	if (local_archive_exists(conn->full_url))
 		return HTTP_ALREADY_EXISTS;
@@ -1031,7 +1044,13 @@ __do_request(connection_t *conn)
 	{
 		case HTTP_FOUND:
 		case HTTP_MOVED_PERMANENTLY:
-			if (__handle301(conn) < 0)
+			fprintf(stdout, "%s%s (%s)\n", ACTION_ING_STR, http_status_code_string(status_code), conn->full_url);
+			rv = __handle301(conn);
+
+			if (HTTP_IS_XDOMAIN == (unsigned int)rv)
+				return rv;
+			else
+			if (rv < 0)
 				return -1;
 /*
  * Check here too because 301 may send different
@@ -1276,12 +1295,15 @@ while (1)
 
 		status_code = __do_request(conn);
 
+		if (HTTP_IS_XDOMAIN != (unsigned int)status_code && status_code < 0)
+			goto fail;
+
 		++(link->nr_requests);
 
 		if (FL_OPERATION_TIMEOUT != status_code)
-			fprintf(stdout, "%s%s (%s)\n", ACTION_ING_STR, http_status_code_string(status_code), link->url);
+			fprintf(stdout, "%s%s (%s)\n", ACTION_ING_STR, http_status_code_string((unsigned int)status_code), link->url);
 
-		switch(status_code)
+		switch((unsigned int)status_code)
 		{
 			case HTTP_OK:
 			case HTTP_NOT_FOUND: /* don't want to keep requesting the link and getting 404, so just archive it */
@@ -1325,6 +1347,7 @@ while (1)
 
 					goto next;
 					break;
+			case HTTP_IS_XDOMAIN:
 			case HTTP_ALREADY_EXISTS:
 			/*
 			 * Ignore 302 Found because it is used a lot for obtaining a random
