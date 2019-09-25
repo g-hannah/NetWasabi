@@ -451,7 +451,7 @@ parse_links(wr_cache_t *e_cache, wr_cache_t *f_cache, http_link_t **tree_root, c
 	buf_destroy(&full_url);
 	buf_destroy(&path);
 
-	fprintf(stdout, "%s%s%s[%sCache %d%s added %d URLs (t:%s%d%s) @@@ Ignored %s%d%s dups, %s%d%s archived, %s%d%s twins]\n",
+	fprintf(stdout, "%s%s%s[%sCache %d%s added %d URL%s (t:%s%d%s) @@@ Ignored %s%d%s dup%s, %s%d%s archived, %s%d%s twin%s]\n",
 		COL_DARKORANGE,
 		STATISTICS_STR,
 		COL_END,
@@ -459,18 +459,21 @@ parse_links(wr_cache_t *e_cache, wr_cache_t *f_cache, http_link_t **tree_root, c
 		e_cache == http_lcache ? 1 : 2,
 		COL_END,
 		nr_urls_call,
+		nr_urls_call == 1 ? "" : "s",
 		COL_PINK,
 		wr_cache_nr_used(e_cache),
 		COL_END,
 		COL_LIGHTRED,
 		nr_dups,
 		COL_END,
+		nr_dups == 1 ? "" : "s",
 		COL_LIGHTRED,
 		nr_already,
 		COL_END,
 		COL_LIGHTRED,
 		nr_twins,
-		COL_END);
+		COL_END,
+		nr_twins == 1 ? "" : "s");
 
 	return 0;
 
