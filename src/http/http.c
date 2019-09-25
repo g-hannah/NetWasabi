@@ -782,50 +782,72 @@ http_status_code_int(buf_t *buf)
 const char *
 http_status_code_string(int code)
 {
-	switch(code)
+	static char code_string[64];
+
+	switch((unsigned int)code)
 	{
 		case HTTP_OK:
-			return "200 OK";
+			sprintf(code_string, "%s%u OK%s", COL_GREEN, HTTP_OK, COL_END);
+			//return "200 OK";
 			break;
 		case HTTP_MOVED_PERMANENTLY:
-			return "301 Moved permanently";
+			sprintf(code_string, "%s%u Moved Permanently%s", COL_ORANGE, HTTP_MOVED_PERMANENTLY, COL_END);
+			//return "301 Moved permanently";
 			break;
 		case HTTP_FOUND:
-			return "302 Found";
+			sprintf(code_string, "%s%u Found%s", COL_ORANGE, HTTP_FOUND, COL_END);
+			//return "302 Found";
 			break;
 		case HTTP_BAD_REQUEST:
-			return "400 Bad request";
+			sprintf(code_string, "%s%u Bad Request%s", COL_RED, HTTP_BAD_REQUEST, COL_END);
+			//return "400 Bad request";
 			break;
 		case HTTP_UNAUTHORISED:
-			return "401 Unauthorised";
+			sprintf(code_string, "%s%u Unauthorised%s", COL_RED, HTTP_UNAUTHORISED, COL_END);
+			//return "401 Unauthorised";
 			break;
 		case HTTP_FORBIDDEN:
-			return "403 Forbidden";
+			sprintf(code_string, "%s%u Forbidden%s", COL_RED, HTTP_FORBIDDEN, COL_END);
+			return code_string;
+			//return "403 Forbidden";
 			break;
 		case HTTP_NOT_FOUND:
-			return "404 Not found";
+			sprintf(code_string, "%s%u Not Found%s", COL_RED, HTTP_NOT_FOUND, COL_END);
+			//return "404 Not found";
 			break;
 		case HTTP_REQUEST_TIMEOUT:
-			return "408 Request timeout";
+			sprintf(code_string, "%s%u Request Timeout%s", COL_RED, HTTP_REQUEST_TIMEOUT, COL_END);
+			//return "408 Request timeout";
 			break;
 		case HTTP_INTERNAL_ERROR:
-			return "500 Internal server error";
+			sprintf(code_string, "%s%u Internal Server Error%s", COL_RED, HTTP_INTERNAL_ERROR, COL_END);
+			//return "500 Internal server error";
 			break;
 		case HTTP_BAD_GATEWAY:
-			return "502 Bad gateway";
+			sprintf(code_string, "%s%u Bad Gateway%s", COL_RED, HTTP_BAD_GATEWAY, COL_END);
+			//return "502 Bad gateway";
 			break;
 		case HTTP_SERVICE_UNAV:
-			return "503 Service unavailable";
+			sprintf(code_string, "%s%u Service Unavailable%s", COL_RED, HTTP_SERVICE_UNAV, COL_END);
+			//return "503 Service unavailable";
 			break;
 		case HTTP_GATEWAY_TIMEOUT:
-			return "504 Gateway timeout";
+			sprintf(code_string, "%s%u Gateway Timeout%s", COL_RED, HTTP_GATEWAY_TIMEOUT, COL_END);
+			//return "504 Gateway timeout";
 			break;
 		case HTTP_ALREADY_EXISTS:
-			return "0xdeadbeef Local copy already exists";
+			sprintf(code_string, "%s%u Local Found%s", COL_DARKGREEN, HTTP_ALREADY_EXISTS, COL_END);
+			//return "0xdeadbeef Local copy already exists";
+			break;
+		case HTTP_IS_XDOMAIN:
+			sprintf(code_string, "%s%u Is XDomain%s", COL_RED, HTTP_IS_XDOMAIN, COL_END);
 			break;
 		default:
-			return "Unknown http status code";
+			sprintf(code_string, "%sUnknown HTTP Status Code (%u)%s", COL_RED, code, COL_END);
+			//return "Unknown http status code";
 	}
+
+	return code_string;
 }
 
 ssize_t
