@@ -64,10 +64,27 @@ __url_acceptable(connection_t *conn, wr_cache_t *e_cache, wr_cache_t *f_cache, b
 			return 0;
 	}
 
-	int nr_urls = wr_cache_nr_used(f_cache);
-	int i;
-	http_link_t *link = (http_link_t *)f_cache->cache;
+	//int nr_urls = wr_cache_nr_used(f_cache);
+	int cmp = 0;
+	http_link_t *nptr = f_cache == http_lcache ? cache1_url_root : cache2_url_root;
 
+	while (nptr)
+	{
+		cmp = strcmp(url->buf_head, nptr->url);
+
+		if (url->buf_head[0] && nptr->url[0] && !cmp)
+			return 0;
+		else
+		if (cmp < 0)
+			nptr = nptr->left;
+		else
+			nptr = nptr->right;
+
+		if (!nptr)
+			break;
+	}
+
+#if 0
 	for (i = 0; i < nr_urls; ++i)
 	{
 		while (!wr_cache_obj_used(f_cache, (void *)link))
@@ -81,6 +98,7 @@ __url_acceptable(connection_t *conn, wr_cache_t *e_cache, wr_cache_t *f_cache, b
 
 		++link;
 	}
+#endif
 
 	return 1;
 }
@@ -426,15 +444,21 @@ parse_links(wr_cache_t *e_cache, wr_cache_t *f_cache, http_link_t **tree_root, c
 	buf_destroy(&full_url);
 	buf_destroy(&path);
 
-	fprintf(stdout, "%s[Cache %d] added %d URLs (t:%s%d%s) @@@ Ignored %d dups, %d archived, %d twins)%s\n",
-		COL_DARKBLUE,
+	fprintf(stdout, "[%sCache %d%s added %d URLs (t:%s%d%s) @@@ Ignored %s%d%s dups, %s%d%s archived, %s%d%s twins]\n",
+		COL_LIGHTBLUE,
 		e_cache == http_lcache ? 1 : 2,
+		COL_END,
 		nr_urls_call,
-		COL_DARKRED,
+		COL_DARKGREEN,
 		wr_cache_nr_used(e_cache),
 		COL_END,
+		COL_LIGHTRED,
 		nr_dups,
+		COL_END,
+		COL_LIGHTRED,
 		nr_already,
+		COL_END,
+		COL_LIGHTRED,
 		nr_sibling,
 		COL_END);
 
