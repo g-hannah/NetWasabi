@@ -787,7 +787,7 @@ http_status_code_string(int code)
 	switch((unsigned int)code)
 	{
 		case HTTP_OK:
-			sprintf(code_string, "%s%u OK%s", COL_GREEN, HTTP_OK, COL_END);
+			sprintf(code_string, "%s%u OK%s", COL_DARKGREEN, HTTP_OK, COL_END);
 			//return "200 OK";
 			break;
 		case HTTP_MOVED_PERMANENTLY:
