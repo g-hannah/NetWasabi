@@ -73,6 +73,23 @@ encode_url(buf_t *url)
 		e = p;
 	}
 
+	e = url->buf_head;
+	tail = url->buf_tail;
+
+	while (1)
+	{
+		p = strstr(e, "\\u0026");
+
+		if (!p || p >= tail)
+			break;
+
+		*p++ = '&';
+		e = (p + 5);
+		buf_collapse(url, (off_t)(p - url->buf_head), (e - p));
+		tail = url->buf_tail;
+		e = p;
+	}
+
 	return;
 }
 
