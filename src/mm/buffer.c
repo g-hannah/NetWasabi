@@ -17,9 +17,6 @@
 #include "malloc.h"
 #include "webreaper.h"
 
-static int SET_SOCK_FLAG_ONCE = 0;
-static int SET_SSL_SOCK_FLAG_ONCE = 0;
-
 #if 0
 static sigjmp_buf __TIMEOUT__;
 static struct sigaction siga_old;

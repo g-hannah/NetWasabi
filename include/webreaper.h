@@ -9,11 +9,19 @@
 
 #define COL_ORANGE	"\x1b[38;5;208m"
 #define COL_RED			"\x1b[38;5;9m"
+#define COL_BLUE		"\x1b[38;5;12m"
+#define COL_PINK		"\x1b[38;5;13m"
+#define COL_GREEN		"\x1b[38;5;10m"
+#define COL_BROWN		"\x1b[38;5;130m"
 #define COL_LIGHTRED "\x1b[38;5;204m"
+#define COL_LIGHTBLUE "\x1b[38;5;27m"
+#define COL_LIGHTGREEN "\x1b[38;5;46m"
+#define COL_LIGHTGREY "\x1b[38;5;250m"
 #define COL_DARKRED "\x1b[38;5;160m"
-#define COL_GREEN		"\x1b[38;5;40m"
-#define COL_DARKGREY "\x1b[38;5;239m"
+#define COL_DARKGREY "\x1b[38;5;240m"
 #define COL_DARKBLUE "\x1b[38;5;20m"
+#define COL_DARKORANGE "\x1b[38;5;202m"
+#define COL_DARKGREEN "\x1b[38;5;28m"
 #define COL_END			"\x1b[m"
 
 #define clear_struct(s) memset((s), 0, sizeof(*(s)))
@@ -106,6 +114,9 @@ int TRAILING_SLASH;
 int path_max;
 char **user_blacklist;
 int USER_BLACKLIST_NR_TOKENS;
+
+int SET_SOCK_FLAG_ONCE;
+int SET_SSL_SOCK_FLAG_ONCE;
 
 #define TOKEN_MAX 64
 
