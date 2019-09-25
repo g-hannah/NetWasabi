@@ -127,6 +127,7 @@ int SET_SSL_SOCK_FLAG_ONCE;
 #define ACTION_ING_STR ">>> "
 #define ACTION_DONE_STR "@@@ "
 #define ATTENTION_STR "!!! "
+#define STATISTICS_STR "+++ "
 
 #define FL_RESET 0x1
 #define FL_OPERATION_TIMEOUT 0x2
