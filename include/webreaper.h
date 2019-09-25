@@ -107,7 +107,7 @@ struct url_types
 	size_t len;
 };
 
-#define NR_URL_TYPES 9
+#define NR_URL_TYPES 11
 struct url_types url_types[NR_URL_TYPES];
 extern uint32_t runtime_options;
 int TRAILING_SLASH;
