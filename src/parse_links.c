@@ -451,12 +451,15 @@ parse_links(wr_cache_t *e_cache, wr_cache_t *f_cache, http_link_t **tree_root, c
 	buf_destroy(&full_url);
 	buf_destroy(&path);
 
-	fprintf(stdout, "[%sCache %d%s added %d URLs (t:%s%d%s) @@@ Ignored %s%d%s dups, %s%d%s archived, %s%d%s twins]\n",
+	fprintf(stdout, "%s%s%s[%sCache %d%s added %d URLs (t:%s%d%s) @@@ Ignored %s%d%s dups, %s%d%s archived, %s%d%s twins]\n",
+		COL_DARKORANGE,
+		STATISTICS_STR,
+		COL_END,
 		COL_LIGHTBLUE,
 		e_cache == http_lcache ? 1 : 2,
 		COL_END,
 		nr_urls_call,
-		COL_DARKGREEN,
+		COL_PINK,
 		wr_cache_nr_used(e_cache),
 		COL_END,
 		COL_LIGHTRED,
