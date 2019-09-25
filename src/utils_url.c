@@ -53,6 +53,27 @@ encode_url(buf_t *url)
 			e = (p += 3);
 		}
 	}
+
+	/* Remove \"&amp;" */
+
+	e = url->buf_head;
+	tail = url->buf_tail;
+
+	while (1)
+	{
+		p = strstr(e, "&amp;");
+
+		if (!p || p >= tail)
+			break;
+
+		++p;
+		e = (p + 4);
+		buf_collapse(url, (off_t)(p - url->buf_head), (e - p));
+		tail = url->buf_tail;
+		e = p;
+	}
+
+	return;
 }
 
 /**
@@ -105,6 +126,7 @@ make_full_url(connection_t *conn, buf_t *in, buf_t *out)
 		if (*(out->buf_tail - 1) == '/')
 			buf_snip(out, (size_t)1);
 
+		encode_url(out);
 		return 0;
 	}
 
@@ -172,7 +194,6 @@ make_full_url(connection_t *conn, buf_t *in, buf_t *out)
 	}
 
 	encode_url(out);
-
 	return 0;
 }
 
@@ -283,16 +304,59 @@ local_archive_exists(char *link)
 		return 0;
 }
 
+static
+char *__last_dot(char *url)
+{
+	size_t url_len = strlen(url);
+	char *e;
+	char *p;
+	char *end = url + url_len;
+
+	p = url;
+
+	while (1)
+	{
+		e = memchr(p, '.', (end - p));
+
+		if (!e)
+			break;
+
+		p = ++e;
+	}
+
+	if (p != url)
+		return --p;
+	else
+		return NULL;
+}
+
 int
 has_extension(char *page)
 {
 	assert(page);
 
 	size_t page_len = strlen(page);
+	char *dot;
+	char *end = page + page_len;
 
-	if (memchr(page, '.', page_len))
-		return 1;
-	else
+	dot = __last_dot(page);
+
+	if (!dot)
 		return 0;
+
+/*
+ * We want to save files ending in .html; we
+ * replace .php, .asp, etc, with .html.
+ * But some can end up having a name like
+ * <filename>.html?param=value&param2=value2
+ * So we're really testing if the last thing
+ * in the name is the extension, not whether there
+ * is one in there somewhere.
+ */
+	if (memchr(dot, '/', (end - dot))
+	|| memchr(dot, '?', (end - dot)))
+		return 0;
+	else
+		return 1;
 }
 
