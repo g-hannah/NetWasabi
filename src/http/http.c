@@ -815,6 +815,9 @@ http_status_code_string(int code)
 			sprintf(code_string, "%s%u Not Found%s", COL_RED, HTTP_NOT_FOUND, COL_END);
 			//return "404 Not found";
 			break;
+		case HTTP_METHOD_NOT_ALLOWED:
+			sprintf(code_string, "%s%u Method Not Allowed%s", COL_RED, HTTP_METHOD_NOT_ALLOWED, COL_END);
+			break;
 		case HTTP_REQUEST_TIMEOUT:
 			sprintf(code_string, "%s%u Request Timeout%s", COL_RED, HTTP_REQUEST_TIMEOUT, COL_END);
 			//return "408 Request timeout";

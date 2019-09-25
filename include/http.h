@@ -14,6 +14,7 @@
 #define HTTP_UNAUTHORISED 401u
 #define HTTP_FORBIDDEN 403u
 #define HTTP_NOT_FOUND 404u
+#define HTTP_METHOD_NOT_ALLOWED 405u
 #define HTTP_REQUEST_TIMEOUT 408u
 #define HTTP_INTERNAL_ERROR 500u
 #define HTTP_BAD_GATEWAY 502u
@@ -54,12 +55,16 @@ do {\
 	else\
 	{\
 		(PTR) = (URL);\
+		if (!strncmp("//", (PTR), 2))\
+		{\
+			while ((*PTR) == '/')\
+				++(PTR);\
+		}\
 	}\
-	while ((*PTR) == '/')\
-		++(PTR);\
 	char *____s_p = (PTR);\
 	char *____e_p = ((URL) + strlen((URL)));\
-	(PTR) = memchr(____s_p, '/', (____e_p - ____s_p));\
+	if (*____s_p != '/')\
+		(PTR) = memchr(____s_p, '/', (____e_p - ____s_p));\
 } while (0)
 
 #define HTTP_EOH(BUF)\
