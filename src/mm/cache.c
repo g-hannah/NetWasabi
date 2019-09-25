@@ -429,6 +429,12 @@ wr_cache_dealloc(wr_cache_t *cachep, void *slot, void *ptr_addr)
 	if (ptr_addr)
 	{
 		WR_CACHE_REMOVE_PTR(cachep, ptr_addr);
+		if (cachep->nr_assigned >= nr_assigned)
+		{
+			fprintf(stderr, "cache \"%s\"; nr_assigned before=%d ; nr_assigned now=%d\n(cache capacity=%d)\n",
+				cachep->name, nr_assigned, cachep->nr_assigned,
+				cachep->capacity);
+		}
 		assert(cachep->nr_assigned < nr_assigned);
 	}
 
