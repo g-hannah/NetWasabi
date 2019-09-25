@@ -238,6 +238,9 @@ reconnect(connection_t *conn)
 		SSL_set_connect_state(conn->ssl); /* Set as client */
 	}
 
+	SET_SOCK_FLAG_ONCE = 0;
+	SET_SSL_SOCK_FLAG_ONCE = 0;
+
 	freeaddrinfo(ainf);
 	return 0;
 
