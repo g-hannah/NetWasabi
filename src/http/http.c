@@ -318,10 +318,13 @@ __http_read_until_eoh(connection_t *conn, char **p)
 				break;
 			default:
 				*p = strstr(buf->buf_head, HTTP_EOH_SENTINEL);
+				//fprintf(stderr, "*p == %p\n", *p);
 				if (*p)
-					break;
+					goto out;
 		}
 	}
+
+	out:
 	alarm(0);
 
 	assert(!strncmp(HTTP_EOH_SENTINEL, *p, strlen(HTTP_EOH_SENTINEL)));
