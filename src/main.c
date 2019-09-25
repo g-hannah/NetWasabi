@@ -984,6 +984,7 @@ __handle301(connection_t *conn)
 
 			if (xdomain && !option_set(OPT_ALLOW_XDOMAIN))
 			{
+				wr_cache_dealloc(http_hcache, (void *)location, &location);
 				return HTTP_IS_XDOMAIN;
 			}
 
@@ -1195,16 +1196,6 @@ while (1)
 		link = (http_link_t *)cachep->cache;
 		nr_links = wr_cache_nr_used(cachep);
 
-		fprintf(stdout, "%s%sDraining %s%d%s %sURLs in %sCache 1%s\n",
-			COL_DARKBLUE,
-			ACTION_ING_STR,
-			COL_DARKRED,
-			nr_links,
-			COL_END,
-			COL_DARKBLUE,
-			COL_PINK,
-			COL_END);
-
 #ifdef DEBUG
 		fprintf(stderr, "Deconstructing binary tree in cache 2\n");
 #endif
@@ -1224,16 +1215,6 @@ while (1)
 		link = (http_link_t *)cachep2->cache;
 		nr_links = wr_cache_nr_used(cachep2);
 
-		fprintf(stdout, "%s%sDraining %s%d%s %sURLs in %sCache 2%s\n",
-			COL_DARKBLUE,
-			ACTION_ING_STR,
-			COL_DARKRED,
-			nr_links,
-			COL_END,
-			COL_DARKBLUE,
-			COL_PINK,
-			COL_END);
-
 #ifdef DEBUG
 		fprintf(stderr, "Deconstructing binary tree in cache 1\n");
 #endif
@@ -1250,6 +1231,15 @@ while (1)
 
 	if (!nr_links)
 		break;
+
+	fprintf(stdout, "%s%sDraining %s%d %sURLs in Cache %d%s\n",
+		COL_DARKGREY,
+		ACTION_ING_STR,
+		COL_DARKRED,
+		nr_links,
+		COL_DARKGREY,
+		!cache_switch ? 1 : 2,
+		COL_END);
 
 	fill = 1;
 
@@ -1403,7 +1393,7 @@ while (1)
 		next:
 		++link;
 		TRAILING_SLASH = 0;
-	}
+	} /* for (i = 0; i < nr_links; ++i) */
 
 	++depth;
 
@@ -1414,7 +1404,7 @@ while (1)
 
 	if (depth >= CRAWL_DEPTH)
 		break;
-}
+} /* while (1) */
 
 	return 0;
 
@@ -1689,7 +1679,16 @@ main(int argc, char *argv[])
 			goto fail_disconnect;
 	}
 
-	fprintf(stdout, "%sFinished reaping %d total pages (depth=%d)\n", ACTION_DONE_STR, nr_reaped, depth);
+	fprintf(stdout, "%s%s%s[Reaped %s%d%s pages: depth=%s%d%s]\n",
+		COL_DARKORANGE,
+		STATISTICS_STR,
+		COL_END,
+		COL_LIGHTRED,
+		nr_reaped,
+		COL_END,
+		COL_LIGHTRED,
+		depth,
+		COL_END);
 
 	out_disconnect:
 	close_connection(&conn);
