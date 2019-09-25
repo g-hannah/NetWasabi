@@ -911,29 +911,63 @@ __handle301(connection_t *conn)
 	int xdomain = 0;
 	char *p;
 	char *q;
+	char *new_page_end;
+	char *old_page_end;
+	char *new_page_start;
+	size_t old_page_len = strlen(conn->page);
+	int archive_redirected = 0;
 
 	//fprintf(stderr, "allocating header obj LOCATION @ %p\n", &location);
 
 	location = (http_header_t *)wr_cache_alloc(http_hcache, &location);
 	http_fetch_header(&conn->read_buf, "Location", location, (off_t)0);
 
-	buf_init(&tmp_full, HTTP_URL_MAX);
-	buf_init(&tmp_local, path_max);
+/*
+ * The redirect may simply be that the server wants
+ * the page with a trailing slash. In that case, we
+ * don't want to archive the redirected page to avoid
+ * asking for it in the future because we won't be
+ * able to archive the actual page. So compare the
+ * Location header value with our page.
+ */
+	old_page_end = conn->page + old_page_len;
+
+	if ((*old_page_end - 1) == '/')
+	{
+		--old_page_end;
+		--old_page_len;
+	}
+
+	new_page_end = location->value + location->vlen;
+
+	if ((*new_page_end - 1) == '/')
+		--new_page_end;
+
+	HTTP_SKIP_HOST_PART(new_page_start, location->value);
+
+	if (strncmp(new_page_start, conn->page, old_page_len))
+		archive_redirected = 1;
 
 /*
  * Create the file locally anyway in order to avoid
  * sending requests to the webserver for these same
  * URLs that get redirected elsewhere.
  */
-	buf_append(&tmp_full, conn->full_url);
-	make_local_url(conn, &tmp_full, &tmp_local);
-	buf_collapse(&tmp_local, (off_t)0, strlen("file://"));
-	fd = open(tmp_local.buf_head, O_RDWR|O_CREAT|O_TRUNC, S_IRUSR|S_IWUSR);
-	close(fd);
-	fd = -1;
+	if (archive_redirected)
+	{
+		buf_init(&tmp_full, HTTP_URL_MAX);
+		buf_init(&tmp_local, path_max);
 
-	buf_destroy(&tmp_local);
-	buf_destroy(&tmp_full);
+		buf_append(&tmp_full, conn->full_url);
+		make_local_url(conn, &tmp_full, &tmp_local);
+		buf_collapse(&tmp_local, (off_t)0, strlen("file://"));
+		fd = open(tmp_local.buf_head, O_RDWR|O_CREAT|O_TRUNC, S_IRUSR|S_IWUSR);
+		close(fd);
+		fd = -1;
+
+		buf_destroy(&tmp_local);
+		buf_destroy(&tmp_full);
+	}
 
 	fprintf(stdout, "%sRedirecting to %s\n", ACTION_ING_STR, location->value);
 
@@ -1344,6 +1378,7 @@ while (1)
 			 * link, for example a random wiki article (Special:Random).
 			 */
 			case HTTP_FOUND:
+			case HTTP_METHOD_NOT_ALLOWED:
 				goto next;
 			case FL_OPERATION_TIMEOUT:
 
@@ -1626,6 +1661,7 @@ main(int argc, char *argv[])
 			__show_request_header(wbuf);
 			break;
 		case HTTP_FORBIDDEN:
+		case HTTP_METHOD_NOT_ALLOWED:
 		case HTTP_GATEWAY_TIMEOUT:
 		case HTTP_BAD_GATEWAY:
 		case HTTP_INTERNAL_ERROR:
