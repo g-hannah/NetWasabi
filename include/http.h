@@ -10,6 +10,7 @@
 #define HTTP_OK 200u
 #define HTTP_MOVED_PERMANENTLY 301u
 #define HTTP_FOUND 302u
+#define HTTP_SEE_OTHER 303u
 #define HTTP_BAD_REQUEST 400u
 #define HTTP_UNAUTHORISED 401u
 #define HTTP_FORBIDDEN 403u
@@ -46,25 +47,22 @@
 
 #define HTTP_SKIP_HOST_PART(PTR, URL)\
 do {\
+	char *____s_p = NULL;\
+	char *____e_p = NULL;\
 	if (!strncmp("http", (URL), 4))\
 	{\
 		(PTR) = (URL) + strlen("http://");\
 		if ((*PTR) == '/')\
 			++(PTR);\
+			____e_p = ((URL) + strlen((URL)));\
+			____s_p = memchr((PTR), '/', (____e_p - (PTR)));\
+			if (____s_p)\
+				(PTR) = ____s_p;\
 	}\
 	else\
 	{\
 		(PTR) = (URL);\
-		if (!strncmp("//", (PTR), 2))\
-		{\
-			while ((*PTR) == '/')\
-				++(PTR);\
-		}\
 	}\
-	char *____s_p = (PTR);\
-	char *____e_p = ((URL) + strlen((URL)));\
-	if (*____s_p != '/')\
-		(PTR) = memchr(____s_p, '/', (____e_p - ____s_p));\
 } while (0)
 
 #define HTTP_EOH(BUF)\

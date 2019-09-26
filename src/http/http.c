@@ -807,6 +807,9 @@ http_status_code_string(int code)
 			sprintf(code_string, "%s%u Found%s", COL_ORANGE, HTTP_FOUND, COL_END);
 			//return "302 Found";
 			break;
+		case HTTP_SEE_OTHER:
+			sprintf(code_string, "%s%u See Other%s", COL_ORANGE, HTTP_SEE_OTHER, COL_END);
+			break;
 		case HTTP_BAD_REQUEST:
 			sprintf(code_string, "%s%u Bad Request%s", COL_RED, HTTP_BAD_REQUEST, COL_END);
 			//return "400 Bad request";
