@@ -11,6 +11,7 @@ PRIMARY_DEPENDENCIES = \
 	$(INCLUDE_DIR)/http.h \
 	$(INCLUDE_DIR)/malloc.h \
 	$(INCLUDE_DIR)/robots.h \
+	$(INCLUDE_DIR)/screen_utils.h \
 	$(INCLUDE_DIR)/utils_url.h \
 	$(INCLUDE_DIR)/webreaper.h
 
@@ -19,6 +20,7 @@ PRIMARY_SOURCE = \
 	connection.c \
 	parse_links.c \
 	robots.c \
+	screen_utils.c \
 	utils_url.c \
 	webreaper.c
 
