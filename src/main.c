@@ -5,6 +5,7 @@
 #include <pthread.h>
 #include <setjmp.h>
 #include <signal.h>
+#include <stdarg.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <sys/stat.h>
@@ -401,17 +402,21 @@ update_current_local(const char *url)
 }
 
 void
-update_operation_status(const char *status_string, int use_colour)
+update_operation_status(const char *status_string, ...)
 {
-	size_t len = strlen(status_string);
+	size_t len;
 	int too_long = 0;
 	int max_len = OUTPUT_TABLE_COLUMNS - 6;
+	va_list args;
+	static char tmp[256];
 
-	if (use_colour)
-	{
-		if (len >= (size_t)max_len)
-			too_long = 1;
-	}
+	va_start(args, status_string);
+	vsprintf(tmp, status_string, args);
+
+	len = strlen(tmp);
+
+	if (len >= (size_t)max_len)
+		too_long = 1;
 
 	pthread_mutex_lock(&screen_mutex);
 
@@ -425,11 +430,13 @@ update_operation_status(const char *status_string, int use_colour)
 	right(UPDATE_OP_STATUS_RIGHT);
 
 	fprintf(stderr, "%s(%.*s%s)%s",
-			use_colour ? COL_LIGHTRED : "",
+			COL_LIGHTRED,
 			too_long ? max_len : (int)len,
-			status_string,
+			tmp,
 			too_long ? "..." : "",
-			use_colour ? COL_END : "");
+			COL_END);
+
+	va_end(args);
 
 	out_release_lock:
 	reset_left();
@@ -752,7 +759,6 @@ __check_host(connection_t *conn)
 	assert(conn);
 
 	static char old_host[HTTP_HNAME_MAX];
-	static char tmp[256];
 
 	if (!conn->full_url[0])
 		return;
@@ -766,9 +772,7 @@ __check_host(connection_t *conn)
 		if (wr_cache_nr_used(cookies) > 0)
 			wr_cache_clear_all(cookies);
 
-		sprintf(tmp, "Changing host: %s ==> %s", old_host, conn->host);
-		update_operation_status(tmp, 1);
-
+		update_operation_status("Changing host: %s ==> %s", old_host, conn->host);
 		reconnect(conn);
 	}
 
@@ -788,7 +792,7 @@ __send_head_request(connection_t *conn)
 
 	buf_clear(wbuf);
 
-	update_operation_status("Sending HEAD request to server", 1);
+	update_operation_status("Sending HEAD request to server");
 
 	__check_host(conn);
 
@@ -856,7 +860,7 @@ __send_get_request(connection_t *conn)
 
 	buf_clear(wbuf);
 
-	update_operation_status("Sending GET request to server", 1);
+	update_operation_status("Sending GET request to server");
 
 	__check_host(conn);
 
@@ -999,8 +1003,9 @@ __check_local_dirs(connection_t *conn, buf_t *filename)
 
 		if(access(_tmp.buf_head, F_OK) != 0)
 		{
-			mkdir(_tmp.buf_head, S_IRWXU);
-			//fprintf(stdout, "%sCreated local dir %s\n", ACTION_DONE_STR, _tmp.buf_head);
+			update_operation_status("Creating %s", _tmp.buf_head);
+			if (mkdir(_tmp.buf_head, S_IRWXU) < 0)
+				update_operation_status("Failed to create directory: %s", strerror(errno));
 		}
 
 		p = ++e;
@@ -1172,7 +1177,7 @@ __archive_page(connection_t *conn)
 	char *p;
 	int rv;
 
-	update_operation_status("Archiving file...", 1);
+	update_operation_status("Archiving file...");
 
 	p = HTTP_EOH(buf);
 
@@ -1206,12 +1211,12 @@ __archive_page(connection_t *conn)
 
 	if (fd == -1)
 	{
-		update_operation_status("Failed to create local copy", 1);
+		update_operation_status("Failed to create local copy (%s)", strerror(errno));
 		goto fail_free_bufs;
 	}
 
 	update_current_local(local_url.buf_head);
-	update_operation_status("Page archived", 1);
+	//update_operation_status("Page archived", 1);
 	++nr_reaped;
 
 	buf_write_fd(fd, buf);
@@ -1315,10 +1320,7 @@ __handle301(connection_t *conn)
 		buf_destroy(&tmp_full);
 	}
 
-	static char redirection_string[128];
-
-	sprintf(redirection_string, "Redirecting to %s", location->value);
-	update_operation_status(redirection_string, 1);
+	update_operation_status("Redirecting to %s", location->value);
 
 	assert(location->vlen < HTTP_URL_MAX);
 
@@ -1503,9 +1505,7 @@ __do_request(connection_t *conn)
 	resend_head:
 	status_code = __send_head_request(conn);
 
-	//__update_status_code(status_code);
 	update_status_code(status_code);
-	//update_operation_status(http_status_code_string(status_code), 0);
 
 	switch(status_code)
 	{
@@ -1539,7 +1539,7 @@ __do_request(connection_t *conn)
 	{
 		//fprintf(stdout, "%s%sRemote peer closed connection%s\n", COL_RED, ACTION_DONE_STR, COL_END);
 		//__show_response_header(&conn->read_buf);
-		update_operation_status("Remove peer closed connection", 1);
+		update_operation_status("Remove peer closed connection");
 		reconnect(conn);
 	}
 
@@ -1670,7 +1670,7 @@ reap(wr_cache_t *cachep, wr_cache_t *cachep2, connection_t *conn)
 			if (fill)
 				update_cache_status(2, FL_CACHE_STATUS_FILLING);
 
-			update_operation_status("Draining URL cache 1", 1);
+			update_operation_status("Draining URL cache 1");
 		}
 		else
 		{
@@ -1694,7 +1694,7 @@ reap(wr_cache_t *cachep, wr_cache_t *cachep2, connection_t *conn)
 			if (fill)
 				update_cache_status(1, FL_CACHE_STATUS_FILLING);
 
-			update_operation_status("Draining URL cache 2", 1);
+			update_operation_status("Draining URL cache 2");
 		}
 
 		if (!nr_links)
@@ -1863,7 +1863,7 @@ reap(wr_cache_t *cachep, wr_cache_t *cachep2, connection_t *conn)
 
 		if (current_depth >= crawl_depth)
 		{
-			update_operation_status("Reached maximum crawl depth", 1);
+			update_operation_status("Reached maximum crawl depth");
 			break;
 		}
 	} /* while (1) */
@@ -2054,7 +2054,7 @@ main(int argc, char *argv[])
 	if (sigsetjmp(main_env, 0) != 0)
 	{
 		fprintf(stderr, "%c%c%c%c%c%c", 0x08, 0x20, 0x08, 0x08, 0x20, 0x08);
-		update_operation_status("Signal caught", 1);
+		update_operation_status("Signal caught");
 		goto out_disconnect;
 	}
 
@@ -2099,7 +2099,7 @@ main(int argc, char *argv[])
 			__show_response_header(rbuf);
 		default:
 			//fprintf(stderr, "%s%sDisconnecting...%s\n", COL_RED, ACTION_ING_STR, COL_END);
-			update_operation_status("Disconnecting...", 1);
+			update_operation_status("Disconnecting...");
 			goto out_disconnect;
 	}
 
@@ -2124,7 +2124,7 @@ main(int argc, char *argv[])
 		goto fail_disconnect;
 	}
 
-	update_operation_status("Finished crawling site", 1);
+	update_operation_status("Finished crawling site");
 
 /*	fprintf(stdout, "%s%s%s[Reaped %s%d%s pages: crawl_depth=%s%d%s]\n",
 		COL_DARKORANGE,
