@@ -1003,7 +1003,6 @@ __check_local_dirs(connection_t *conn, buf_t *filename)
 
 		if(access(_tmp.buf_head, F_OK) != 0)
 		{
-			update_operation_status("Creating %s", _tmp.buf_head);
 			if (mkdir(_tmp.buf_head, S_IRWXU) < 0)
 				update_operation_status("Failed to create directory: %s", strerror(errno));
 		}
