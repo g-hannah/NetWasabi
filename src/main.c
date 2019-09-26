@@ -752,6 +752,7 @@ __check_host(connection_t *conn)
 	assert(conn);
 
 	static char old_host[HTTP_HNAME_MAX];
+	static char tmp[256];
 
 	if (!conn->full_url[0])
 		return;
@@ -765,11 +766,8 @@ __check_host(connection_t *conn)
 		if (wr_cache_nr_used(cookies) > 0)
 			wr_cache_clear_all(cookies);
 
-		fprintf(stdout,
-			"%sChanging host (%s ==> %s)\n"
-			"(URL: %s)\n",
-			ACTION_ING_STR, old_host, conn->host,
-			conn->full_url);
+		sprintf(tmp, "Changing host: %s ==> %s", old_host, conn->host);
+		update_operation_status(tmp, 1);
 
 		reconnect(conn);
 	}
@@ -1213,6 +1211,7 @@ __archive_page(connection_t *conn)
 	}
 
 	update_current_local(local_url.buf_head);
+	update_operation_status("Page archived", 1);
 	++nr_reaped;
 
 	buf_write_fd(fd, buf);
