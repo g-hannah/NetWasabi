@@ -164,15 +164,19 @@ __dtor __wr_fini(void)
 		free(hc_loop);
 }
 
-#define THREAD_SLEEP_TIME 2
+#define THREAD_SLEEP_TIME_USEC 500000
 void *
 screen_updater_thread(void *arg)
 {
-	static int go_right = 0;
+	static int go_right = 1;
 	static char *string_collection[] =
 	{
-		"The Internet is ours",
-		"Challenge yourself",
+		"Things you own end up owning you.",
+		"Be a better person than you were yesterday.",
+		"Welcome to the desert of the real.",
+		"We're the all-singing, all-dancing crap of the world.",
+		"Never send a human to do a machine's job.",
+		"There is nothing so eternally adhesive as the memory of power.",
 		NULL
 	};
 	static int string_idx = 0;
@@ -180,11 +184,11 @@ screen_updater_thread(void *arg)
 	static size_t len;
 
 	len = strlen(string_collection[0]);
-	max_right = OUTPUT_TABLE_COLUMNS - (int)len;
+	max_right = (OUTPUT_TABLE_COLUMNS - (int)len);
 
 	while (!screen_updater_stop)
 	{
-		sleep(THREAD_SLEEP_TIME);
+		usleep(THREAD_SLEEP_TIME_USEC);
 
 		pthread_mutex_lock(&screen_mutex);
 
@@ -192,7 +196,7 @@ screen_updater_thread(void *arg)
 		up(1);
 		clear_line();
 		right(go_right);
-		fprintf(stderr, "%.*s", (int)len, string_collection[string_idx]);
+		fprintf(stderr, "%s%.*s%s", COL_LIGHTGREY, (int)len, string_collection[string_idx], COL_END);
 		reset_left();
 		down(1);
 
@@ -200,20 +204,23 @@ screen_updater_thread(void *arg)
 
 		++go_right;
 
-		if (go_right >= max_right)
+		if (go_right > max_right)
 		{
 			--len;
 
-			if (len < 0)
+			if ((ssize_t)len < 0)
 			{
-				go_right &= ~go_right;
+				go_right = 1;
 				++string_idx;
+
 				if (string_collection[string_idx] == NULL)
-					string_idx &= ~string_idx;
+					string_idx = 0;
 
 				len = strlen(string_collection[string_idx]);
 
-				max_right = OUTPUT_TABLE_COLUMNS - (int)len;
+				max_right = (OUTPUT_TABLE_COLUMNS - (int)len);
+
+				sleep(1);
 			}
 		}
 	}
@@ -370,16 +377,21 @@ update_current_local(const char *url)
 	reset_left();
 	up(UPDATE_CURRENT_LOCAL_UP);
 	clear_line();
+
+	if (!url_len)
+		goto out_release_lock;
+
 	right(UPDATE_CURRENT_LOCAL_RIGHT);
 
 	fprintf(stderr, " %sCreated %s%.*s%s%s",
 		ACTION_DONE_STR,
-		COL_BROWN,
+		COL_DARKGREY,
 		too_long ? max_len : (int)url_len,
 		url,
 		too_long ? "..." : "",
 		COL_END);
 
+	out_release_lock:
 	reset_left();
 	down(UPDATE_CURRENT_LOCAL_UP);
 
@@ -407,25 +419,21 @@ update_operation_status(const char *status_string, int use_colour)
 	clear_line();
 
 	if (!len)
-	{
-		reset_left();
-		down(UPDATE_OP_STATUS_UP);
 		goto out_release_lock;
-	}
 
 	right(UPDATE_OP_STATUS_RIGHT);
 
 	fprintf(stderr, "%s(%.*s%s)%s",
-			use_colour ? COL_LIGHTBLUE : "",
+			use_colour ? COL_LIGHTRED : "",
 			too_long ? max_len : (int)len,
 			status_string,
 			too_long ? "..." : "",
 			use_colour ? COL_END : "");
 
+	out_release_lock:
 	reset_left();
 	down(UPDATE_OP_STATUS_UP);
 
-	out_release_lock:
 	pthread_mutex_unlock(&screen_mutex);
 	return;
 }
@@ -453,21 +461,22 @@ __print_information_layout(void)
 	fprintf(stderr,
 		"%s"
 		"\n\n"
-		"    oo  oo  oo   oooooo  ooooo   ooooo   oooooo   oooo   ooooo   oooooo  ooooo\n"
-		"    oo  oo  oo   oo      oo   o  oo  oo  oo      oo  oo  oo  oo  oo      oo  oo\n"
-		"    oo  oo  oo   oooooo  oooooo  ooooo   oooooo  oooooo  ooooo   oooooo  ooooo\n"
-		"    oo  oo  oo   oo      oo   o  oo oo   oo      oo  oo  oo      oo      oo oo\n"
-		"     oooooooo    oooooo  ooooo   oo  oo  oooooo  oo  oo  oo      oooooo  oo  oo\n"
+		"                                                                                 ,`.               \n"
+		"  @  @  @   @@@@@  @@@@@@   @@@@@@    @@@@@   @@@@@   @@@@@@    @@@@@  @@@@@@   , ,        @@@@@   \n"
+		"  @  @  @  @@      @@   @@  @@   @@  @@      @@   @@  @@   @@  @@      @@   @@  ' '       /'       \n"
+		"  @  @  @  @@@@@@  @@@@@@   @@@@@@   @@@@@@  @@@@@@@  @@@@@@   @@@@@@  @@@@@@   ` `      ' '       \n"
+		"   @ @ @   @@      @@   @@  @@  @@   @@      @@   @@  @@       @@      @@  @@    ` ` . .' .        \n"
+		"   *oOo*    @@@@@  @@@@@@   @@   @@   @@@@@  @@   @@  @@        @@@@@  @@   @@    ` . _ .'         \n"
 		"\n"
-		"     v%s\n\n"
+		"   v%s\n\n"
 		"%s",
-		COL_ORANGE,
+		COL_DARKRED,
 		WEBREAPER_BUILD,
 		COL_END);
 /*       15               15                 22                  17             13
  *"===============|===============|======================|=================|============="
  */
-#define COL_HEADINGS COL_LIGHTRED
+#define COL_HEADINGS COL_DARKORANGE
 	fprintf(stderr,
 	" ==========================================================================================\n"
   "  %sCache 1%s: %4d | %sCache 2%s: %4d | %sData%s: %12lu B | %sCrawl-Delay%s: %ds | %sMax-Depth%s: %d\n"
@@ -763,6 +772,8 @@ __send_head_request(connection_t *conn)
 
 	buf_clear(wbuf);
 
+	update_operation_status("Sending HEAD request to server", 1);
+
 	__check_host(conn);
 
 	if (!(tmp_cbuf = wr_calloc(8192, 1)))
@@ -828,6 +839,8 @@ __send_get_request(connection_t *conn)
 	int rv;
 
 	buf_clear(wbuf);
+
+	update_operation_status("Sending GET request to server", 1);
 
 	__check_host(conn);
 
@@ -1480,8 +1493,9 @@ __do_request(connection_t *conn)
 
 	switch(status_code)
 	{
-		case HTTP_FOUND:
 		case HTTP_MOVED_PERMANENTLY:
+		case HTTP_FOUND:
+		case HTTP_SEE_OTHER:
 			//fprintf(stdout, "%s%s (%s)\n", ACTION_ING_STR, http_status_code_string(status_code), conn->full_url);
 			rv = __handle301(conn);
 
@@ -1507,8 +1521,9 @@ __do_request(connection_t *conn)
 
 	if (__connection_closed(conn))
 	{
-		fprintf(stdout, "%s%sRemote peer closed connection%s\n", COL_RED, ACTION_DONE_STR, COL_END);
-		__show_response_header(&conn->read_buf);
+		//fprintf(stdout, "%s%sRemote peer closed connection%s\n", COL_RED, ACTION_DONE_STR, COL_END);
+		//__show_response_header(&conn->read_buf);
+		update_operation_status("Remove peer closed connection", 1);
 		reconnect(conn);
 	}
 
@@ -1516,7 +1531,6 @@ __do_request(connection_t *conn)
 	status_code = __send_get_request(conn);
 
 	update_status_code(status_code);
-	update_operation_status("", 0);
 
 	return status_code;
 }
@@ -1705,6 +1719,7 @@ reap(wr_cache_t *cachep, wr_cache_t *cachep2, connection_t *conn)
 			}
 
 			update_current_url(conn->full_url);
+			update_current_local("");
 
 			status_code = __do_request(conn);
 
@@ -1819,7 +1834,9 @@ reap(wr_cache_t *cachep, wr_cache_t *cachep2, connection_t *conn)
 				update_cache1_count(url_cnt);
 			else
 				update_cache2_count(url_cnt);
+
 			TRAILING_SLASH = 0;
+
 		} /* for (i = 0; i < nr_links; ++i) */
 
 		++current_depth;
@@ -1948,9 +1965,6 @@ main(int argc, char *argv[])
 
 	conn_init(&conn);
 
-	rbuf = &conn.read_buf;
-	wbuf = &conn.write_buf;
-
 	http_parse_host(argv[1], conn.host);
 	http_parse_page(argv[1], conn.page);
 
@@ -2017,20 +2031,12 @@ main(int argc, char *argv[])
 	if (sigsetjmp(main_env, 0) != 0)
 	{
 		fprintf(stderr, "%c%c%c%c%c%c", 0x08, 0x20, 0x08, 0x08, 0x20, 0x08);
-		update_operation_status("Signal caught.", 1);
-		//fprintf(stderr, "%s%sCaught signal! Exiting!%s\n", COL_RED, ACTION_DONE_STR, COL_END);
+		update_operation_status("Signal caught", 1);
 		goto out_disconnect;
 	}
 
-	//buf_clear(rbuf);
-	//buf_clear(wbuf);
-
-	/*printf("\n%s===> %s%s %s<===%s\n\n",
-			COL_RED,
-			COL_LIGHTGREY,
-			conn.page,
-			COL_RED,
-			COL_END);*/
+	buf_clear(rbuf);
+	buf_clear(wbuf);
 
 	update_current_url(conn.full_url);
 
@@ -2050,6 +2056,7 @@ main(int argc, char *argv[])
 			break;
 		case HTTP_MOVED_PERMANENTLY:
 		case HTTP_FOUND:
+		case HTTP_SEE_OTHER:
 			__handle301(&conn);
 			goto resend;
 			break;
@@ -2086,7 +2093,7 @@ main(int argc, char *argv[])
 	{
 		//fprintf(stdout, "%sParsed zero pages from URL %s\n", ACTION_DONE_STR, conn.full_url);
 		reset_left();
-		update_operation_status("Parsed 0 URLs", 1);
+		//update_operation_status("Parsed 0 URLs", 1); /* parse_links() will update this */
 		goto out_disconnect;
 	}
 
