@@ -384,7 +384,7 @@ parse_links(wr_cache_t *e_cache, wr_cache_t *f_cache, http_link_t **tree_root, c
 	nr_urls_call = 0;
 	nr_urls_total = wr_cache_nr_used(e_cache);
 
-	update_operation_status("Parsing URLs...", 1);
+	update_operation_status("Parsing URLs...");
 
 	while (1)
 	{
@@ -453,6 +453,7 @@ parse_links(wr_cache_t *e_cache, wr_cache_t *f_cache, http_link_t **tree_root, c
 	buf_destroy(&full_url);
 	buf_destroy(&path);
 
+/*
 	static char cache_update_str[128];
 	sprintf(cache_update_str,
 		"%s%s%sCache %d%s added %d URL%s (ignored %s%d%s dup%s, %s%d%s archived, %s%d%s twin%s)",
@@ -474,8 +475,16 @@ parse_links(wr_cache_t *e_cache, wr_cache_t *f_cache, http_link_t **tree_root, c
 		nr_twins,
 		COL_END,
 		nr_twins == 1 ? "" : "s");
+*/
 
-	update_operation_status(cache_update_str, 0);
+	update_operation_status("Cache %d added %d URL%s (ignored %d dup%s, %d archived, %d twin%s)",
+		e_cache == http_lcache ? 1 : 2,
+		nr_urls_call,
+		nr_urls_call == 1 ? "" : "s",
+		nr_dups,
+		nr_dups == 1 ? "" : "s",
+		nr_twins,
+		nr_twins == 1 ? "" : "s");
 /*
 	fprintf(stdout, "%s%s%s[%sCache %d%s added %d URL%s (t:%s%d%s) @@@ Ignored %s%d%s dup%s, %s%d%s archived, %s%d%s twin%s]\n",
 		COL_DARKORANGE,

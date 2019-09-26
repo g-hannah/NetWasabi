@@ -295,7 +295,7 @@ __http_read_until_eoh(connection_t *conn, char **p)
 
 	if (sigsetjmp(TIMEOUT, 1) != 0)
 	{
-		update_operation_status("Timed out waiting for response from server", 1);
+		update_operation_status("Timed out waiting for response from server");
 		//fprintf(stderr, "%s%sTimed out waiting for HTTP response from server%s\n", COL_RED, ACTION_DONE_STR, COL_END);
 		sigaction(SIGALRM, &oact, NULL);
 		return FL_OPERATION_TIMEOUT;
@@ -627,7 +627,7 @@ http_recv_response(connection_t *conn)
 	http_header_t *transfer_enc = NULL;
 	buf_t *buf = &conn->read_buf;
 
-	update_operation_status("Receiving data from server", 1);
+	update_operation_status("Receiving data from server");
 
 	content_len = (http_header_t *)wr_cache_alloc(http_hcache, &content_len);
 
