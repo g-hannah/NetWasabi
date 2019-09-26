@@ -145,9 +145,6 @@ __ctor __wr_init(void)
 	SET_SOCK_FLAG_ONCE = 0;
 	SET_SSL_SOCK_FLAG_ONCE = 0;
 
-	clear_struct(&winsize);
-	ioctl(STDOUT_FILENO, TIOCGWINSZ, &winsize);
-
 	return;
 }
 
@@ -2000,6 +1997,13 @@ main(int argc, char *argv[])
 	 */
 	if (open_connection(&conn) < 0)
 		goto fail;
+
+	/*
+	 * Must be done here and not in the constructor function
+	 * because the dimensions are not known before main()
+	 */
+	clear_struct(&winsize);
+	ioctl(STDOUT_FILENO, TIOCGWINSZ, &winsize);
 
 	__print_information_layout(&conn);
 
