@@ -5,7 +5,7 @@
 #include <string.h>
 #include <sys/ioctl.h>
 
-#define WEBREAPER_BUILD		"0.0.1"
+#define WEBREAPER_BUILD		"0.0.2"
 #define WEBREAPER_DIR			"WR_Reaped"
 
 #define COL_ORANGE	"\x1b[38;5;208m"
