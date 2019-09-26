@@ -16,6 +16,7 @@
 #include "http.h"
 #include "malloc.h"
 #include "robots.h"
+#include "screen_utils.h"
 #include "utils_url.h"
 #include "webreaper.h"
 
@@ -74,6 +75,9 @@ static int nr_reaped = 0;
 static int current_depth = 0;
 http_link_t *cache1_url_root;
 http_link_t *cache2_url_root;
+size_t TOTAL_BYTES_RECEIVED = 0;
+struct winsize winsize;
+int url_cnt = 0;
 
 struct url_types url_types[] =
 {
@@ -136,6 +140,9 @@ __ctor __wr_init(void)
 	SET_SOCK_FLAG_ONCE = 0;
 	SET_SSL_SOCK_FLAG_ONCE = 0;
 
+	clear_struct(&winsize);
+	ioctl(STDOUT_FILENO, TIOCGWINSZ, &winsize);
+
 	return;
 }
 
@@ -179,13 +186,185 @@ __noret usage(int exit_status)
 	exit(exit_status);
 }
 
-static void
-__print_prog_info(void)
+void
+update_bytes(size_t bytes)
 {
-	fprintf(stdout,
-		"WebReaper v%s\n"
-		"Written by Gary Hannah\n\n",
-		WEBREAPER_BUILD);
+	reset_left();
+	up(UPDATE_BYTES_UP);
+	right(UPDATE_BYTES_RIGHT);
+	fprintf(stderr, "%s%12lu%s", COL_LIGHTRED, bytes, COL_END);
+	reset_left();
+	down(UPDATE_BYTES_UP);
+}
+
+void
+update_cache1_count(int count)
+{
+	reset_left();
+	up(UPDATE_CACHE1_COUNT_UP);
+	right(UPDATE_CACHE1_COUNT_RIGHT);
+	fprintf(stderr, "%s%4d%s", COL_LIGHTRED, count, COL_END);
+	reset_left();
+	down(UPDATE_CACHE1_COUNT_UP);
+	return;
+}
+
+void
+update_cache2_count(int count)
+{
+	reset_left();
+	up(UPDATE_CACHE2_COUNT_UP);
+	right(UPDATE_CACHE2_COUNT_RIGHT);
+	fprintf(stderr, "%s%4d%s", COL_LIGHTRED, count, COL_END);
+	reset_left();
+	down(UPDATE_CACHE2_COUNT_UP);
+	return;
+}
+
+void
+update_cache_status_draining(int cache)
+{
+	reset_left();
+	up(UPDATE_CACHE_STATUS_UP);
+	right(cache == 1 ? UPDATE_CACHE1_STATUS_RIGHT : UPDATE_CACHE2_STATUS_RIGHT);
+	fprintf(stderr, "%s(draining)%s ", COL_LIGHTGREY, COL_END);
+	reset_left();
+	down(UPDATE_CACHE_STATUS_UP);
+	return;
+}
+
+void
+update_cache_status_filling(int cache)
+{
+	reset_left();
+	up(UPDATE_CACHE_STATUS_UP);
+	right(cache == 1 ? UPDATE_CACHE1_STATUS_RIGHT : UPDATE_CACHE2_STATUS_RIGHT);
+	fprintf(stderr, "%.*s", (int)CACHE_STATUS_LEN+1, " ");
+	fprintf(stderr, "%s(filling)%s ", COL_DARKGREEN, COL_END);
+	reset_left();
+	down(UPDATE_CACHE_STATUS_UP);
+	return;
+}
+
+void
+update_current_url(const char *url)
+{
+	size_t url_len = strlen(url);
+	int too_long = 0;
+	int max_len = OUTPUT_TABLE_COLUMNS - 10;
+
+	if (url_len >= (size_t)max_len)
+		too_long = 1;
+
+	reset_left();
+	up(UPDATE_CURRENT_URL_UP);
+	clear_line();
+	right(UPDATE_CURRENT_URL_RIGHT);
+
+	fprintf(stderr, " %s%.*s%s",
+		ACTION_ING_STR,
+		too_long ? max_len : (int)url_len,
+		url,
+		too_long ? "..." : "");
+
+	reset_left();
+	down(UPDATE_CURRENT_URL_UP);
+	return;
+}
+
+void
+update_current_local(const char *url)
+{
+	size_t url_len = strlen(url);
+	int too_long = 0;
+	int max_len = OUTPUT_TABLE_COLUMNS - 18;
+
+	if (url_len >= (size_t)max_len)
+		too_long = 1;
+
+	reset_left();
+	up(UPDATE_CURRENT_LOCAL_UP);
+	clear_line();
+	right(UPDATE_CURRENT_LOCAL_RIGHT);
+
+	fprintf(stderr, " %sCreated %s%.*s%s%s",
+		ACTION_DONE_STR,
+		COL_BROWN,
+		too_long ? max_len : (int)url_len,
+		url,
+		too_long ? "..." : "",
+		COL_END);
+
+	reset_left();
+	down(UPDATE_CURRENT_LOCAL_UP);
+	return;
+}
+
+void
+update_operation_status(const char *status_string, int use_colour)
+{
+	size_t len = strlen(status_string);
+	int too_long = 0;
+	int max_len = OUTPUT_TABLE_COLUMNS - 3;
+
+	if (use_colour)
+	{
+		if (len >= (size_t)max_len)
+			too_long = 1;
+	}
+
+	reset_left();
+	up(UPDATE_OP_STATUS_UP);
+	clear_line();
+	right(UPDATE_OP_STATUS_RIGHT);
+
+	fprintf(stderr, "%s%.*s%s%s",
+			use_colour ? COL_DARKGREY : "",
+			too_long ? max_len : (int)len,
+			status_string,
+			too_long ? "..." : "",
+			use_colour ? COL_END : "");
+
+	reset_left();
+	down(UPDATE_OP_STATUS_UP);
+	return;
+}
+
+void
+update_status_code(int status_code)
+{
+	reset_left();
+	up(UPDATE_STATUS_CODE_UP);
+	clear_line();
+	right(UPDATE_STATUS_CODE_RIGHT);
+	fprintf(stderr, "%s", http_status_code_string(status_code));
+	reset_left();
+	down(UPDATE_STATUS_CODE_UP);
+	return;
+}
+
+static void
+__print_information_layout(void)
+{
+	fprintf(stderr,
+		"           ____  ____  ____  ____  ____  ____  ____  ____\n"
+		"    | | |  |___  |__|  |__|  |___  |__|  |__|  |___  |__|\n"
+		"    |_|_|  |___  |__|  |  \\  |___  |  |  |     |___  |  \\\n"
+		"\n\n");
+
+	fprintf(stderr,
+	" ==================================================================================================\n"
+  " Cache 1: %s%4d%s | Cache 2: %s%4d%s | Data: %12lu B | Crawl-Delay: %ds | Max-Depth: %d\n"
+	"  %s%10s%s   | %s%10s%s    |                      |                 |                     \n"
+	" --------------------------------------------------------------------------------------------------\n"
+	"\n"
+	"\n" /* current URL goes here */
+	"\n" /* locally created file goes here */
+	"\n"
+	"\n" /* general status messages can go here */
+	" ==================================================================================================\n\n",
+		COL_LIGHTRED, (int)0, COL_END, COL_LIGHTRED, (int)0, COL_END, (size_t)0, crawl_delay, crawl_depth,
+		COL_DARKGREEN, "(filling)", COL_END, COL_LIGHTGREY, "(empty)", COL_END);
 
 	return;
 }
@@ -675,7 +854,7 @@ __check_local_dirs(connection_t *conn, buf_t *filename)
 		if(access(_tmp.buf_head, F_OK) != 0)
 		{
 			mkdir(_tmp.buf_head, S_IRWXU);
-			fprintf(stdout, "%sCreated local dir %s\n", ACTION_DONE_STR, _tmp.buf_head);
+			//fprintf(stdout, "%sCreated local dir %s\n", ACTION_DONE_STR, _tmp.buf_head);
 		}
 
 		p = ++e;
@@ -871,7 +1050,8 @@ __archive_page(connection_t *conn)
 
 	if (access(local_url.buf_head, F_OK) == 0)
 	{
-		fprintf(stdout, "%s%sAlready archived %s%s\n", COL_RED, ATTENTION_STR, local_url.buf_head, COL_END);
+		update_operation_status("Already archived local copy", 1);
+		//fprintf(stdout, "%s%sAlready archived %s%s\n", COL_RED, ATTENTION_STR, local_url.buf_head, COL_END);
 		goto out_free_bufs;
 	}
 
@@ -879,11 +1059,13 @@ __archive_page(connection_t *conn)
 
 	if (fd == -1)
 	{
-		fprintf(stderr, "__archive_page: failed to create file %s (%s)\n", local_url.buf_head, strerror(errno));
+		update_operation_status("Failed to create local copy", 1);
+		//fprintf(stderr, "__archive_page: failed to create file %s (%s)\n", local_url.buf_head, strerror(errno));
 		goto fail_free_bufs;
 	}
 
-	fprintf(stdout, "%sCreated file %s\n", ACTION_DONE_STR, local_url.buf_head);
+	update_current_local(local_url.buf_head);
+	//fprintf(stdout, "%sCreated file %s\n", ACTION_DONE_STR, local_url.buf_head);
 	++nr_reaped;
 
 	buf_write_fd(fd, buf);
@@ -976,7 +1158,10 @@ __handle301(connection_t *conn)
 		buf_destroy(&tmp_full);
 	}
 
-	fprintf(stdout, "%sRedirecting to %s\n", ACTION_ING_STR, location->value);
+	static char redirection_string[128];
+
+	sprintf(redirection_string, "Redirecting to %s", location->value);
+	update_operation_status(redirection_string, 1);
 
 	assert(location->vlen < HTTP_URL_MAX);
 
@@ -1012,7 +1197,7 @@ __handle301(connection_t *conn)
 		q = (location->value + 1);
 		if ((p = strstr(q, "http")))
 		{
-			fprintf(stderr, "%s%sMangled location header! (%s)%s\n", COL_RED, ATTENTION_STR, location->value, COL_END);
+			//fprintf(stderr, "%s%sMangled location header! (%s)%s\n", COL_RED, ATTENTION_STR, location->value, COL_END);
 			return -1;
 		}
 		else
@@ -1037,6 +1222,8 @@ __handle301(connection_t *conn)
 	}
 
 	assert(!memchr(conn->host, '/', strlen(conn->host)));
+
+	update_current_url(conn->full_url);
 
 	//fprintf(stderr, "deallocating header obj LOCATION @ %p\n", &location);
 
@@ -1170,15 +1357,18 @@ __do_request(connection_t *conn)
 		conn->page,
 		conn->host,
 		conn->primary_host);
-
 	fprintf(stdout, "%s [HEAD] %s (%s)\n", ACTION_ING_STR, http_status_code_string(status_code), conn->full_url);
 #endif
+
+	//__update_status_code(status_code);
+	update_status_code(status_code);
+	//update_operation_status(http_status_code_string(status_code), 0);
 
 	switch(status_code)
 	{
 		case HTTP_FOUND:
 		case HTTP_MOVED_PERMANENTLY:
-			fprintf(stdout, "%s%s (%s)\n", ACTION_ING_STR, http_status_code_string(status_code), conn->full_url);
+			//fprintf(stdout, "%s%s (%s)\n", ACTION_ING_STR, http_status_code_string(status_code), conn->full_url);
 			rv = __handle301(conn);
 
 			if (HTTP_IS_XDOMAIN == (unsigned int)rv)
@@ -1210,6 +1400,9 @@ __do_request(connection_t *conn)
 
 	status_code &= ~status_code;
 	status_code = __send_get_request(conn);
+
+	update_status_code(status_code);
+	update_operation_status("", 0);
 
 	return status_code;
 }
@@ -1332,9 +1525,10 @@ while (1)
 			cachep2->nr_assigned = 0;
 
 		assert(wr_cache_nr_used(cachep2) == 0);
-
 		cache2_url_root = NULL;
-		
+
+		update_cache_status_draining(1);
+		update_cache_status_filling(2);
 	}
 	else
 	{
@@ -1351,21 +1545,25 @@ while (1)
 			cachep->nr_assigned = 0;
 
 		assert(wr_cache_nr_used(cachep) == 0);
-
 		cache1_url_root = NULL;
+
+		update_cache_status_draining(2);
+		update_cache_status_filling(1);
 	}
 
 	if (!nr_links)
 		break;
 
-	fprintf(stdout, "%s%sDraining %s%d %sURLs in Cache %d%s\n",
+	url_cnt = nr_links;
+
+	/*fprintf(stdout, "%s%sDraining %s%d %sURLs in Cache %d%s\n",
 		COL_DARKGREY,
 		ACTION_ING_STR,
 		COL_DARKRED,
 		nr_links,
 		COL_DARKGREY,
 		!cache_switch ? 1 : 2,
-		COL_END);
+		COL_END);*/
 
 	fill = 1;
 
@@ -1402,12 +1600,14 @@ while (1)
 			continue;
 		}
 
-		fprintf(stdout, "\n%s===> %s%s %s<===%s\n\n",
+	/*	fprintf(stdout, "\n%s===> %s%s %s<===%s\n\n",
 				COL_RED,
 				COL_LIGHTGREY,
 				conn->page,
 				COL_RED,
-				COL_END);
+				COL_END);*/
+
+		update_current_url(conn->full_url);
 
 		status_code = __do_request(conn);
 
@@ -1416,8 +1616,9 @@ while (1)
 
 		++(link->nr_requests);
 
-		if (FL_OPERATION_TIMEOUT != status_code)
-			fprintf(stdout, "%s%s (%s)\n", ACTION_ING_STR, http_status_code_string((unsigned int)status_code), link->url);
+		//if (FL_OPERATION_TIMEOUT != status_code)
+			//__update_status_code(status_code);
+			//fprintf(stdout, "%s%s (%s)\n", ACTION_ING_STR, http_status_code_string((unsigned int)status_code), link->url);
 
 		switch((unsigned int)status_code)
 		{
@@ -1484,7 +1685,7 @@ while (1)
 				goto next;
 				break;
 			default:
-				fprintf(stdout, "reap: received HTTP status code %d\n", status_code);
+			//	fprintf(stdout, "reap: received HTTP status code %d\n", status_code);
 				goto fail;
 		}
 
@@ -1496,29 +1697,36 @@ while (1)
 				{
 					parse_links(cachep2, cachep, &cache2_url_root, conn);
 					nr_links_sibling = wr_cache_nr_used(cachep2);
+					update_cache2_count(nr_links_sibling);
 				}
 				else
 				{
 					parse_links(cachep, cachep2, &cache1_url_root, conn);
 					nr_links_sibling = wr_cache_nr_used(cachep);
+					update_cache1_count(nr_links_sibling);
 				}
 
 				if (nr_links_sibling >= NR_LINKS_THRESHOLD)
 				{
 					fill = 0;
-					fprintf(stdout, "%s%sURL threshold reached%s\n",
+				/*fprintf(stdout, "%s%sURL threshold reached%s\n",
 					COL_DARKORANGE,
 					ACTION_DONE_STR,
-					COL_END);
+					COL_END);*/
 				}
 			}
 		}
 
-		fprintf(stdout, "%sArchiving %s\n", ACTION_ING_STR, conn->full_url);
+	//	fprintf(stdout, "%sArchiving %s\n", ACTION_ING_STR, conn->full_url);
 		__archive_page(conn);
 
 		next:
 		++link;
+		--url_cnt;
+		if (!cache_switch)
+			update_cache1_count(url_cnt);
+		else
+			update_cache2_count(url_cnt);
 		TRAILING_SLASH = 0;
 	} /* for (i = 0; i < nr_links; ++i) */
 
@@ -1610,7 +1818,7 @@ main(int argc, char *argv[])
 		goto fail;
 #endif
 
-	__print_prog_info();
+	__print_information_layout();
 	srand(time(NULL));
 
 	clear_struct(&new_act);
@@ -1639,12 +1847,14 @@ main(int argc, char *argv[])
 	int status_code;
 	int do_not_archive = 0;
 	int rv;
-	int nr_fails = 0;
 	size_t url_len;
 	buf_t *rbuf = NULL;
 	buf_t *wbuf = NULL;
 
 	conn_init(&conn);
+
+	rbuf = &conn.read_buf;
+	wbuf = &conn.write_buf;
 
 	http_parse_host(argv[1], conn.host);
 	http_parse_page(argv[1], conn.page);
@@ -1661,18 +1871,9 @@ main(int argc, char *argv[])
 
 	strcpy(conn.primary_host, conn.host);
 
-	fprintf(stdout, "%s%sReaping site %s%s%s\n", COL_DARKGREY, ACTION_ING_STR, COL_DARKBLUE, conn.full_url, COL_END);
-	fprintf(stdout, "%s%s%s[Crawl-Delay=%s%d%s second%s, Crawl-Depth=%s%d%s]\n",
-		COL_ORANGE,
-		STATISTICS_STR,
-		COL_END,
-		COL_LIGHTRED,	
-		crawl_delay,
-		COL_END,
-		crawl_delay == 1 ? "" : "s",
-		COL_LIGHTRED,
-		crawl_depth,
-		COL_END);
+//	__update_current_url(conn.full_url);
+	//fprintf(stdout, "%s%sReaping site %s%s%s\n", COL_DARKGREY, ACTION_ING_STR, COL_DARKBLUE, conn.full_url, COL_END);
+	//fprintf(stdout, "%s%s%s[Crawl-Delay=%s%d%s second%s, Crawl-Depth=%s%d%s]\n",
 		
 	/*
 	 * Initialises read/write buffers in conn.
@@ -1728,24 +1929,28 @@ main(int argc, char *argv[])
 	if (sigsetjmp(main_env, 0) != 0)
 	{
 		fprintf(stderr, "%c%c%c%c%c%c", 0x08, 0x20, 0x08, 0x08, 0x20, 0x08);
-		fprintf(stderr, "%s%sCaught signal! Exiting!%s\n", COL_RED, ACTION_DONE_STR, COL_END);
+		update_operation_status("Signal caught.", 1);
+		//fprintf(stderr, "%s%sCaught signal! Exiting!%s\n", COL_RED, ACTION_DONE_STR, COL_END);
 		goto out_disconnect;
 	}
 
-	buf_clear(rbuf);
-	buf_clear(wbuf);
+	//buf_clear(rbuf);
+	//buf_clear(wbuf);
 
-	printf("\n%s===> %s%s %s<===%s\n\n",
+	/*printf("\n%s===> %s%s %s<===%s\n\n",
 			COL_RED,
 			COL_LIGHTGREY,
 			conn.page,
 			COL_RED,
-			COL_END);
+			COL_END);*/
+
+	update_current_url(conn.full_url);
 
 	resend:
 	status_code = __do_request(&conn);
 
-	fprintf(stdout, "%s%s (%s)\n", ACTION_ING_STR, http_status_code_string(status_code), conn.full_url);
+	//__update_status_code(status_code);
+	//fprintf(stdout, "%s%s\n", ACTION_ING_STR, http_status_code_string(status_code));
 
 	switch(status_code)
 	{
@@ -1758,7 +1963,8 @@ main(int argc, char *argv[])
 			break;
 		case HTTP_ALREADY_EXISTS:
 			do_not_archive = 1;
-			__send_get_request(&conn); /* in this case we still need to get it to extract URLs */
+			status_code = __send_get_request(&conn); /* in this case we still need to get it to extract URLs */
+			update_status_code(status_code);
 			break;
 		case HTTP_BAD_REQUEST:
 			__show_request_header(wbuf);
@@ -1770,55 +1976,38 @@ main(int argc, char *argv[])
 		case HTTP_INTERNAL_ERROR:
 			__show_response_header(rbuf);
 		default:
-			fprintf(stderr, "%s%sDisconnecting...%s\n", COL_RED, ACTION_ING_STR, COL_END);
+			//fprintf(stderr, "%s%sDisconnecting...%s\n", COL_RED, ACTION_ING_STR, COL_END);
+			update_operation_status("Disconnecting...", 1);
 			goto out_disconnect;
 	}
 
 	parse_links(http_lcache, http_lcache2, &cache1_url_root, &conn);
+	update_cache1_count(wr_cache_nr_used(http_lcache));
 
 	if (!do_not_archive)
 	{
-		fprintf(stdout, "%sArchiving %s\n", ACTION_ING_STR, conn.full_url);
+		//fprintf(stdout, "%sArchiving %s\n", ACTION_ING_STR, conn.full_url);
 		__archive_page(&conn);
 	}
 
 	if (!wr_cache_nr_used(http_lcache))
 	{
-		fprintf(stdout, "%sParsed zero pages from URL %s\n", ACTION_DONE_STR, conn.full_url);
+		//fprintf(stdout, "%sParsed zero pages from URL %s\n", ACTION_DONE_STR, conn.full_url);
+		reset_left();
+		update_operation_status("Parsed 0 URLs", 1);
 		goto out_disconnect;
 	}
 
-	try_again:
 	rv = reap(http_lcache, http_lcache2, &conn);
 
 	if (rv < 0)
 	{
 		goto fail_disconnect;
 	}
-	else
-	if (FL_RESET == rv)
-	{
-		buf_clear(&conn.read_buf);
-		buf_clear(&conn.write_buf);
-		reconnect(&conn);
 
-		BLOCK_SIGNAL(SIGINT);
-		sleep(RESET_DELAY);
-		UNBLOCK_SIGNAL(SIGINT);
+	update_operation_status("Finished crawling site", 1);
 
-		if (wr_cache_nr_used(http_lcache) >= wr_cache_nr_used(http_lcache2))
-			wr_cache_clear_all(http_lcache2);
-		else
-			wr_cache_clear_all(http_lcache);	
-
-		++nr_fails;
-		if (nr_fails < MAX_FAILS)
-			goto try_again;
-		else
-			goto fail_disconnect;
-	}
-
-	fprintf(stdout, "%s%s%s[Reaped %s%d%s pages: crawl_depth=%s%d%s]\n",
+/*	fprintf(stdout, "%s%s%s[Reaped %s%d%s pages: crawl_depth=%s%d%s]\n",
 		COL_DARKORANGE,
 		STATISTICS_STR,
 		COL_END,
@@ -1827,7 +2016,7 @@ main(int argc, char *argv[])
 		COL_END,
 		COL_LIGHTRED,
 		current_depth,
-		COL_END);
+		COL_END);*/
 
 	out_disconnect:
 	close_connection(&conn);
