@@ -466,6 +466,7 @@ update_status_code(int status_code)
 		case HTTP_FOUND:
 		case HTTP_SEE_OTHER:
 			fprintf(stderr, "%s%3d%s", COL_ORANGE, status_code, COL_END);
+			break;
 		default:
 			fprintf(stderr, "%s%3d%s", COL_RED, status_code, COL_END);
 	}
