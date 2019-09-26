@@ -499,7 +499,7 @@ __print_information_layout(connection_t *conn)
   "  %sCache 1%s: %4d | %sCache 2%s: %4d | %sData%s: %12lu B | %sCrawl-Delay%s: %ds | %sStatus%s: %d\n"
 	"   %s%10s%s   | %s%10s%s    |                      |                 |                     \n"
 	" ------------------------------------------------------------------------------------------\n"
-	"  Server: %s%s%s\n"
+	"  Server: %s%s%s [@ %s]\n"
 	"\n" /* current URL goes here */
 	"\n" /* locally created file goes here */
 	"\n"
@@ -508,7 +508,7 @@ __print_information_layout(connection_t *conn)
 	COL_HEADINGS, COL_END, (int)0, COL_HEADINGS, COL_END, (int)0, COL_HEADINGS, COL_END, (size_t)0,
 	COL_HEADINGS, COL_END, crawl_delay, COL_HEADINGS, COL_END, 0,
 	COL_DARKGREEN, "(filling)", COL_END, COL_LIGHTGREY, "(empty)", COL_END,
-	COL_RED, conn->host, COL_END);
+	COL_RED, conn->host, COL_END, conn->host_ipv4);
 
 	return;
 }
