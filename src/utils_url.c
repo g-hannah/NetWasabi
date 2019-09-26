@@ -258,6 +258,7 @@ make_local_url(connection_t *conn, buf_t *url, buf_t *path)
 		buf_replace(path, ".php", ".html");
 		buf_replace(path, ".asp", ".html");
 		buf_replace(path, ".aspx", ".html");
+		buf_replace(path, ".git", ".html");
 	}
 
 	buf_destroy(&tmp_full);
