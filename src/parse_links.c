@@ -384,6 +384,8 @@ parse_links(wr_cache_t *e_cache, wr_cache_t *f_cache, http_link_t **tree_root, c
 	nr_urls_call = 0;
 	nr_urls_total = wr_cache_nr_used(e_cache);
 
+	update_operation_status("Parsing URLs...", 1);
+
 	while (1)
 	{
 		buf_clear(&url);
