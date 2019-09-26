@@ -174,9 +174,13 @@ screen_updater_thread(void *arg)
 		"Things you own end up owning you.",
 		"Be a better person than you were yesterday.",
 		"Welcome to the desert of the real.",
+		"Where others have failed, I will not fail.",
 		"We're the all-singing, all-dancing crap of the world.",
 		"Never send a human to do a machine's job.",
 		"There is nothing so eternally adhesive as the memory of power.",
+		"We're all living in each other's paranoia.",
+		"Somewhere, something incredible is waiting to be known.",
+		"To the poet a pearl is a tear of the sea.",
 		NULL
 	};
 	static int string_idx = 0;
@@ -196,7 +200,7 @@ screen_updater_thread(void *arg)
 		up(1);
 		clear_line();
 		right(go_right);
-		fprintf(stderr, "%s%.*s%s", COL_LIGHTGREY, (int)len, string_collection[string_idx], COL_END);
+		fprintf(stderr, "%s%.*s%s", COL_DARKCYAN, (int)len, string_collection[string_idx], COL_END);
 		reset_left();
 		down(1);
 
@@ -318,10 +322,10 @@ update_cache_status(int cache, int status_flag)
 			fprintf(stderr, "%s (filling)%s", COL_DARKGREEN, COL_END);
 			break;
 		case FL_CACHE_STATUS_DRAINING:
-			fprintf(stderr, "%s(draining)%s", COL_LIGHTGREY, COL_END);
+			fprintf(stderr, " %s(draining)%s", COL_LIGHTGREY, COL_END);
 			break;
 		case FL_CACHE_STATUS_FULL:
-			fprintf(stderr, "   %s(full)%s ", COL_DARKRED, COL_END);
+			fprintf(stderr, "   %s(full)  %s ", COL_DARKRED, COL_END);
 			break;
 	}
 
@@ -445,9 +449,23 @@ update_status_code(int status_code)
 
 	reset_left();
 	up(UPDATE_STATUS_CODE_UP);
-	clear_line();
+
 	right(UPDATE_STATUS_CODE_RIGHT);
-	fprintf(stderr, "%s", http_status_code_string(status_code));
+
+	switch(status_code)
+	{
+		case HTTP_OK:
+		case HTTP_ALREADY_EXISTS:
+			fprintf(stderr, "%s%3d%s", COL_DARKGREEN, status_code, COL_END);
+			break;
+		case HTTP_MOVED_PERMANENTLY:
+		case HTTP_FOUND:
+		case HTTP_SEE_OTHER:
+			fprintf(stderr, "%s%3d%s", COL_ORANGE, status_code, COL_END);
+		default:
+			fprintf(stderr, "%s%3d%s", COL_RED, status_code, COL_END);
+	}
+
 	reset_left();
 	down(UPDATE_STATUS_CODE_UP);
 
@@ -456,8 +474,10 @@ update_status_code(int status_code)
 }
 
 static void
-__print_information_layout(void)
+__print_information_layout(connection_t *conn)
 {
+	assert(conn);
+
 	fprintf(stderr,
 		"%s"
 		"\n\n"
@@ -468,8 +488,8 @@ __print_information_layout(void)
 		"   @ @ @   @@      @@   @@  @@  @@   @@      @@   @@  @@       @@      @@  @@    ` ` . .' .        \n"
 		"   *oOo*    @@@@@  @@@@@@   @@   @@   @@@@@  @@   @@  @@        @@@@@  @@   @@    ` . _ .'         \n"
 		"\n"
-		"   v%s\n\n"
-		"%s",
+		"   %sv%s%s\n\n",
+		COL_DARKGREY,
 		COL_DARKRED,
 		WEBREAPER_BUILD,
 		COL_END);
@@ -479,18 +499,19 @@ __print_information_layout(void)
 #define COL_HEADINGS COL_DARKORANGE
 	fprintf(stderr,
 	" ==========================================================================================\n"
-  "  %sCache 1%s: %4d | %sCache 2%s: %4d | %sData%s: %12lu B | %sCrawl-Delay%s: %ds | %sMax-Depth%s: %d\n"
+  "  %sCache 1%s: %4d | %sCache 2%s: %4d | %sData%s: %12lu B | %sCrawl-Delay%s: %ds | %sStatus%s: %d\n"
 	"   %s%10s%s   | %s%10s%s    |                      |                 |                     \n"
 	" ------------------------------------------------------------------------------------------\n"
-	"\n"
+	"  Server: %s%s%s\n"
 	"\n" /* current URL goes here */
 	"\n" /* locally created file goes here */
 	"\n"
 	"\n" /* general status messages can go here */
 	" ==========================================================================================\n\n",
 	COL_HEADINGS, COL_END, (int)0, COL_HEADINGS, COL_END, (int)0, COL_HEADINGS, COL_END, (size_t)0,
-	COL_HEADINGS, COL_END, crawl_delay, COL_HEADINGS, COL_END, crawl_depth,
-	COL_DARKGREEN, "(filling)", COL_END, COL_LIGHTGREY, "(empty)", COL_END);
+	COL_HEADINGS, COL_END, crawl_delay, COL_HEADINGS, COL_END, 0,
+	COL_DARKGREEN, "(filling)", COL_END, COL_LIGHTGREY, "(empty)", COL_END,
+	COL_RED, conn->host, COL_END);
 
 	return;
 }
@@ -1156,6 +1177,8 @@ __archive_page(connection_t *conn)
 	char *p;
 	int rv;
 
+	update_operation_status("Archiving file...", 1);
+
 	p = HTTP_EOH(buf);
 
 	if (p)
@@ -1180,8 +1203,7 @@ __archive_page(connection_t *conn)
 
 	if (access(local_url.buf_head, F_OK) == 0)
 	{
-		update_operation_status("Already archived local copy", 1);
-		//fprintf(stdout, "%s%sAlready archived %s%s\n", COL_RED, ATTENTION_STR, local_url.buf_head, COL_END);
+		//update_operation_status("Already archived local copy", 1);
 		goto out_free_bufs;
 	}
 
@@ -1190,12 +1212,10 @@ __archive_page(connection_t *conn)
 	if (fd == -1)
 	{
 		update_operation_status("Failed to create local copy", 1);
-		//fprintf(stderr, "__archive_page: failed to create file %s (%s)\n", local_url.buf_head, strerror(errno));
 		goto fail_free_bufs;
 	}
 
 	update_current_local(local_url.buf_head);
-	//fprintf(stdout, "%sCreated file %s\n", ACTION_DONE_STR, local_url.buf_head);
 	++nr_reaped;
 
 	buf_write_fd(fd, buf);
@@ -1836,7 +1856,6 @@ reap(wr_cache_t *cachep, wr_cache_t *cachep2, connection_t *conn)
 				update_cache2_count(url_cnt);
 
 			TRAILING_SLASH = 0;
-
 		} /* for (i = 0; i < nr_links; ++i) */
 
 		++current_depth;
@@ -1930,7 +1949,6 @@ main(int argc, char *argv[])
 		goto fail;
 #endif
 
-	__print_information_layout();
 	srand(time(NULL));
 
 	clear_struct(&new_act);
@@ -1982,6 +2000,8 @@ main(int argc, char *argv[])
 	 */
 	if (open_connection(&conn) < 0)
 		goto fail;
+
+	__print_information_layout(&conn);
 
 	rbuf = &conn.read_buf;
 	wbuf = &conn.write_buf;
@@ -2085,15 +2105,12 @@ main(int argc, char *argv[])
 
 	if (!do_not_archive)
 	{
-		//fprintf(stdout, "%sArchiving %s\n", ACTION_ING_STR, conn.full_url);
 		__archive_page(&conn);
 	}
 
 	if (!wr_cache_nr_used(http_lcache))
 	{
-		//fprintf(stdout, "%sParsed zero pages from URL %s\n", ACTION_DONE_STR, conn.full_url);
 		reset_left();
-		//update_operation_status("Parsed 0 URLs", 1); /* parse_links() will update this */
 		goto out_disconnect;
 	}
 
