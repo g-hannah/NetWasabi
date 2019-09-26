@@ -627,6 +627,8 @@ http_recv_response(connection_t *conn)
 	http_header_t *transfer_enc = NULL;
 	buf_t *buf = &conn->read_buf;
 
+	update_operation_status("Receiving data from server", 1);
+
 	content_len = (http_header_t *)wr_cache_alloc(http_hcache, &content_len);
 
 	if (!content_len)
