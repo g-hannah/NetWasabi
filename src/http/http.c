@@ -555,6 +555,9 @@ __http_do_chunked_recv(connection_t *conn)
 
 		save_size = chunk_size;
 
+		TOTAL_BYTES_RECEIVED += save_size;
+		update_bytes(TOTAL_BYTES_RECEIVED);
+
 		e += 2; /* Skip the \r\n do NOT use SKIP_CRNL(); chunk data could start with these bytes */
 
 		buf_collapse(buf, (off_t)(p - buf->buf_head), (e - p));
@@ -670,6 +673,9 @@ http_recv_response(connection_t *conn)
 
 		overread = (buf->buf_tail - p);
 
+		TOTAL_BYTES_RECEIVED += clen;
+		update_bytes(TOTAL_BYTES_RECEIVED);
+
 		if (overread < clen)
 		{
 			clen -= overread;
@@ -709,6 +715,9 @@ http_recv_response(connection_t *conn)
 
 		if (rv < 0)
 			goto fail_dealloc;
+
+		TOTAL_BYTES_RECEIVED += rv;
+		update_bytes(TOTAL_BYTES_RECEIVED);
 
 		p = strstr(buf->buf_head, "</body");
 
