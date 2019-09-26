@@ -129,23 +129,29 @@ struct winsize winsize;
 #define UPDATE_CURRENT_LOCAL_UP 5
 #define UPDATE_STATUS_CODE_UP 7
 #define UPDATE_OP_STATUS_UP 3
-#define UPDATE_BYTES_RIGHT 39
-#define UPDATE_CACHE1_COUNT_RIGHT 10
-#define UPDATE_CACHE2_COUNT_RIGHT 26
-#define UPDATE_CACHE1_STATUS_RIGHT 2
-#define UPDATE_CACHE2_STATUS_RIGHT 17
+#define UPDATE_BYTES_RIGHT 40
+#define UPDATE_CACHE1_COUNT_RIGHT 11
+#define UPDATE_CACHE2_COUNT_RIGHT 27
+#define UPDATE_CACHE1_STATUS_RIGHT 3
+#define UPDATE_CACHE2_STATUS_RIGHT 18
 #define UPDATE_CURRENT_URL_RIGHT 1
 #define UPDATE_CURRENT_LOCAL_RIGHT 1
-#define UPDATE_STATUS_CODE_RIGHT 78
+#define UPDATE_STATUS_CODE_RIGHT 2
 #define UPDATE_OP_STATUS_RIGHT 2
 #define CACHE_STATUS_LEN 10
-#define OUTPUT_TABLE_COLUMNS 98
+#define OUTPUT_TABLE_COLUMNS 90
+
+#define FL_CACHE_STATUS_FILLING 0x1
+#define FL_CACHE_STATUS_DRAINING 0x2
+#define FL_CACHE_STATUS_FULL 0x4
+
 void update_operation_status(const char *, int) __nonnull((1));
 void update_current_url(const char *) __nonnull((1));
 void update_current_local(const char *) __nonnull((1));
 void update_bytes(size_t);
 void update_cache1_count(int);
 void update_cache2_count(int);
+void update_cache_status(int, int);
 
 #define TOKEN_MAX 64
 
