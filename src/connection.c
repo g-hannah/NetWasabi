@@ -185,7 +185,7 @@ reconnect(connection_t *conn)
 	conn->sock = -1;
 
 	//fprintf(stdout, "%sReconnecting to %s\n", ACTION_ING_STR, conn->host);
-	update_operation_status("Reconnecting to remote host", 1);
+	update_operation_status("Reconnecting to remote host");
 
 	if (option_set(OPT_USE_TLS))
 	{
