@@ -295,7 +295,8 @@ __http_read_until_eoh(connection_t *conn, char **p)
 
 	if (sigsetjmp(TIMEOUT, 1) != 0)
 	{
-		fprintf(stderr, "%s%sTimed out waiting for HTTP response from server%s\n", COL_RED, ACTION_DONE_STR, COL_END);
+		update_operation_status("Timed out waiting for response from server", 1);
+		//fprintf(stderr, "%s%sTimed out waiting for HTTP response from server%s\n", COL_RED, ACTION_DONE_STR, COL_END);
 		sigaction(SIGALRM, &oact, NULL);
 		return FL_OPERATION_TIMEOUT;
 	}
