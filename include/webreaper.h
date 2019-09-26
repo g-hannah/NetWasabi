@@ -3,6 +3,7 @@
 
 #include <stdint.h>
 #include <string.h>
+#include <sys/ioctl.h>
 
 #define WEBREAPER_BUILD		"0.0.1"
 #define WEBREAPER_DIR			"WR_Reaped"
@@ -117,6 +118,34 @@ int USER_BLACKLIST_NR_TOKENS;
 
 int SET_SOCK_FLAG_ONCE;
 int SET_SSL_SOCK_FLAG_ONCE;
+size_t TOTAL_BYTES_RECEIVED;
+struct winsize winsize;
+
+#define UPDATE_BYTES_UP 10
+#define UPDATE_CACHE1_COUNT_UP 10
+#define UPDATE_CACHE2_COUNT_UP 10
+#define UPDATE_CACHE_STATUS_UP 9
+#define UPDATE_CURRENT_URL_UP 6
+#define UPDATE_CURRENT_LOCAL_UP 5
+#define UPDATE_STATUS_CODE_UP 7
+#define UPDATE_OP_STATUS_UP 3
+#define UPDATE_BYTES_RIGHT 39
+#define UPDATE_CACHE1_COUNT_RIGHT 10
+#define UPDATE_CACHE2_COUNT_RIGHT 26
+#define UPDATE_CACHE1_STATUS_RIGHT 2
+#define UPDATE_CACHE2_STATUS_RIGHT 17
+#define UPDATE_CURRENT_URL_RIGHT 1
+#define UPDATE_CURRENT_LOCAL_RIGHT 1
+#define UPDATE_STATUS_CODE_RIGHT 78
+#define UPDATE_OP_STATUS_RIGHT 2
+#define CACHE_STATUS_LEN 10
+#define OUTPUT_TABLE_COLUMNS 98
+void update_operation_status(const char *, int) __nonnull((1));
+void update_current_url(const char *) __nonnull((1));
+void update_current_local(const char *) __nonnull((1));
+void update_bytes(size_t);
+void update_cache1_count(int);
+void update_cache2_count(int);
 
 #define TOKEN_MAX 64
 
