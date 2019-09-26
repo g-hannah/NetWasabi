@@ -149,7 +149,7 @@ struct winsize winsize;
 #define FL_CACHE_STATUS_DRAINING 0x2
 #define FL_CACHE_STATUS_FULL 0x4
 
-void update_operation_status(const char *, int) __nonnull((1));
+void update_operation_status(const char *, ...) __nonnull((1));
 void update_current_url(const char *) __nonnull((1));
 void update_current_local(const char *) __nonnull((1));
 void update_bytes(size_t);
