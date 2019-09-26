@@ -24,6 +24,7 @@ conn_init(connection_t *conn)
 
 	clear_struct(conn);
 	conn->host = wr_calloc(HTTP_URL_MAX+1, 1);
+	conn->host_ipv4 = wr_calloc(__ALIGN((INET_ADDRSTRLEN+1)), 1);
 	conn->page = wr_calloc(HTTP_URL_MAX+1, 1);
 	conn->full_url = wr_calloc(HTTP_URL_MAX+1, 1);
 	conn->primary_host = wr_calloc(HTTP_URL_MAX+1,1);
@@ -37,6 +38,7 @@ conn_destroy(connection_t *conn)
 	assert(conn);
 
 	free(conn->host);
+	free(conn->host_ipv4);
 	free(conn->page);
 	free(conn->full_url);
 	free(conn->primary_host);
@@ -104,6 +106,8 @@ open_connection(connection_t *conn)
 
 	if (!aip)
 		goto fail;
+
+	sprintf(conn->host_ipv4, "%s", inet_ntoa(sock4.sin_addr));
 
 	if (option_set(OPT_USE_TLS))
 		sock4.sin_port = htons(HTTPS_PORT_NR);
