@@ -109,6 +109,8 @@ open_connection(connection_t *conn)
 
 	sprintf(conn->host_ipv4, "%s", inet_ntoa(sock4.sin_addr));
 
+	update_connection_state(conn, FL_CONNECTION_CONNECTING);
+
 	if (option_set(OPT_USE_TLS))
 		sock4.sin_port = htons(HTTPS_PORT_NR);
 	else
@@ -138,10 +140,12 @@ open_connection(connection_t *conn)
 		SSL_set_connect_state(conn->ssl); /* Set as client */
 	}
 
+	update_connection_state(conn, FL_CONNECTION_CONNECTED);
 	freeaddrinfo(ainf);
 	return 0;
 
 	fail_release_ainf:
+	update_connection_state(conn, FL_CONNECTION_DISCONNECTED);
 	freeaddrinfo(ainf);
 
 	fail:
@@ -156,6 +160,8 @@ close_connection(connection_t *conn)
 	shutdown(conn->sock, SHUT_RDWR);
 	close(conn->sock);
 	conn->sock = -1;
+
+	update_connection_state(conn, FL_CONNECTION_DISCONNECTED);
 
 	if (option_set(OPT_USE_TLS))
 	{
@@ -185,7 +191,8 @@ reconnect(connection_t *conn)
 	conn->sock = -1;
 
 	//fprintf(stdout, "%sReconnecting to %s\n", ACTION_ING_STR, conn->host);
-	update_operation_status("Reconnecting to remote host");
+	//update_operation_status("Reconnecting to remote host");
+
 
 	if (option_set(OPT_USE_TLS))
 	{
@@ -214,6 +221,10 @@ reconnect(connection_t *conn)
 
 	if (!aip)
 		goto fail;
+
+	sprintf(conn->host_ipv4, "%s", inet_ntoa(sock4.sin_addr));
+
+	update_connection_state(conn, FL_CONNECTION_CONNECTING);
 
 	if (option_set(OPT_USE_TLS))
 		sock4.sin_port = htons(HTTPS_PORT_NR);
@@ -246,11 +257,14 @@ reconnect(connection_t *conn)
 	SET_SOCK_FLAG_ONCE = 0;
 	SET_SSL_SOCK_FLAG_ONCE = 0;
 
+	update_connection_state(conn, FL_CONNECTION_CONNECTED);
 	freeaddrinfo(ainf);
 	return 0;
 
 	fail_release_ainf:
 	freeaddrinfo(ainf);
+
+	update_connection_state(conn, FL_CONNECTION_DISCONNECTED);
 
 	fail:
 	return -1;

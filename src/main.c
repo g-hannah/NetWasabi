@@ -45,18 +45,6 @@ do {\
 
 #define UNBLOCK_SIGNAL(signal) sigprocmask(SIG_SETMASK, &oldset, NULL)
 
-#if 0
-static sigjmp_buf __ICL_TIMEOUT__;
-
-static void __handle_icl_timeout(int signo)
-{
-	if (signo != SIGALRM)
-		return;
-
-	siglongjmp(__ICL_TIMEOUT__, 1);
-}
-#endif
-
 static int get_opts(int, char *[]) __nonnull((2)) __wur;
 
 /*
@@ -446,6 +434,39 @@ update_operation_status(const char *status_string, ...)
 	return;
 }
 
+#define UPDATE_CONN_STATE_UP 12
+#define UPDATE_CONN_STATE_RIGHT 2
+void
+update_connection_state(connection_t *conn, int state)
+{
+	pthread_mutex_lock(&screen_mutex);
+
+	reset_left();
+	up(UPDATE_CONN_STATE_UP);
+	clear_line();
+	right(UPDATE_CONN_STATE_RIGHT);
+
+	switch(state)
+	{
+		default:
+		case FL_CONNECTION_CONNECTED:
+			fprintf(stderr, "%sConnected%s to %s%s%s (%s)", COL_DARKGREEN, COL_END, COL_RED, conn->host, COL_END, conn->host_ipv4);
+			break;
+		case FL_CONNECTION_DISCONNECTED:
+			fprintf(stderr, "%sDisconnected%s", COL_LIGHTGREY, COL_END);
+			break;
+		case FL_CONNECTION_CONNECTING:
+			fprintf(stderr, "Connecting to server %s at %s", conn->host, conn->host_ipv4);
+			break;
+	}
+
+	reset_left();
+	down(UPDATE_CONN_STATE_UP);
+
+	pthread_mutex_unlock(&screen_mutex);
+	return;
+}
+
 void
 update_status_code(int status_code)
 {
@@ -479,10 +500,8 @@ update_status_code(int status_code)
 }
 
 static void
-__print_information_layout(connection_t *conn)
+__print_information_layout(void)
 {
-	assert(conn);
-
 	fprintf(stderr,
 		"%s"
 		"\n\n"
@@ -504,19 +523,21 @@ __print_information_layout(connection_t *conn)
 #define COL_HEADINGS COL_DARKORANGE
 	fprintf(stderr,
 	" ==========================================================================================\n"
+	"  %sDisconnected%s\n"
+	" ==========================================================================================\n"
   "  %sCache 1%s: %4d | %sCache 2%s: %4d | %sData%s: %12lu B | %sCrawl-Delay%s: %ds | %sStatus%s: %d\n"
 	"   %s%10s%s   | %s%10s%s    |                      |                 |                     \n"
 	" ------------------------------------------------------------------------------------------\n"
-	"  Server: %s%s%s [@ %s]\n"
+	"\n"
+	"\n"
 	"\n" /* current URL goes here */
 	"\n" /* locally created file goes here */
-	"\n"
 	"\n" /* general status messages can go here */
 	" ==========================================================================================\n\n",
+	COL_LIGHTGREY, COL_END,
 	COL_HEADINGS, COL_END, (int)0, COL_HEADINGS, COL_END, (int)0, COL_HEADINGS, COL_END, (size_t)0,
 	COL_HEADINGS, COL_END, crawl_delay, COL_HEADINGS, COL_END, 0,
-	COL_DARKGREEN, "(filling)", COL_END, COL_LIGHTGREY, "(empty)", COL_END,
-	COL_RED, conn->host, COL_END, conn->host_ipv4);
+	COL_DARKGREEN, "(filling)", COL_END, COL_LIGHTGREY, "(empty)", COL_END);
 
 	return;
 }
@@ -1977,6 +1998,15 @@ main(int argc, char *argv[])
 	buf_t *rbuf = NULL;
 	buf_t *wbuf = NULL;
 
+	/*
+	 * Must be done here and not in the constructor function
+	 * because the dimensions are not known before main()
+	 */
+	clear_struct(&winsize);
+	ioctl(STDOUT_FILENO, TIOCGWINSZ, &winsize);
+
+	__print_information_layout();
+
 	conn_init(&conn);
 
 	http_parse_host(argv[1], conn.host);
@@ -1997,14 +2027,6 @@ main(int argc, char *argv[])
 	if (open_connection(&conn) < 0)
 		goto fail;
 
-	/*
-	 * Must be done here and not in the constructor function
-	 * because the dimensions are not known before main()
-	 */
-	clear_struct(&winsize);
-	ioctl(STDOUT_FILENO, TIOCGWINSZ, &winsize);
-
-	__print_information_layout(&conn);
 
 	rbuf = &conn.read_buf;
 	wbuf = &conn.write_buf;

@@ -4,6 +4,7 @@
 #include <stdint.h>
 #include <string.h>
 #include <sys/ioctl.h>
+#include "connection.h"
 
 #define WEBREAPER_BUILD		"0.0.2"
 #define WEBREAPER_DIR			"WR_Reaped"
@@ -149,6 +150,10 @@ struct winsize winsize;
 #define FL_CACHE_STATUS_DRAINING 0x2
 #define FL_CACHE_STATUS_FULL 0x4
 
+#define FL_CONNECTION_CONNECTED 0x1
+#define FL_CONNECTION_DISCONNECTED 0x2
+#define FL_CONNECTION_CONNECTING 0x4
+
 void update_operation_status(const char *, ...) __nonnull((1));
 void update_current_url(const char *) __nonnull((1));
 void update_current_local(const char *) __nonnull((1));
@@ -156,6 +161,7 @@ void update_bytes(size_t);
 void update_cache1_count(int);
 void update_cache2_count(int);
 void update_cache_status(int, int);
+void update_connection_state(connection_t *, int) __nonnull((1));
 
 #define TOKEN_MAX 64
 
