@@ -305,7 +305,7 @@ update_cache_status(int cache, int status_flag)
 	{
 		default:
 		case FL_CACHE_STATUS_FILLING:
-			fprintf(stderr, "%s (filling)%s", COL_DARKGREEN, COL_END);
+			fprintf(stderr, "%s (filling) %s", COL_DARKGREEN, COL_END);
 			break;
 		case FL_CACHE_STATUS_DRAINING:
 			fprintf(stderr, " %s(draining)%s", COL_LIGHTGREY, COL_END);
