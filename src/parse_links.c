@@ -7,6 +7,7 @@
 #include "buffer.h"
 #include "cache.h"
 #include "http.h"
+#include "robots.h"
 #include "utils_url.h"
 #include "webreaper.h"
 
@@ -23,6 +24,7 @@ __url_acceptable(connection_t *conn, wr_cache_t *e_cache, wr_cache_t *f_cache, b
 	assert(url);
 
 	char *tail = url->buf_tail;
+	static char tmp_page[HTTP_URL_MAX];
 
 	if (url->data_len >= 256)
 		return 0;
@@ -32,6 +34,13 @@ __url_acceptable(connection_t *conn, wr_cache_t *e_cache, wr_cache_t *f_cache, b
 	{
 		if (url->data_len < httplen || url->data_len < httpslen)
 			return 0;
+
+		if (got_token_graph(wrctx))
+		{
+			http_parse_page(url->buf_head, tmp_page);
+			if (!robots_page_permitted(graph, tmp_page))
+				return 0;
+		}
 	}
 
 	if (local_archive_exists(url->buf_head))
@@ -64,48 +73,35 @@ __url_acceptable(connection_t *conn, wr_cache_t *e_cache, wr_cache_t *f_cache, b
 			return 0;
 	}
 
-	//int nr_urls = wr_cache_nr_used(f_cache);
-	int cmp = 0;
-	http_link_t *nptr = f_cache == http_lcache ? cache1_url_root : cache2_url_root;
 
-	while (nptr)
+	if (f_cache)
 	{
-		cmp = strcmp(url->buf_head, nptr->url);
+		int cmp = 0;
+		http_link_t *nptr = f_cache == http_lcache ? cache1_url_root : cache2_url_root;
 
-		if (url->buf_head[0] && nptr->url[0] && !cmp)
+		while (nptr)
 		{
-			++nr_twins;
-			return 0;
-		}
-		else
-		if (cmp < 0)
-		{
-			nptr = nptr->left;
-		}
-		else
-		{
-			nptr = nptr->right;
-		}
+			cmp = strcmp(url->buf_head, nptr->url);
 
-		if (!nptr)
-			break;
+			if (url->buf_head[0] && nptr->url[0] && !cmp)
+			{
+				++nr_twins;
+				return 0;
+			}
+			else
+			if (cmp < 0)
+			{
+				nptr = nptr->left;
+			}
+			else
+			{
+				nptr = nptr->right;
+			}
+
+			if (!nptr)
+				break;
+		}
 	}
-
-#if 0
-	for (i = 0; i < nr_urls; ++i)
-	{
-		while (!wr_cache_obj_used(f_cache, (void *)link))
-			++link;
-
-		if (!strcmp(link->url, url->buf_head))
-		{
-			++nr_sibling;
-			return 0;
-		}
-
-		++link;
-	}
-#endif
 
 	return 1;
 }
@@ -384,7 +380,7 @@ parse_links(wr_cache_t *e_cache, wr_cache_t *f_cache, http_link_t **tree_root, c
 	nr_urls_call = 0;
 	nr_urls_total = wr_cache_nr_used(e_cache);
 
-	update_operation_status("Parsing URLs...");
+	//update_operation_status("Parsing URLs...");
 
 	while (1)
 	{
@@ -453,63 +449,15 @@ parse_links(wr_cache_t *e_cache, wr_cache_t *f_cache, http_link_t **tree_root, c
 	buf_destroy(&full_url);
 	buf_destroy(&path);
 
-/*
-	static char cache_update_str[128];
-	sprintf(cache_update_str,
-		"%s%s%sCache %d%s added %d URL%s (ignored %s%d%s dup%s, %s%d%s archived, %s%d%s twin%s)",
-		COL_DARKORANGE,
-		COL_END,
-		COL_LIGHTBLUE,
-		e_cache == http_lcache ? 1 : 2,
-		COL_END,
-		nr_urls_call,
-		nr_urls_call == 1 ? "" : "s",
-		COL_LIGHTRED,
-		nr_dups,
-		COL_END,
-		nr_dups == 1 ? "" : "s",
-		COL_LIGHTRED,
-		nr_already,
-		COL_END,
-		COL_LIGHTRED,
-		nr_twins,
-		COL_END,
-		nr_twins == 1 ? "" : "s");
-*/
-
-	update_operation_status("Cache %d added %d URL%s (ignored %d dup%s, %d archived, %d twin%s)",
-		e_cache == http_lcache ? 1 : 2,
+#if 0
+	update_operation_status("Added %d URL%s (ignored %d dup%s, %d archived, %d twin%s)",
 		nr_urls_call,
 		nr_urls_call == 1 ? "" : "s",
 		nr_dups,
 		nr_dups == 1 ? "" : "s",
-		nr_twins,
-		nr_twins == 1 ? "" : "s");
-/*
-	fprintf(stdout, "%s%s%s[%sCache %d%s added %d URL%s (t:%s%d%s) @@@ Ignored %s%d%s dup%s, %s%d%s archived, %s%d%s twin%s]\n",
-		COL_DARKORANGE,
-		STATISTICS_STR,
-		COL_END,
-		COL_LIGHTBLUE,
-		e_cache == http_lcache ? 1 : 2,
-		COL_END,
-		nr_urls_call,
-		nr_urls_call == 1 ? "" : "s",
-		COL_PINK,
-		wr_cache_nr_used(e_cache),
-		COL_END,
-		COL_LIGHTRED,
 		nr_dups,
-		COL_END,
-		nr_dups == 1 ? "" : "s",
-		COL_LIGHTRED,
-		nr_already,
-		COL_END,
-		COL_LIGHTRED,
-		nr_twins,
-		COL_END,
-		nr_twins == 1 ? "" : "s");
-*/
+		nr_dups == 1 ? "" : "s");
+#endif
 
 	return 0;
 
