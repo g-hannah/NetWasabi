@@ -5,11 +5,9 @@
 #include "cache.h"
 #include "connection.h"
 
-#define TOK_MAXLEN 256
-#define TOK_FORBID_DEFAULT_NR 128
+#define MAX_TOKEN 512
 
-#define ROBOT_FILE "/robots.txt"
-
-int parse_robots(buf_t *) __nonnull((1)) __wur;
+int create_token_graph(struct graph_ctx *, buf_t *) __nonnull((1)) __wur;
+int robots_page_permitted(struct graph_ctx *, char *) __nonnull((1,2)) __wur;
 
 #endif /* !defined ROBOTS_H */

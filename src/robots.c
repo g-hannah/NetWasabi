@@ -1,165 +1,201 @@
 #include <assert.h>
-#include <errno.h>
-#include <fcntl.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
-#include <sys/stat.h>
 #include "buffer.h"
-#include "cache.h"
-#include "http.h"
-#include "malloc.h"
 #include "robots.h"
 #include "webreaper.h"
 
-#define GLOB_CHAR '*'
-
-static inline void __blacklist_token(const char *token);
-
-int got_global_rules = 0;
-static char line_buffer[1024];
-
-char **forbidden_tokens;
-
-#define CONSUME_UNTIL(c, sp, p, t) \
-do {\
-	(p) = memchr((sp), (c), ((t) - (sp)));\
-	(sp) = (p);\
-} while(0)
-
-#define FIND_TOKEN(tok, p, sp, t) \
-do {\
-	(p) = strstr((sp), (tok));\
-	if ((p) > (t))\
-		(p) = NULL;\
-} while(0)
-
-#define GET_LINE(p, sp, t) \
-do {\
-	(p) = memchr((sp), '\n', ((t) - (sp)));\
-	if (p)\
-	{\
-		strncpy(line_buffer, (sp), ((p) - (sp)));\
-		line_buffer[(p) - (sp)] = 0;\
-		while ((*p) == 0x0a)\
-			++(p);\
-		(sp) = (p);\
-	}\
-	else\
-		(sp) = NULL;\
-} while(0)
-
-static inline void
-__blacklist_token(const char *token)
+/**
+ * robots_page_permitted : check that each token in the URL
+ * is connected to the next in the graph.
+ *
+ * @graph: the structure holding matrix and root node
+ * @url: the page to verify
+ */
+int
+robots_page_permitted(struct graph_ctx *graph, char *url_page)
 {
-	if (!forbidden_tokens)
+	char *p;
+	char *e;
+	size_t url_len = strlen(url_page);
+	char *end = url_page + url_len;
+	struct graph_node *n1;
+	struct graph_node *n2;
+	static char token1[MAX_TOKEN];
+	static char token2[MAX_TOKEN];
+
+	p = url_page;
+	if (*p == '/')
+		++p;
+
+	e = memchr(p, '/', (end - p));
+
+	if (!e)
+		e = end;
+
+	while (1)
 	{
-		forbidden_tokens = wr_calloc(TOK_FORBID_DEFAULT_NR, sizeof(char *));	
+		strncpy(token1, p, (e - p));
+		token1[e - p] = 0;
 
-		int i;
+		n1 = graph_get_node(graph, token1, (e - p));
 
-		for (i = 0; i < TOK_FORBID_DEFAULT_NR+1; ++i)
-			forbidden_tokens[i] = NULL;
+		if (!n1)
+			return 0;
 
-		for (i = 0; i < TOK_FORBID_DEFAULT_NR; ++i)
-			forbidden_tokens[i] = wr_calloc(TOK_MAXLEN, 1);
+		if (e == end)
+			break;
+
+		p = ++e;
+		e = memchr(p, '/', (end - p));
+		if (!e)
+			e = end;
+
+		strncpy(token2, p, (e - p));
+		token2[e - p] = 0;
+
+		n2 = graph_get_node(graph, token2, (e - p));
+		if (!n2)
+			return 0;
+
+		if (!GRAPH_NODES_CONNECTED(graph, n1, n2))
+		{
+			return 0;
+		}
+
+		if (e == end)
+			break;
 	}
 
-	assert(forbidden_tokens);
-
-	int i = 0;
-
-	while (forbidden_tokens[i] && forbidden_tokens[i][0] != 0)
-		++i;
-
-	if (!forbidden_tokens[i])
-	{
-		forbidden_tokens = wr_realloc(forbidden_tokens, (i + TOK_FORBID_DEFAULT_NR));
-
-		int j;
-
-		for (j = i; j < (i + TOK_FORBID_DEFAULT_NR); ++j)
-			forbidden_tokens[j] = NULL;
-
-		int m = (i + TOK_FORBID_DEFAULT_NR - 1);
-
-		for (j = i; j < m; ++j)
-			forbidden_tokens[j] = wr_calloc(TOK_MAXLEN, 1);
-	}
-
-	strncpy(forbidden_tokens[i], token, strlen(token));
-	forbidden_tokens[strlen(token)] = 0;
-
-	return;
+	return 1;
 }
 
-#define ADD_RULE(l) \
-do {\
-	char *__p = (l);\
-	char *__q = (l);\
-	size_t len = strlen(l);\
-	char *__e = ((l) + len);\
-	static char tmp[256];\
-	if (strstr((l), "Disallow"))\
-	{\
-		__p = memchr(__q, ' ', (__e - __q));\
-		if (__p)\
-		{\
-			++__p;\
-			strncpy(tmp, __p, (__e - __p));\
-			tmp[__e - __p] = 0;\
-			__blacklist_token(tmp);\
-		}\
-	}\
-} while(0)
-
 int
-parse_robots(buf_t *buf)
+create_token_graph(struct graph_ctx *graph, buf_t *buf)
 {
-	//assert(buf);
+	assert(buf);
 
-	char *p;
-	char *savep;
+	char *start;
+	char *eol;
 	char *tail = buf->buf_tail;
+	char *ts;
+	char *te;
+	static char new[MAX_TOKEN];
+	static char prev[MAX_TOKEN];
+	struct graph_node *prev_node;
+	struct graph_node *cur_node;
 
-	savep = p = buf->buf_head;
-
-	FIND_TOKEN("User-agent", p, savep, tail);
-
-	if (!p)
-		return -1;
-
-	savep = p;
-
-	CONSUME_UNTIL(' ', savep, p, tail);
-
-	if (!p)
-		return -1;
-
-	if (*(p+1) == GLOB_CHAR)
-		got_global_rules = 1;
-
-	if (got_global_rules)
-		printf("Got rules for \"User-agent: *\"\n");
-
-	CONSUME_UNTIL('\n', savep, p, tail);
-
-	if (!p)
-		return -1;
-
-	++p;
-	savep = p;
-
-	while (p < tail)
+	if (!(start = strstr(buf->buf_head, "User-agent: *")))
 	{
-		GET_LINE(p, savep, tail);
-		ADD_RULE(line_buffer);
+		put_error_msg("Did not find User-Agent line in robots.txt");
+		return -1;
 	}
 
-	int i;
+	eol = memchr(start, '\n', (tail - start));
 
-	for (i = 0; forbidden_tokens[i] != NULL; ++i)
-		printf("FORBIDDEN[%d]=%s\n", i, forbidden_tokens[i]);
+	if (!eol)
+		return -1;
+
+	start = ++eol;
+
+	if (!(graph_ctx_new(&graph)))
+		return -1;
+
+	prev_node = NULL;
+	cur_node = NULL;
+
+	while (1)
+	{
+		if (strncmp("Allow:", start, 6))
+		{
+			eol = memchr(start, '\n', (tail - start));
+			if (!eol || eol >= tail)
+				break;
+
+			start = ++eol;
+			if (start >= tail)
+				break;
+			else
+				continue;
+		}
+
+		eol = memchr(start, ' ', (tail - start));
+		if (!eol || eol >= tail)
+			break;
+
+		start = ++eol;
+		eol = memchr(start, '\n', (tail - start));
+		if (!eol || eol >= tail)
+			break;
+
+		ts = start;
+		if (*ts == '/')
+			++ts;
+
+		while (1)
+		{
+			te = memchr(ts, '/', (eol - ts));
+
+			if (!te)
+				te = eol;
+
+			strncpy(new, ts, (te - ts));
+			new[te - ts] = 0;
+
+			cur_node = graph_node_insert(graph, (void *)new, strlen(new));
+
+			if (cur_node && prev_node)
+			{
+				if (memcmp(cur_node->data, prev_node->data, strlen((char *)cur_node->data)))
+				{
+					if (!GRAPH_NODES_CONNECTED(graph, prev_node, cur_node))
+					{
+#ifdef DEBUG
+						fprintf(stderr, "Connecting %s (node %d) to %s (node %d) in graph\n",
+								prev, prev_node->node_idx, new, cur_node->node_idx);
+#endif
+						GRAPH_NODES_CONNECT(graph, prev_node, cur_node);
+
+						if (!GRAPH_NODES_CONNECTED(graph, prev_node, cur_node))
+						{
+#ifdef DEBUG
+							fprintf(stderr, "Failed to connect %s (%d) with %s (%d) (bit==%d)\n"
+									"idx %% bits_per_int = %d\n",
+									prev, prev_node->node_idx, new, cur_node->node_idx,
+									GRAPH_NODES_CONNECTED(graph, prev_node, cur_node),
+									(int)GRAPH_NODES_BIT_RESULT(cur_node));
+							bitprint_int(GRAPH_NODES_INTEGER(graph, prev_node, cur_node));
+#endif
+						}
+						assert(GRAPH_NODES_CONNECTED(graph, prev_node, cur_node));
+					}
+				}
+			}
+
+			if (te == eol)
+				break;
+			else
+				ts = ++te;
+
+			prev_node = cur_node;
+			strcpy(prev, new);
+		}
+
+		start = ++eol;
+
+		prev[0] = 0;
+		new[0] = 0;
+		prev_node = NULL;
+		cur_node = NULL;
+
+		if (start >= tail)
+			break;
+	}
+
+#ifdef DEBUG
+	put_error_msg("%d unique nodes in graph", graph->nr_nodes);
+#endif
 
 	return 0;
 }
