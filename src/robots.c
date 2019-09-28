@@ -160,7 +160,7 @@ create_token_graphs(struct graph_ctx **allowed, struct graph_ctx **forbidden, bu
 			allow = 1;
 		}
 		else
-		if (!strncasecmp("disallow:", start, 10))
+		if (!strncasecmp("Disallow:", start, 9))
 		{
 			allow = 0;
 		}
@@ -209,22 +209,10 @@ create_token_graphs(struct graph_ctx **allowed, struct graph_ctx **forbidden, bu
 					if (!GRAPH_NODES_CONNECTED(allow ? *allowed : *forbidden, prev_node, cur_node))
 					{
 #ifdef DEBUG
-						fprintf(stderr, "Connecting %s (node %d) to %s (node %d) in graph\n",
-								prev, prev_node->node_idx, new, cur_node->node_idx);
+						fprintf(stderr, "Connecting %s (node %d) to %s (node %d) in graph \"%s\"\n",
+								prev, prev_node->node_idx, new, cur_node->node_idx, allow ? "allowed" : "forbidden");
 #endif
 						GRAPH_NODES_CONNECT(allow ? *allowed : *forbidden, prev_node, cur_node);
-
-						if (!GRAPH_NODES_CONNECTED(allow ? *allowed : *forbidden, prev_node, cur_node))
-						{
-#ifdef DEBUG
-							fprintf(stderr, "Failed to connect %s (%d) with %s (%d) (bit==%d)\n"
-									"idx %% bits_per_int = %d\n",
-									prev, prev_node->node_idx, new, cur_node->node_idx,
-									GRAPH_NODES_CONNECTED(allow ? *allowed : *forbidden, prev_node, cur_node),
-									(int)GRAPH_NODES_BIT_RESULT(cur_node));
-							bitprint_int(GRAPH_NODES_INTEGER(allow ? *allowed : *forbidden, prev_node, cur_node));
-#endif
-						}
 						assert(GRAPH_NODES_CONNECTED(allow ? *allowed : *forbidden, prev_node, cur_node));
 					}
 				}
