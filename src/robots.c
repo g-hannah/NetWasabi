@@ -7,14 +7,16 @@
 #include "webreaper.h"
 
 /**
- * robots_page_permitted : check that each token in the URL
+ * __url_legality - check that each token in the URL
  * is connected to the next in the graph.
  *
  * @graph: the structure holding matrix and root node
  * @url: the page to verify
+ * @test_forbidden: boolean to determine what the return means.
+ *   if testing the forbidden graph, 1 == illegal, otherwise 1 == legal.
  */
-int
-robots_page_permitted(struct graph_ctx *graph, char *url_page)
+static int
+__url_legality(struct graph_ctx *graph, char *url_page, int test_forbidden)
 {
 	char *p;
 	char *e;
@@ -24,6 +26,7 @@ robots_page_permitted(struct graph_ctx *graph, char *url_page)
 	struct graph_node *n2;
 	static char token1[MAX_TOKEN];
 	static char token2[MAX_TOKEN];
+	int connected = 0;
 
 	p = url_page;
 	if (*p == '/')
@@ -39,8 +42,13 @@ robots_page_permitted(struct graph_ctx *graph, char *url_page)
 		strncpy(token1, p, (e - p));
 		token1[e - p] = 0;
 
-		n1 = graph_get_node(graph, token1, (e - p));
+		n1 = graph_get_node_by_data(graph, token1, (e - p));
 
+/*
+ * Only time this can happen is with the very first token, because
+ * after checking connectedness of token1 and token2, token2 becomes
+ * token1.
+ */
 		if (!n1)
 			return 0;
 
@@ -55,24 +63,54 @@ robots_page_permitted(struct graph_ctx *graph, char *url_page)
 		strncpy(token2, p, (e - p));
 		token2[e - p] = 0;
 
-		n2 = graph_get_node(graph, token2, (e - p));
+		n2 = graph_get_node_by_data(graph, token2, (e - p));
+
 		if (!n2)
 			return 0;
 
-		if (!GRAPH_NODES_CONNECTED(graph, n1, n2))
+		connected = GRAPH_NODES_CONNECTED(graph, n1, n2);
+
+		if (test_forbidden)
 		{
-			return 0;
+			if (connected)
+				return 1;
+		}
+		else
+		{
+			if (!connected)
+				return 0;
 		}
 
 		if (e == end)
 			break;
 	}
 
-	return 1;
+	if (test_forbidden)
+		return 0; /* No, it's not illegal */
+	else
+		return 1; /* Yes, it is legal */
 }
 
 int
-create_token_graph(struct graph_ctx *graph, buf_t *buf)
+robots_eval_url(struct graph_ctx *allowed, struct graph_ctx *forbidden, char *const url)
+{
+	int illegal = 0;
+	int legal = 0;
+
+	illegal = __url_legality(forbidden, url, 1);
+	legal = __url_legality(allowed, url, 0);
+
+/*
+ * if (somehow) illegal && legal, or !illegal && !legal, default to LEGAL
+ */
+	if (illegal && !legal)
+		return 0;
+	else
+		return 1;
+}
+
+int
+create_token_graphs(struct graph_ctx **allowed, struct graph_ctx **forbidden, buf_t *buf)
 {
 	assert(buf);
 
@@ -85,6 +123,7 @@ create_token_graph(struct graph_ctx *graph, buf_t *buf)
 	static char prev[MAX_TOKEN];
 	struct graph_node *prev_node;
 	struct graph_node *cur_node;
+	int allow = 0;
 
 	if (!(start = strstr(buf->buf_head, "User-agent: *")))
 	{
@@ -99,15 +138,33 @@ create_token_graph(struct graph_ctx *graph, buf_t *buf)
 
 	start = ++eol;
 
-	if (!(graph_ctx_new(&graph)))
+	if (!(graph_ctx_new(allowed)))
 		return -1;
+
+	if (!(graph_ctx_new(forbidden)))
+		return -1;
+
+	assert(*allowed);
+	assert(*forbidden);
 
 	prev_node = NULL;
 	cur_node = NULL;
 
 	while (1)
 	{
-		if (strncmp("Allow:", start, 6))
+		if (!strncasecmp("user-agent", start, 10))
+			break;
+
+		if (!strncasecmp("allow:", start, 6))
+		{
+			allow = 1;
+		}
+		else
+		if (!strncasecmp("disallow:", start, 10))
+		{
+			allow = 0;
+		}
+		else
 		{
 			eol = memchr(start, '\n', (tail - start));
 			if (!eol || eol >= tail)
@@ -143,32 +200,32 @@ create_token_graph(struct graph_ctx *graph, buf_t *buf)
 			strncpy(new, ts, (te - ts));
 			new[te - ts] = 0;
 
-			cur_node = graph_node_insert(graph, (void *)new, strlen(new));
+			cur_node = graph_node_insert(allow ? *allowed : *forbidden, (void *)new, strlen(new));
 
 			if (cur_node && prev_node)
 			{
 				if (memcmp(cur_node->data, prev_node->data, strlen((char *)cur_node->data)))
 				{
-					if (!GRAPH_NODES_CONNECTED(graph, prev_node, cur_node))
+					if (!GRAPH_NODES_CONNECTED(allow ? *allowed : *forbidden, prev_node, cur_node))
 					{
 #ifdef DEBUG
 						fprintf(stderr, "Connecting %s (node %d) to %s (node %d) in graph\n",
 								prev, prev_node->node_idx, new, cur_node->node_idx);
 #endif
-						GRAPH_NODES_CONNECT(graph, prev_node, cur_node);
+						GRAPH_NODES_CONNECT(allow ? *allowed : *forbidden, prev_node, cur_node);
 
-						if (!GRAPH_NODES_CONNECTED(graph, prev_node, cur_node))
+						if (!GRAPH_NODES_CONNECTED(allow ? *allowed : *forbidden, prev_node, cur_node))
 						{
 #ifdef DEBUG
 							fprintf(stderr, "Failed to connect %s (%d) with %s (%d) (bit==%d)\n"
 									"idx %% bits_per_int = %d\n",
 									prev, prev_node->node_idx, new, cur_node->node_idx,
-									GRAPH_NODES_CONNECTED(graph, prev_node, cur_node),
+									GRAPH_NODES_CONNECTED(allow ? *allowed : *forbidden, prev_node, cur_node),
 									(int)GRAPH_NODES_BIT_RESULT(cur_node));
-							bitprint_int(GRAPH_NODES_INTEGER(graph, prev_node, cur_node));
+							bitprint_int(GRAPH_NODES_INTEGER(allow ? *allowed : *forbidden, prev_node, cur_node));
 #endif
 						}
-						assert(GRAPH_NODES_CONNECTED(graph, prev_node, cur_node));
+						assert(GRAPH_NODES_CONNECTED(allow ? *allowed : *forbidden, prev_node, cur_node));
 					}
 				}
 			}
@@ -194,7 +251,7 @@ create_token_graph(struct graph_ctx *graph, buf_t *buf)
 	}
 
 #ifdef DEBUG
-	put_error_msg("%d unique nodes in graph", graph->nr_nodes);
+	put_error_msg("unique nodes: \"allowed\"=%d ; \"forbidden\"=%d", (*allowed)->nr_nodes, (*forbidden)->nr_nodes);
 #endif
 
 	return 0;
