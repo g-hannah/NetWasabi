@@ -312,7 +312,7 @@ matrix_bitprint(struct graph_ctx *g)
 #endif
 
 struct graph_node *
-graph_get_node(struct graph_ctx *graph, void *data, size_t data_len)
+graph_get_node_by_data(struct graph_ctx *graph, void *data, size_t data_len)
 {
 	struct graph_node *nptr = graph->graph_root;
 	int cmp;
@@ -320,6 +320,36 @@ graph_get_node(struct graph_ctx *graph, void *data, size_t data_len)
 	while (nptr)
 	{
 		cmp = memcmp(data, nptr->data, data_len);
+
+		if (!cmp)
+		{
+			return nptr;
+		}
+		else
+		if (cmp < 0)
+		{
+			nptr = nptr->left;
+			continue;
+		}
+		else
+		{
+			nptr = nptr->right;
+			continue;
+		}
+	}
+
+	return NULL;
+}
+
+struct graph_node *
+graph_get_node_by_index(struct graph_ctx *graph, int index)
+{
+	struct graph_node *nptr = graph->graph_root;
+	int cmp;
+
+	while (nptr)
+	{
+		cmp = (index - nptr->node_idx);
 
 		if (!cmp)
 		{
