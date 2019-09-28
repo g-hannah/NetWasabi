@@ -1400,11 +1400,21 @@ __handle301(connection_t *conn)
 
 		http_parse_host(tmp_full.buf_head, conn->host);
 		http_parse_page(tmp_full.buf_head, conn->page);
+
 		strncpy(conn->full_url, tmp_full.buf_head, tmp_full.data_len);
 		conn->full_url[tmp_full.data_len] = 0;
 
 		buf_destroy(&tmp_url);
 		buf_destroy(&tmp_full);
+
+		if (got_token_graph(wrctx))
+		{
+			if (!robots_eval_url(allowed, forbidden, conn->page))
+			{
+				rv = HTTP_FORBIDDEN;
+				goto out_dealloc;
+			}
+		}
 	}
 	else
 	{
@@ -1441,6 +1451,15 @@ __handle301(connection_t *conn)
 			http_parse_page(conn->full_url, conn->page);
 			strncpy(conn->full_url, location->value, location->vlen);
 			conn->full_url[location->vlen] = 0;
+
+			if (got_token_graph(wrctx))
+			{
+				if (!robots_eval_url(allowed, forbidden, conn->page))
+				{
+					rv = HTTP_FORBIDDEN;
+					goto out_dealloc;
+				}
+			}
 		}
 	}
 
