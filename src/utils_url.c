@@ -204,7 +204,7 @@ make_full_url(connection_t *conn, buf_t *in, buf_t *out)
 		}
 	}
 
-	if (!TRAILING_SLASH)
+	if (!keep_trailing_slash(wrctx))
 	{
 		if (*(out->buf_tail - 1) == '/')
 			buf_snip(out, (size_t)1);
