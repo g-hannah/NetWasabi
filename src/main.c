@@ -68,7 +68,8 @@ pthread_t thread_screen_tid;
 pthread_attr_t thread_screen_attr;
 pthread_mutex_t screen_mutex;
 static volatile sig_atomic_t screen_updater_stop = 0;
-struct graph_ctx *graph;
+struct graph_ctx *allowed;
+struct graph_ctx *forbidden;
 
 struct url_types url_types[] =
 {
@@ -2029,13 +2030,10 @@ __get_robots(connection_t *conn)
 			update_operation_status("No robots.txt file");
 	}
 
-	if (!graph_ctx_new(&graph))
-	{
-		put_error_msg("Failed to create graph context for URL token graph");
-		goto out;
-	}
-
-	if (create_token_graph(graph, &conn->read_buf) < 0)
+/*
+ * This initialises the graphs.
+ */
+	if (create_token_graphs(&allowed, &forbidden, &conn->read_buf) < 0)
 	{
 		put_error_msg("Failed to create graph for URL tokens");
 		goto out_destroy_graph;
@@ -2045,9 +2043,9 @@ __get_robots(connection_t *conn)
 	return 0;
 
 	out_destroy_graph:
-	destroy_graph(graph);
+	destroy_graph(allowed);
+	destroy_graph(forbidden);
 
-	out:
 	return 0;
 }
 
@@ -2281,8 +2279,11 @@ main(int argc, char *argv[])
 	wr_cache_destroy(http_hcache);
 	wr_cache_destroy(cookies);
 
-	if (graph)
-		destroy_graph(graph);
+	if (allowed)
+		destroy_graph(allowed);
+
+	if (forbidden)
+		destroy_graph(forbidden);
 
 	sigaction(SIGINT, &old_sigint, NULL);
 	sigaction(SIGQUIT, &old_sigquit, NULL);
@@ -2307,8 +2308,11 @@ main(int argc, char *argv[])
 	wr_cache_destroy(http_hcache);
 	wr_cache_destroy(cookies);
 
-	if (graph)
-		destroy_graph(graph);
+	if (allowed)
+		destroy_graph(allowed);
+
+	if (forbidden)
+		destroy_graph(forbidden);
 
 	fail:
 	sigaction(SIGINT, &old_sigint, NULL);

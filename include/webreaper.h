@@ -153,7 +153,8 @@ struct webreaper_ctx wrctx;
 int SET_SOCK_FLAG_ONCE;
 int SET_SSL_SOCK_FLAG_ONCE;
 struct winsize winsize;
-struct graph_ctx *graph;
+struct graph_ctx *allowed;
+struct graph_ctx *forbidden;
 
 #define UPDATE_BYTES_UP 10
 #define UPDATE_CACHE1_COUNT_UP 10
