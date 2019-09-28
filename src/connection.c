@@ -91,7 +91,7 @@ open_connection(connection_t *conn)
 
 	if (getaddrinfo(conn->host, NULL, NULL, &ainf) < 0)
 	{
-		fprintf(stderr, "open_connection: getaddrinfo error (%s)\n", gai_strerror(errno));
+		put_error_msg("open_connection: getaddrinfo error (%s)", gai_strerror(errno));
 		goto fail;
 	}
 
@@ -118,7 +118,7 @@ open_connection(connection_t *conn)
 
 	if ((conn->sock = socket(AF_INET, SOCK_STREAM, 0)) < 0)
 	{
-		fprintf(stderr, "open_connection: connect error (%s)\n", strerror(errno));
+		put_error_msg("open_connection: connect error (%s)", strerror(errno));
 		goto fail_release_ainf;
 	}
 
@@ -126,7 +126,7 @@ open_connection(connection_t *conn)
 
 	if (connect(conn->sock, (struct sockaddr *)&sock4, (socklen_t)sizeof(sock4)) != 0)
 	{
-		fprintf(stderr, "open_connection: connect error (%s)\n", strerror(errno));
+		put_error_msg("open_connection: connect error (%s)", strerror(errno));
 		goto fail_release_ainf;
 	}
 
@@ -206,7 +206,7 @@ reconnect(connection_t *conn)
 
 	if (getaddrinfo(conn->host, NULL, NULL, &ainf) < 0)
 	{
-		fprintf(stderr, "open_connection: getaddrinfo error (%s)\n", gai_strerror(errno));
+		put_error_msg("open_connection: getaddrinfo error (%s)", gai_strerror(errno));
 		goto fail;
 	}
 
@@ -233,7 +233,7 @@ reconnect(connection_t *conn)
 
 	if ((conn->sock = socket(AF_INET, SOCK_STREAM, 0)) < 0)
 	{
-		fprintf(stderr, "open_connection: connect error (%s)\n", strerror(errno));
+		put_error_msg("open_connection: connect error (%s)", strerror(errno));
 		goto fail_release_ainf;
 	}
 
@@ -241,7 +241,7 @@ reconnect(connection_t *conn)
 
 	if (connect(conn->sock, (struct sockaddr *)&sock4, (socklen_t)sizeof(sock4)) != 0)
 	{
-		fprintf(stderr, "open_connection: connect error (%s)\n", strerror(errno));
+		put_error_msg("open_connection: connect error (%s)", strerror(errno));
 		goto fail_release_ainf;
 	}
 
@@ -276,17 +276,13 @@ conn_switch_to_tls(connection_t *conn)
 	close_connection(conn);
 
 #ifdef DEBUG
-	printf("Switching to TLS (%s)\n", conn->host);
+	update_operation_status("Switching to TLS (%s)", conn->host);
 #endif
 
 	set_option(OPT_USE_TLS);
 
 	if (open_connection(conn) < 0)
 		goto fail;
-
-#ifdef DEBUG
-	printf("Securely connected to host\n");
-#endif
 
 	return 0;
 

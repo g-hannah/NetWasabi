@@ -30,9 +30,6 @@
 #define MAX_FAILS 10
 #define RESET_DELAY 3
 
-int crawl_delay = 0;
-int crawl_depth = 0;
-
 static sigset_t oldset;
 static sigset_t newset;
 
@@ -50,12 +47,12 @@ static int get_opts(int, char *[]) __nonnull((2)) __wur;
 /*
  * Global variables.
  */
+struct webreaper_ctx wrctx = {0};
 uint32_t runtime_options = 0;
 wr_cache_t *http_hcache;
 wr_cache_t *http_lcache;
 wr_cache_t *http_lcache2;
 wr_cache_t *cookies;
-int TRAILING_SLASH = 0;
 size_t httplen;
 size_t httpslen;
 char **user_blacklist;
@@ -65,13 +62,13 @@ static int nr_reaped = 0;
 static int current_depth = 0;
 http_link_t *cache1_url_root;
 http_link_t *cache2_url_root;
-size_t TOTAL_BYTES_RECEIVED = 0;
 struct winsize winsize;
 int url_cnt = 0;
 pthread_t thread_screen_tid;
 pthread_attr_t thread_screen_attr;
 pthread_mutex_t screen_mutex;
 static volatile sig_atomic_t screen_updater_stop = 0;
+struct graph_ctx *graph;
 
 struct url_types url_types[] =
 {
@@ -400,6 +397,7 @@ update_operation_status(const char *status_string, ...)
 
 	va_start(args, status_string);
 	vsprintf(tmp, status_string, args);
+	va_end(args);
 
 	len = strlen(tmp);
 
@@ -423,8 +421,6 @@ update_operation_status(const char *status_string, ...)
 			tmp,
 			too_long ? "..." : "",
 			COL_END);
-
-	va_end(args);
 
 	out_release_lock:
 	reset_left();
@@ -499,6 +495,53 @@ update_status_code(int status_code)
 	return;
 }
 
+#define UPDATE_ERROR_MSG_UP 7
+void
+put_error_msg(const char *fmt, ...)
+{
+	va_list args;
+	static char tmp[256];
+	size_t len;
+	int go_right = 1;
+
+	va_start(args, fmt);
+	vsprintf(tmp, fmt, args);
+	va_end(args);
+
+	len = strlen(tmp);
+
+	if (len < OUTPUT_TABLE_COLUMNS)
+		go_right = (OUTPUT_TABLE_COLUMNS - len);
+
+	pthread_mutex_lock(&screen_mutex);
+
+	reset_left();
+	up(UPDATE_ERROR_MSG_UP);
+	clear_line();
+	right(go_right);
+
+	fprintf(stderr, "%s%.*s%s", COL_RED, !go_right ? OUTPUT_TABLE_COLUMNS : (int)len, tmp, COL_END);
+	reset_left();
+	down(UPDATE_ERROR_MSG_UP);
+
+	pthread_mutex_unlock(&screen_mutex);
+	return;
+}
+
+void
+clear_error_msg(void)
+{
+	pthread_mutex_lock(&screen_mutex);
+
+	reset_left();
+	up(UPDATE_ERROR_MSG_UP);
+	clear_line();
+	down(UPDATE_ERROR_MSG_UP);
+
+	pthread_mutex_unlock(&screen_mutex);
+	return;
+}
+
 static void
 __print_information_layout(void)
 {
@@ -536,7 +579,7 @@ __print_information_layout(void)
 	" ==========================================================================================\n\n",
 	COL_LIGHTGREY, COL_END,
 	COL_HEADINGS, COL_END, (int)0, COL_HEADINGS, COL_END, (int)0, COL_HEADINGS, COL_END, (size_t)0,
-	COL_HEADINGS, COL_END, crawl_delay, COL_HEADINGS, COL_END, 0,
+	COL_HEADINGS, COL_END, crawl_delay(wrctx), COL_HEADINGS, COL_END, 0,
 	COL_DARKGREEN, "(filling)", COL_END, COL_LIGHTGREY, "(empty)", COL_END);
 
 	return;
@@ -661,13 +704,11 @@ __check_cookies(connection_t *conn)
 
 			if (!tmp->name[0] && !tmp->value[0])
 			{
-				fprintf(stderr, "%sEMPTY VALUES FOR COOKIE FROM HEADER...%s\n", COL_ORANGE, COL_END);
 				break;
 			}
 
 			http_append_header(&conn->write_buf, tmp);
 
-			//fprintf(stderr, "allocating cookie obj to HC_LOOP @ %p\n", hc_loop);
 			*hc_loop = (struct http_cookie_t *)wr_cache_alloc(cookies, hc_loop);
 
 			__extract_cookie_info(*hc_loop, tmp);
@@ -763,8 +804,8 @@ __show_response_header(buf_t *buf)
 
 	if (!p)
 	{
-		fprintf(stderr, "__show_response_header: failed to find end of HTTP header\n");
-		fprintf(stderr, "%s", buf->buf_head);
+		put_error_msg("__show_response_header: failed to find end of HTTP header");
+		//fprintf(stderr, "%s", buf->buf_head);
 		
 		errno = EPROTO;
 		return;
@@ -987,7 +1028,7 @@ __check_local_dirs(connection_t *conn, buf_t *filename)
 
 	if (!p)
 	{
-		fprintf(stderr, "__check_local_dirs: failed to find webreaper directory in caller's filename\n");
+		put_error_msg("__check_local_dirs: failed to find webreaper directory in caller's filename\n");
 		errno = EPROTO;
 		return -1;
 	}
@@ -998,7 +1039,7 @@ __check_local_dirs(connection_t *conn, buf_t *filename)
 
 	if (!e)
 	{
-		fprintf(stderr, "__check_local_dirs: failed to find necessary '/' character in caller's filename\n");
+		put_error_msg("__check_local_dirs: failed to find necessary '/' character in caller's filename\n");
 		errno = EPROTO;
 		return -1;
 	}
@@ -1026,7 +1067,7 @@ __check_local_dirs(connection_t *conn, buf_t *filename)
 		if(access(_tmp.buf_head, F_OK) != 0)
 		{
 			if (mkdir(_tmp.buf_head, S_IRWXU) < 0)
-				update_operation_status("Failed to create directory: %s", strerror(errno));
+				put_error_msg("Failed to create directory: %s", strerror(errno));
 		}
 
 		p = ++e;
@@ -1198,8 +1239,6 @@ __archive_page(connection_t *conn)
 	char *p;
 	int rv;
 
-	update_operation_status("Archiving file...");
-
 	p = HTTP_EOH(buf);
 
 	if (p)
@@ -1232,7 +1271,7 @@ __archive_page(connection_t *conn)
 
 	if (fd == -1)
 	{
-		update_operation_status("Failed to create local copy (%s)", strerror(errno));
+		put_error_msg("Failed to create local copy (%s)", strerror(errno));
 		goto fail_free_bufs;
 	}
 
@@ -1277,6 +1316,7 @@ __handle301(connection_t *conn)
 	char *new_page_start;
 	size_t old_page_len = strlen(conn->page);
 	int archive_redirected = 0;
+	int rv = 0;
 	static char tmp[HTTP_URL_MAX];
 
 	//fprintf(stderr, "allocating header obj LOCATION @ %p\n", &location);
@@ -1285,6 +1325,7 @@ __handle301(connection_t *conn)
 	if (!http_fetch_header(&conn->read_buf, "Location", location, (off_t)0))
 	{
 		wr_cache_dealloc(http_hcache, (void *)location, &location);
+		put_error_msg("__handle301: Failed to allocate header cache object");
 		return -1;
 	}
 
@@ -1346,7 +1387,7 @@ __handle301(connection_t *conn)
 	assert(location->vlen < HTTP_URL_MAX);
 
 	if (location->value[location->vlen - 1] == '/')
-		TRAILING_SLASH = 1;
+		trailing_slash_on(wrctx);
 
 	if (strncmp("http://", location->value, 7) && strncmp("https://", location->value, 8))
 	{
@@ -1377,8 +1418,9 @@ __handle301(connection_t *conn)
 		q = (location->value + 1);
 		if ((p = strstr(q, "http")))
 		{
-			//fprintf(stderr, "%s%sMangled location header! (%s)%s\n", COL_RED, ATTENTION_STR, location->value, COL_END);
-			return -1;
+			put_error_msg("Received mangle Location header");
+			rv = FL_HTTP_SKIP_LINK;
+			goto out_dealloc;
 		}
 		else
 		{
@@ -1402,12 +1444,7 @@ __handle301(connection_t *conn)
 	}
 
 	assert(!memchr(conn->host, '/', strlen(conn->host)));
-
 	update_current_url(conn->full_url);
-
-	//fprintf(stderr, "deallocating header obj LOCATION @ %p\n", &location);
-
-	wr_cache_dealloc(http_hcache, (void *)location, &location);
 
 	if (!strncmp("https", conn->full_url, 5))
 	{
@@ -1415,7 +1452,10 @@ __handle301(connection_t *conn)
 			conn_switch_to_tls(conn);
 	}
 
-	return 0;
+	out_dealloc:
+	wr_cache_dealloc(http_hcache, (void *)location, &location);
+
+	return rv;
 }
 
 #if 0
@@ -1646,7 +1686,7 @@ reap(wr_cache_t *cachep, wr_cache_t *cachep2, connection_t *conn)
 	buf_t *wbuf = &conn->write_buf;
 	buf_t *rbuf = &conn->read_buf;
 
-	TRAILING_SLASH = 0;
+	trailing_slash_off(wrctx);
 /*
  * As we archive the pages from URLs stored in one cache,
  * we fill the sibling cache with URLs to follow in the next
@@ -1743,7 +1783,7 @@ reap(wr_cache_t *cachep, wr_cache_t *cachep2, connection_t *conn)
 				continue;
 
 			BLOCK_SIGNAL(SIGINT);
-			sleep(crawl_delay);
+			sleep(crawl_delay(wrctx));
 			UNBLOCK_SIGNAL(SIGINT);
 
 			__check_host(conn);
@@ -1760,7 +1800,7 @@ reap(wr_cache_t *cachep, wr_cache_t *cachep2, connection_t *conn)
 
 			status_code = __do_request(conn);
 
-			if (HTTP_IS_XDOMAIN != (unsigned int)status_code && status_code < 0)
+			if (status_code < 0)
 				goto fail;
 
 			++(link->nr_requests);
@@ -1768,6 +1808,7 @@ reap(wr_cache_t *cachep, wr_cache_t *cachep2, connection_t *conn)
 			switch((unsigned int)status_code)
 			{
 				case HTTP_OK:
+				case HTTP_GONE:
 				case HTTP_NOT_FOUND: /* don't want to keep requesting the link and getting 404, so just archive it */
 					break;
 				case HTTP_MOVED_PERMANENTLY:
@@ -1780,7 +1821,7 @@ reap(wr_cache_t *cachep, wr_cache_t *cachep2, connection_t *conn)
 					goto resend;
 					break;
 				case HTTP_BAD_REQUEST:
-					__show_request_header(wbuf);
+					//__show_request_header(wbuf);
 
 					if (wr_cache_nr_used(cookies) > 0)
 						wr_cache_clear_all(cookies);
@@ -1797,7 +1838,7 @@ reap(wr_cache_t *cachep, wr_cache_t *cachep2, connection_t *conn)
 				case HTTP_BAD_GATEWAY:
 				case HTTP_SERVICE_UNAV:
 				case HTTP_GATEWAY_TIMEOUT:
-					__show_response_header(rbuf);
+					//__show_response_header(rbuf);
 
 					if (wr_cache_nr_used(cookies) > 0)
 						wr_cache_clear_all(cookies);
@@ -1817,6 +1858,7 @@ reap(wr_cache_t *cachep, wr_cache_t *cachep2, connection_t *conn)
 				 */
 				case HTTP_FOUND:
 				case HTTP_METHOD_NOT_ALLOWED:
+				case FL_HTTP_SKIP_LINK:
 					goto next;
 				case FL_OPERATION_TIMEOUT:
 
@@ -1830,6 +1872,7 @@ reap(wr_cache_t *cachep, wr_cache_t *cachep2, connection_t *conn)
 					goto next;
 					break;
 				default:
+					put_error_msg("Unknown HTTP status code returned (%d)", status_code);
 					goto fail;
 			}
 
@@ -1872,7 +1915,9 @@ reap(wr_cache_t *cachep, wr_cache_t *cachep2, connection_t *conn)
 			else
 				update_cache2_count(url_cnt);
 
-			TRAILING_SLASH = 0;
+			clear_error_msg();
+
+			trailing_slash_off(wrctx);
 		} /* for (i = 0; i < nr_links; ++i) */
 
 		++current_depth;
@@ -1882,7 +1927,7 @@ reap(wr_cache_t *cachep, wr_cache_t *cachep2, connection_t *conn)
 		else
 			cache_switch = 1;
 
-		if (current_depth >= crawl_depth)
+		if (current_depth >= crawl_depth(wrctx))
 		{
 			update_operation_status("Reached maximum crawl depth");
 			break;
@@ -1944,6 +1989,68 @@ __check_directory(void)
 	return;
 }
 
+static int
+__get_robots(connection_t *conn)
+{
+	assert(conn);
+
+	int status_code = 0;
+
+	update_operation_status("Requesting robots.txt file from server");
+
+	strcpy(conn->page, "robots.txt");
+
+	buf_t full_url;
+
+	buf_init(&full_url, HTTP_URL_MAX);
+
+	if (option_set(OPT_USE_TLS))
+		buf_append(&full_url, "https://");
+	else
+		buf_append(&full_url, "http://");
+
+	assert(conn->host[0]);
+	buf_append(&full_url, conn->host);
+	buf_append(&full_url, "/robots.txt");
+
+	assert(full_url.data_len < HTTP_URL_MAX);
+	strcpy(conn->full_url, full_url.buf_head);
+
+	buf_destroy(&full_url);
+	wrctx.got_token_graph = 0;
+
+	status_code = __do_request(conn);
+
+	switch(status_code)
+	{
+		case HTTP_OK:
+			break;
+		default:
+			update_operation_status("No robots.txt file");
+	}
+
+	if (!graph_ctx_new(&graph))
+	{
+		put_error_msg("Failed to create graph context for URL token graph");
+		goto out;
+	}
+
+	if (create_token_graph(graph, &conn->read_buf) < 0)
+	{
+		put_error_msg("Failed to create graph for URL tokens");
+		goto out_destroy_graph;
+	}
+
+	wrctx.got_token_graph = 1;
+	return 0;
+
+	out_destroy_graph:
+	destroy_graph(graph);
+
+	out:
+	return 0;
+}
+
 /*
  * ./webreaper <url> [options]
  */
@@ -1957,7 +2064,7 @@ main(int argc, char *argv[])
 
 	if (get_opts(argc, argv) < 0)
 	{
-		fprintf(stderr, "main: failed to parse program options\n");
+		put_error_msg("main: failed to parse program options");
 		goto fail;
 	}
 
@@ -1978,13 +2085,13 @@ main(int argc, char *argv[])
 
 	if (sigaction(SIGINT, &new_act, &old_sigint) < 0)
 	{
-		fprintf(stderr, "main: failed to set SIGINT handler (%s)\n", strerror(errno));
+		put_error_msg("main: failed to set SIGINT handler (%s)", strerror(errno));
 		goto fail;
 	}
 
 	if (sigaction(SIGQUIT, &new_act, &old_sigquit) < 0)
 	{
-		fprintf(stderr, "main: failed to set SIGQUIT handler (%s)\n", strerror(errno));
+		put_error_msg("main: failed to set SIGQUIT handler (%s)", strerror(errno));
 		goto fail;
 	}
 
@@ -2010,26 +2117,14 @@ main(int argc, char *argv[])
 	conn_init(&conn);
 
 	http_parse_host(argv[1], conn.host);
-	http_parse_page(argv[1], conn.page);
-
-	url_len = strlen(argv[1]);
-
-	assert(url_len < HTTP_URL_MAX);
-
-	strncpy(conn.full_url, argv[1], url_len);
-	conn.full_url[url_len] = 0;
-
 	strcpy(conn.primary_host, conn.host);
 
-	/*
-	 * Initialises read/write buffers in conn.
-	 */
 	if (open_connection(&conn) < 0)
 		goto fail;
 
-
 	rbuf = &conn.read_buf;
 	wbuf = &conn.write_buf;
+
 
 	/*
 	 * Create a new cache for http_link_t objects.
@@ -2076,9 +2171,27 @@ main(int argc, char *argv[])
 	if (sigsetjmp(main_env, 0) != 0)
 	{
 		fprintf(stderr, "%c%c%c%c%c%c", 0x08, 0x20, 0x08, 0x08, 0x20, 0x08);
-		update_operation_status("Signal caught");
+		put_error_msg("Signal caught");
 		goto out_disconnect;
 	}
+
+
+	/*
+	 * Check if the webserver has a robots.txt file
+	 * and if so, use it to create a directed network
+	 * of URL tokens.
+	 */
+	if (__get_robots(&conn) < 0)
+		put_error_msg("No robots.txt file");
+
+
+	http_parse_page(argv[1], conn.page);
+	url_len = strlen(argv[1]);
+
+	assert(url_len < HTTP_URL_MAX);
+
+	strncpy(conn.full_url, argv[1], url_len);
+	conn.full_url[url_len] = 0;
 
 	buf_clear(rbuf);
 	buf_clear(wbuf);
@@ -2115,13 +2228,14 @@ main(int argc, char *argv[])
 			break;
 		case HTTP_FORBIDDEN:
 		case HTTP_METHOD_NOT_ALLOWED:
+		case HTTP_GONE:
 		case HTTP_GATEWAY_TIMEOUT:
 		case HTTP_BAD_GATEWAY:
 		case HTTP_INTERNAL_ERROR:
 			__show_response_header(rbuf);
 		default:
 			//fprintf(stderr, "%s%sDisconnecting...%s\n", COL_RED, ACTION_ING_STR, COL_END);
-			update_operation_status("Disconnecting...");
+			//update_operation_status("Disconnecting...");
 			goto out_disconnect;
 	}
 
@@ -2135,7 +2249,7 @@ main(int argc, char *argv[])
 
 	if (!wr_cache_nr_used(http_lcache))
 	{
-		reset_left();
+		update_operation_status("Parsed no URLs from page (already archived)");
 		goto out_disconnect;
 	}
 
@@ -2147,17 +2261,6 @@ main(int argc, char *argv[])
 	}
 
 	update_operation_status("Finished crawling site");
-
-/*	fprintf(stdout, "%s%s%s[Reaped %s%d%s pages: crawl_depth=%s%d%s]\n",
-		COL_DARKORANGE,
-		STATISTICS_STR,
-		COL_END,
-		COL_LIGHTRED,
-		nr_reaped,
-		COL_END,
-		COL_LIGHTRED,
-		current_depth,
-		COL_END);*/
 
 	out_disconnect:
 	screen_updater_stop = 1;
@@ -2177,6 +2280,9 @@ main(int argc, char *argv[])
 	wr_cache_destroy(http_lcache2);
 	wr_cache_destroy(http_hcache);
 	wr_cache_destroy(cookies);
+
+	if (graph)
+		destroy_graph(graph);
 
 	sigaction(SIGINT, &old_sigint, NULL);
 	sigaction(SIGQUIT, &old_sigquit, NULL);
@@ -2200,6 +2306,9 @@ main(int argc, char *argv[])
 	wr_cache_destroy(http_lcache2);
 	wr_cache_destroy(http_hcache);
 	wr_cache_destroy(cookies);
+
+	if (graph)
+		destroy_graph(graph);
 
 	fail:
 	sigaction(SIGINT, &old_sigint, NULL);
@@ -2240,9 +2349,9 @@ get_opts(int argc, char *argv[])
 				usage(EXIT_FAILURE);
 			}
 
-			crawl_depth = atoi(argv[i]);
-			assert(crawl_depth > 0);
-			assert(crawl_depth <= INT_MAX);
+			crawl_depth(wrctx) = atoi(argv[i]);
+			assert(crawl_depth(wrctx) > 0);
+			assert(crawl_depth(wrctx) <= INT_MAX);
 		}
 		else
 		if (!strcmp("--crawl-delay", argv[i])
@@ -2256,9 +2365,9 @@ get_opts(int argc, char *argv[])
 				usage(EXIT_FAILURE);
 			}
 
-			crawl_delay = atoi(argv[i]);
-			assert(crawl_delay > 0);
-			assert(crawl_delay < MAX_CRAWL_DELAY);
+			crawl_delay(wrctx) = atoi(argv[i]);
+			assert(crawl_delay(wrctx) > 0);
+			assert(crawl_delay(wrctx) < MAX_CRAWL_DELAY);
 		}
 		else
 		if (!strcmp("--blacklist", argv[i])
@@ -2327,11 +2436,11 @@ get_opts(int argc, char *argv[])
 		}
 	}
 
-	if (!crawl_delay)
-		crawl_delay = CRAWL_DELAY_DEFAULT;
+	if (!crawl_delay(wrctx))
+		crawl_delay(wrctx) = CRAWL_DELAY_DEFAULT;
 
-	if (!crawl_depth)
-		crawl_depth = CRAWL_DEPTH_DEFAULT;
+	if (!crawl_depth(wrctx))
+		crawl_depth(wrctx) = CRAWL_DEPTH_DEFAULT;
 
 	return 0;
 }

@@ -5,6 +5,7 @@
 #include <string.h>
 #include <sys/ioctl.h>
 #include "connection.h"
+#include "graph.h"
 
 #define WEBREAPER_BUILD		"0.0.2"
 #define WEBREAPER_DIR			"WR_Reaped"
@@ -113,18 +114,46 @@ struct url_types
 	size_t len;
 };
 
+struct webreaper_ctx
+{
+	unsigned char trailing_slash;
+	unsigned int crawl_delay;
+	unsigned int crawl_depth;
+	unsigned char got_token_graph;
+	size_t nr_bytes_received;
+	unsigned int nr_requests;
+	unsigned int nr_pages;
+	unsigned int nr_errors;
+};
+
+#define keep_trailing_slash(w) ((w).trailing_slash)
+#define trailing_slash_off(w) ((w).trailing_slash &= ~((w).trailing_slash))
+#define trailing_slash_on(w) ((w).trailing_slash = 1)
+#define got_token_graph(w) ((w).got_token_graph)
+#define crawl_delay(w) ((w).crawl_delay)
+#define crawl_depth(w) ((w).crawl_depth)
+#define total_bytes(w) ((w).nr_bytes_received)
+#define total_requests(w) ((w).nr_requests)
+#define total_pages(w) ((w).nr_pages)
+#define total_errors(w) ((w).nr_errors)
+
+#define STATS_INC_ERRORS(w) ++((w).nr_errors)
+#define STATS_INC_PAGES(w) ++((w).nr_pages)
+#define STATS_INC_REQS(w) ++((w).nr_requests)
+#define STATS_ADD_BYTES(w, b) ((w).nr_bytes_received += (b))
+
 #define NR_URL_TYPES 11
 struct url_types url_types[NR_URL_TYPES];
 extern uint32_t runtime_options;
-int TRAILING_SLASH;
 int path_max;
 char **user_blacklist;
 int USER_BLACKLIST_NR_TOKENS;
+struct webreaper_ctx wrctx;
 
 int SET_SOCK_FLAG_ONCE;
 int SET_SSL_SOCK_FLAG_ONCE;
-size_t TOTAL_BYTES_RECEIVED;
 struct winsize winsize;
+struct graph_ctx *graph;
 
 #define UPDATE_BYTES_UP 10
 #define UPDATE_CACHE1_COUNT_UP 10
@@ -146,6 +175,8 @@ struct winsize winsize;
 #define CACHE_STATUS_LEN 10
 #define OUTPUT_TABLE_COLUMNS 90
 
+#define FL_HTTP_SKIP_LINK 0x1
+
 #define FL_CACHE_STATUS_FILLING 0x1
 #define FL_CACHE_STATUS_DRAINING 0x2
 #define FL_CACHE_STATUS_FULL 0x4
@@ -155,13 +186,14 @@ struct winsize winsize;
 #define FL_CONNECTION_CONNECTING 0x4
 
 void update_operation_status(const char *, ...) __nonnull((1));
+void update_connection_state(connection_t *, int) __nonnull((1));
 void update_current_url(const char *) __nonnull((1));
 void update_current_local(const char *) __nonnull((1));
 void update_bytes(size_t);
 void update_cache1_count(int);
 void update_cache2_count(int);
 void update_cache_status(int, int);
-void update_connection_state(connection_t *, int) __nonnull((1));
+void put_error_msg(const char *, ...) __nonnull ((1));
 
 #define TOKEN_MAX 64
 

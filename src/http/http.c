@@ -556,8 +556,8 @@ __http_do_chunked_recv(connection_t *conn)
 
 		save_size = chunk_size;
 
-		TOTAL_BYTES_RECEIVED += save_size;
-		update_bytes(TOTAL_BYTES_RECEIVED);
+		STATS_ADD_BYTES(wrctx, save_size);
+		update_bytes(total_bytes(wrctx));
 
 		e += 2; /* Skip the \r\n do NOT use SKIP_CRNL(); chunk data could start with these bytes */
 
@@ -676,8 +676,8 @@ http_recv_response(connection_t *conn)
 
 		overread = (buf->buf_tail - p);
 
-		TOTAL_BYTES_RECEIVED += clen;
-		update_bytes(TOTAL_BYTES_RECEIVED);
+		STATS_ADD_BYTES(wrctx, clen);
+		update_bytes(total_bytes(wrctx));
 
 		if (overread < clen)
 		{
@@ -719,8 +719,8 @@ http_recv_response(connection_t *conn)
 		if (rv < 0)
 			goto fail_dealloc;
 
-		TOTAL_BYTES_RECEIVED += rv;
-		update_bytes(TOTAL_BYTES_RECEIVED);
+		STATS_ADD_BYTES(wrctx, rv);
+		update_bytes(total_bytes(wrctx));
 
 		p = strstr(buf->buf_head, "</body");
 
@@ -956,7 +956,7 @@ http_parse_page(char *url, char *page)
 		p += strlen("http://");
 	}
 
-	if (!TRAILING_SLASH)
+	if (!keep_trailing_slash(wrctx))
 	{
 		if (*(endp - 1) == '/')
 		{
