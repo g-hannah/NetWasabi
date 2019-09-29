@@ -65,10 +65,17 @@ struct graph_ctx
 	int matrix_size;
 };
 
+struct graph_node_collection
+{
+	int nr_nodes;
+	struct graph_node *nodes;
+}
+
 struct graph_ctx *graph_ctx_new(struct graph_ctx **) __nonnull((1)) __wur;
 struct graph_node *graph_node_init(struct graph_node **, size_t, size_t) __nonnull((1)) __wur;
 struct graph_node *graph_node_insert(struct graph_ctx *, void *, size_t) __nonnull((1,2)) __wur;
 struct graph_node *graph_get_node_by_data(struct graph_ctx *, void *, size_t) __nonnull((1,2)) __wur;
+struct graph_node_collection *graph_get_all_nodes_by_data(struct graph_ctx *, void *, size_t) __nonnull((1,2)) __wur;
 struct graph_node *graph_get_node_by_index(struct graph_ctx *, int) __nonnull((1)) __wur;
 void destroy_graph(struct graph_ctx *) __nonnull((1));
 

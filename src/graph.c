@@ -370,3 +370,62 @@ graph_get_node_by_index(struct graph_ctx *graph, int index)
 
 	return NULL;
 }
+
+struct graph_node_collection *
+graph_get_all_nodes_by_data(struct graph_ctx *graph, void *data, size_t data_len)
+{
+	struct graph_node_collection *collection = NULL;
+	struct graph_node *nptr;
+	int cmp;
+
+	assert(graph);
+
+	nptr = graph->graph_root;
+	if (!nptr)
+		return NULL;
+
+	while (nptr)
+	{
+		cmp = memcmp(data, nptr->data, data_len);
+		if (data[0] && nptr->data[0] && !cmp)
+		{
+			if (!collection)
+			{
+				collection = malloc(sizeof(struct graph_node_collection));
+				assert(collection);
+				collection->nr_nodes = 0;
+				collection->nodes = calloc(1, sizeof(struct graph_node));
+				assert(collection->nodes);
+				memcpy(collection->nodes[0], nptr, sizeof(struct graph_node));
+				collection->nr_nodes = 1;
+				collection->nodes[0].left = NULL;
+				collection->nodes[0].right = NULL;
+			}
+			else
+			{
+				collection->nodes = realloc(collection->nodes, (collection->nr_nodes + 1) * sizeof(struct graph_node));
+				assert(collection->nodes);
+				memcpy(collection->nodes[collection->nr_nodes], nptr, sizeof(struct graph_node));
+				collection->nodes[collection->nr_nodes].left = NULL;
+				collection->nodes[collection->nr_nodes].right = NULL;
+			}
+
+			++(collection->nr_nodes);
+			nptr = nptr->right;
+			continue;
+		}
+		else
+		if (cmp < 0)
+		{
+			nptr = nptr->left;
+			continue;
+		}
+		else
+		{
+			nptr = nptr->right;
+			continue;
+		}
+	}
+
+	return collection;
+}
