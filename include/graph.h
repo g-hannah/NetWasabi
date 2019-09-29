@@ -1,6 +1,8 @@
 #ifndef GRAPH_H
 #define GRAPH_H 1
 
+#include <sys/types.h>
+
 /*
  * The graph is directed; connections are:
  *
