@@ -371,6 +371,28 @@ graph_get_node_by_index(struct graph_ctx *graph, int index)
 	return NULL;
 }
 
+/**
+ * graph_get_all_nodes_by_data - get all nodes that match DATA;
+ * since we compare the data in each node with the first DATA_LEN bytes
+ * of DATA, there may be several matches. There are times when we need
+ * to look at all matching nodes. For example, in the robots.txt files,
+ * often there are rules such as:
+ *
+ * Allow: /api.php?
+ * Allow: /api.php?action=
+ * Allow: /api.php?*&action=
+ *
+ * We may have a URL that is "/api.php?param1=one&param2=two&action=some_action".
+ * If we only returned the first match ("api.php?"), we couldn't determine
+ * whether our URL is actually legitimate. We need to be able to say: it matches
+ * the first node; it does not match the second; it matches the final node.
+ * Otherwise, all URLs with params after api.php?, even if illegal, would be
+ * deemed legitimate due to our successful match with the first node.
+ *
+ * @graph: the graph in which to search for matching nodes.
+ * @data: the input data to match against
+ * @data_len: the number of bytes of our input data
+ */
 struct graph_node_collection *
 graph_get_all_nodes_by_data(struct graph_ctx *graph, void *data, size_t data_len)
 {
