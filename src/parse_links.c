@@ -39,7 +39,9 @@ __url_acceptable(connection_t *conn, wr_cache_t *e_cache, wr_cache_t *f_cache, b
 		{
 			http_parse_page(url->buf_head, tmp_page);
 			if (!robots_eval_url(allowed, forbidden, tmp_page))
+			{
 				return 0;
+			}
 		}
 	}
 
