@@ -1,9 +1,6 @@
 #ifndef GRAPH_H
 #define GRAPH_H 1
 
-#include "buffer.h"
-#include "cache.h"
-
 /*
  * The graph is directed; connections are:
  *
@@ -69,7 +66,7 @@ struct graph_node_collection
 {
 	int nr_nodes;
 	struct graph_node *nodes;
-}
+};
 
 struct graph_ctx *graph_ctx_new(struct graph_ctx **) __nonnull((1)) __wur;
 struct graph_node *graph_node_init(struct graph_node **, size_t, size_t) __nonnull((1)) __wur;
