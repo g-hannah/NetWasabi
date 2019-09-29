@@ -409,7 +409,7 @@ graph_get_all_nodes_by_data(struct graph_ctx *graph, void *data, size_t data_len
 	while (nptr)
 	{
 		cmp = memcmp(data, nptr->data, data_len);
-		if (data[0] && nptr->data[0] && !cmp)
+		if (((char *)data)[0] && ((char *)nptr->data)[0] && !cmp)
 		{
 			if (!collection)
 			{
@@ -418,7 +418,7 @@ graph_get_all_nodes_by_data(struct graph_ctx *graph, void *data, size_t data_len
 				collection->nr_nodes = 0;
 				collection->nodes = calloc(1, sizeof(struct graph_node));
 				assert(collection->nodes);
-				memcpy(collection->nodes[0], nptr, sizeof(struct graph_node));
+				memcpy(&collection->nodes[0], nptr, sizeof(struct graph_node));
 				collection->nr_nodes = 1;
 				collection->nodes[0].left = NULL;
 				collection->nodes[0].right = NULL;
@@ -427,7 +427,7 @@ graph_get_all_nodes_by_data(struct graph_ctx *graph, void *data, size_t data_len
 			{
 				collection->nodes = realloc(collection->nodes, (collection->nr_nodes + 1) * sizeof(struct graph_node));
 				assert(collection->nodes);
-				memcpy(collection->nodes[collection->nr_nodes], nptr, sizeof(struct graph_node));
+				memcpy(&collection->nodes[collection->nr_nodes], nptr, sizeof(struct graph_node));
 				collection->nodes[collection->nr_nodes].left = NULL;
 				collection->nodes[collection->nr_nodes].right = NULL;
 			}
