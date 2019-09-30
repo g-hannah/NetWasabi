@@ -2044,6 +2044,7 @@ __get_robots(connection_t *conn)
 	switch(status_code)
 	{
 		case HTTP_OK:
+			update_operation_status("Got robots.txt file");
 			break;
 		default:
 			update_operation_status("No robots.txt file");
@@ -2052,18 +2053,25 @@ __get_robots(connection_t *conn)
 /*
  * This initialises the graphs.
  */
+	allowed = NULL;
+	forbidden = NULL;
+
 	if (create_token_graphs(&allowed, &forbidden, &conn->read_buf) < 0)
 	{
 		put_error_msg("Failed to create graph for URL tokens");
-		goto out_destroy_graph;
+		goto out_destroy_graphs;
 	}
 
 	wrctx.got_token_graph = 1;
 	return 0;
 
-	out_destroy_graph:
-	destroy_graph(allowed);
-	destroy_graph(forbidden);
+	out_destroy_graphs:
+
+	if (allowed)
+		destroy_graph(allowed);
+
+	if (forbidden)
+		destroy_graph(forbidden);
 
 	return 0;
 }
