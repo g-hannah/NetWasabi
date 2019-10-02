@@ -1,3 +1,1 @@
-Improve cookie storage implementation (current wr_cache_t is overkill)
-
-Parsed image URLs
+Correctly handle glob character in robots URL token rules
