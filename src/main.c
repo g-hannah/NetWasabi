@@ -30,6 +30,28 @@
 #define MAX_FAILS 10
 #define RESET_DELAY 3
 
+#define UPDATE_BYTES_UP 8
+#define UPDATE_CACHE1_COUNT_UP 8
+#define UPDATE_CACHE2_COUNT_UP 8
+#define UPDATE_CACHE_STATUS_UP 7
+#define UPDATE_CURRENT_URL_UP 4
+#define UPDATE_CURRENT_LOCAL_UP 4
+#define UPDATE_STATUS_CODE_UP 8
+#define UPDATE_CONN_STATE_UP 10
+#define UPDATE_OP_STATUS_UP 3
+#define UPDATE_BYTES_RIGHT 40
+#define UPDATE_CACHE1_COUNT_RIGHT 11
+#define UPDATE_CACHE2_COUNT_RIGHT 27
+#define UPDATE_CACHE1_STATUS_RIGHT 3
+#define UPDATE_CACHE2_STATUS_RIGHT 18
+#define UPDATE_CURRENT_URL_RIGHT 1
+#define UPDATE_CURRENT_LOCAL_RIGHT 1
+#define UPDATE_STATUS_CODE_RIGHT 83
+#define UPDATE_CONN_STATE_RIGHT 2
+#define UPDATE_OP_STATUS_RIGHT 2
+#define CACHE_STATUS_LEN 10
+#define OUTPUT_TABLE_COLUMNS 90
+
 static sigset_t oldset;
 static sigset_t newset;
 
@@ -243,25 +265,6 @@ __noret usage(int exit_status)
 	exit(exit_status);
 }
 
-#define UPDATE_BYTES_UP 8
-#define UPDATE_CACHE1_COUNT_UP 8
-#define UPDATE_CACHE2_COUNT_UP 8
-#define UPDATE_CACHE_STATUS_UP 7
-#define UPDATE_CURRENT_URL_UP 4
-#define UPDATE_CURRENT_LOCAL_UP 4
-#define UPDATE_STATUS_CODE_UP 8
-#define UPDATE_OP_STATUS_UP 3
-#define UPDATE_BYTES_RIGHT 40
-#define UPDATE_CACHE1_COUNT_RIGHT 11
-#define UPDATE_CACHE2_COUNT_RIGHT 27
-#define UPDATE_CACHE1_STATUS_RIGHT 3
-#define UPDATE_CACHE2_STATUS_RIGHT 18
-#define UPDATE_CURRENT_URL_RIGHT 1
-#define UPDATE_CURRENT_LOCAL_RIGHT 1
-#define UPDATE_STATUS_CODE_RIGHT 83
-#define UPDATE_OP_STATUS_RIGHT 2
-#define CACHE_STATUS_LEN 10
-#define OUTPUT_TABLE_COLUMNS 90
 
 void
 update_bytes(size_t bytes)
@@ -451,8 +454,6 @@ update_operation_status(const char *status_string, ...)
 	return;
 }
 
-#define UPDATE_CONN_STATE_UP 12
-#define UPDATE_CONN_STATE_RIGHT 2
 void
 update_connection_state(connection_t *conn, int state)
 {
@@ -1294,9 +1295,7 @@ __archive_page(connection_t *conn)
 		goto fail_free_bufs;
 	}
 
-	//update_current_local(local_url.buf_head);
-	update_current_local("Created %s", local_url.buf_head);
-	//update_operation_status("Page archived", 1);
+	update_operation_status("Created %s", local_url.buf_head);
 	++nr_reaped;
 
 	buf_write_fd(fd, buf);
