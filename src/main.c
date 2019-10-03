@@ -2398,7 +2398,7 @@ get_opts(int argc, char *argv[])
 			}
 
 			crawl_depth(wrctx) = atoi(argv[i]);
-			assert(crawl_depth(wrctx) > 0);
+			assert(crawl_depth(wrctx) >= 0);
 			assert(crawl_depth(wrctx) <= INT_MAX);
 		}
 		else
