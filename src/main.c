@@ -39,6 +39,7 @@
 #define UPDATE_STATUS_CODE_UP 8
 #define UPDATE_CONN_STATE_UP 10
 #define UPDATE_OP_STATUS_UP 3
+#define UPDATE_ERROR_MSG_UP 5
 #define UPDATE_BYTES_RIGHT 40
 #define UPDATE_CACHE1_COUNT_RIGHT 11
 #define UPDATE_CACHE2_COUNT_RIGHT 27
@@ -517,7 +518,6 @@ update_status_code(int status_code)
 	return;
 }
 
-#define UPDATE_ERROR_MSG_UP 7
 void
 put_error_msg(const char *fmt, ...)
 {
