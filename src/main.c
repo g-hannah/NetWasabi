@@ -243,6 +243,26 @@ __noret usage(int exit_status)
 	exit(exit_status);
 }
 
+#define UPDATE_BYTES_UP 8
+#define UPDATE_CACHE1_COUNT_UP 8
+#define UPDATE_CACHE2_COUNT_UP 8
+#define UPDATE_CACHE_STATUS_UP 7
+#define UPDATE_CURRENT_URL_UP 4
+#define UPDATE_CURRENT_LOCAL_UP 4
+#define UPDATE_STATUS_CODE_UP 8
+#define UPDATE_OP_STATUS_UP 3
+#define UPDATE_BYTES_RIGHT 40
+#define UPDATE_CACHE1_COUNT_RIGHT 11
+#define UPDATE_CACHE2_COUNT_RIGHT 27
+#define UPDATE_CACHE1_STATUS_RIGHT 3
+#define UPDATE_CACHE2_STATUS_RIGHT 18
+#define UPDATE_CURRENT_URL_RIGHT 1
+#define UPDATE_CURRENT_LOCAL_RIGHT 1
+#define UPDATE_STATUS_CODE_RIGHT 83
+#define UPDATE_OP_STATUS_RIGHT 2
+#define CACHE_STATUS_LEN 10
+#define OUTPUT_TABLE_COLUMNS 90
+
 void
 update_bytes(size_t bytes)
 {
@@ -573,9 +593,7 @@ __print_information_layout(void)
 	"   %s%10s%s   | %s%10s%s    |                      |                 |                     \n"
 	" ------------------------------------------------------------------------------------------\n"
 	"\n"
-	"\n"
 	"\n" /* current URL goes here */
-	"\n" /* locally created file goes here */
 	"\n" /* general status messages can go here */
 	" ==========================================================================================\n\n",
 	COL_LIGHTGREY, COL_END,
@@ -1276,7 +1294,8 @@ __archive_page(connection_t *conn)
 		goto fail_free_bufs;
 	}
 
-	update_current_local(local_url.buf_head);
+	//update_current_local(local_url.buf_head);
+	update_current_local("Created %s", local_url.buf_head);
 	//update_operation_status("Page archived", 1);
 	++nr_reaped;
 
@@ -1816,7 +1835,6 @@ reap(wr_cache_t *cachep, wr_cache_t *cachep2, connection_t *conn)
 			}
 
 			update_current_url(conn->full_url);
-			update_current_local("");
 
 			status_code = __do_request(conn);
 
