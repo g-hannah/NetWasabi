@@ -2484,8 +2484,8 @@ get_opts(int argc, char *argv[])
 		}
 	}
 
-	if (!crawl_delay(wrctx))
-		crawl_delay(wrctx) = CRAWL_DELAY_DEFAULT;
+	//if (!crawl_delay(wrctx))
+		//crawl_delay(wrctx) = CRAWL_DELAY_DEFAULT;
 
 	if (!crawl_depth(wrctx))
 		crawl_depth(wrctx) = CRAWL_DEPTH_DEFAULT;
