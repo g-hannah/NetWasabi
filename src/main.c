@@ -1259,6 +1259,7 @@ __archive_page(connection_t *conn)
 	char *p;
 	int rv;
 
+	update_operation_status("Archiving %s", conn->full_url);
 	p = HTTP_EOH(buf);
 
 	if (p)
@@ -1870,7 +1871,6 @@ reap(wr_cache_t *cachep, wr_cache_t *cachep2, connection_t *conn)
 					goto next;
 					break;
 				case HTTP_METHOD_NOT_ALLOWED:
-					update_operation_status("Method not allowed...");
 				case HTTP_FORBIDDEN:
 				case HTTP_INTERNAL_ERROR:
 				case HTTP_BAD_GATEWAY:
