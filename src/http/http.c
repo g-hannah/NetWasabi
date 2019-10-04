@@ -287,6 +287,8 @@ __http_read_until_eoh(connection_t *conn, char **p)
 	nact.sa_handler = __http_handle_timeout;
 	sigemptyset(&nact.sa_mask);
 
+	update_operation_status("Getting HTTP response header");
+
 	if (sigaction(SIGALRM, &nact, &oact) < 0)
 	{
 		fprintf(stderr, "__http_read_until_eoh: failed to set signal handler for SIGALRM\n");
