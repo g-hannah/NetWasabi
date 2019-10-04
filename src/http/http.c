@@ -270,7 +270,7 @@ http_send_request(connection_t *conn)
 	return -1;
 }
 
-#define HTTP_SMALL_READ_BLOCK 256
+#define HTTP_SMALL_READ_BLOCK 64
 #define MAX_WAIT_TIME 12
 
 static int
@@ -320,6 +320,8 @@ __http_read_until_eoh(connection_t *conn, char **p)
 				continue;
 				break;
 			default:
+				if (!strstr(buf->buf_head, "HTTP/") && strncmp("\r\n", buf->buf_head, 2))
+					goto out;
 				*p = strstr(buf->buf_head, HTTP_EOH_SENTINEL);
 				//fprintf(stderr, "*p == %p\n", *p);
 				if (*p)
@@ -648,8 +650,8 @@ http_recv_response(connection_t *conn)
 
 	if (!p)
 	{
-		fprintf(stderr, "http_recv_response: failed to find end of header sentinel\n");
-		goto fail_dealloc;
+		//fprintf(stderr, "http_recv_response: failed to find end of header sentinel\n");
+		goto out_dealloc;
 	}
 
 /*
