@@ -1871,6 +1871,7 @@ reap(wr_cache_t *cachep, wr_cache_t *cachep2, connection_t *conn)
 					goto next;
 					break;
 				case HTTP_FORBIDDEN:
+				case HTTP_METHOD_NOT_ALLOWED:
 				case HTTP_INTERNAL_ERROR:
 				case HTTP_BAD_GATEWAY:
 				case HTTP_SERVICE_UNAV:
@@ -1894,7 +1895,6 @@ reap(wr_cache_t *cachep, wr_cache_t *cachep2, connection_t *conn)
 				 * link, for example a random wiki article (Special:Random).
 				 */
 				case HTTP_FOUND:
-				case HTTP_METHOD_NOT_ALLOWED:
 				case FL_HTTP_SKIP_LINK:
 					goto next;
 				case FL_OPERATION_TIMEOUT:
