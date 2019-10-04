@@ -1628,7 +1628,6 @@ __do_request(connection_t *conn)
 			goto resend_head;
 			break;
 		case HTTP_OK:
-		case HTTP_METHOD_NOT_ALLOWED:
 			break;
 		default:
 			return status_code;
@@ -1870,8 +1869,9 @@ reap(wr_cache_t *cachep, wr_cache_t *cachep2, connection_t *conn)
 
 					goto next;
 					break;
-				case HTTP_FORBIDDEN:
 				case HTTP_METHOD_NOT_ALLOWED:
+					update_operation_status("Method not allowed...");
+				case HTTP_FORBIDDEN:
 				case HTTP_INTERNAL_ERROR:
 				case HTTP_BAD_GATEWAY:
 				case HTTP_SERVICE_UNAV:
