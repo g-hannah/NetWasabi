@@ -2093,6 +2093,20 @@ __get_robots(connection_t *conn)
 	return 0;
 }
 
+static int
+__valid_url(char *url)
+{
+	assert(url);
+
+	if (!strstr(url, "http://") && !strstr(url, "https://"))
+		return 0;
+
+	if (!memchr(url, '.', (url + strlen(url))))
+		return 0;
+
+	return 1;
+}
+
 /*
  * ./webreaper <url> [options]
  */
@@ -2106,14 +2120,15 @@ main(int argc, char *argv[])
 
 	if (get_opts(argc, argv) < 0)
 	{
-		put_error_msg("main: failed to parse program options");
+		fprintf(stderr, "main: failed to parse program options\n");
 		goto fail;
 	}
 
-#if 0
-	if (!valid_url(argv[1]))
+	if (!__valid_url(argv[1]))
+	{
+		fprintf(stderr, "\"%s\" is not a valid URL\n", argv[1]);
 		goto fail;
-#endif
+	}
 
 	srand(time(NULL));
 
