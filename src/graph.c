@@ -311,6 +311,19 @@ matrix_bitprint(struct graph_ctx *g)
 }
 #endif
 
+/**
+ * graph_match_pattern - determine if data matches with pattern in node
+ * @data: the data to match pattern against
+ * @data_len: length of data to match against
+ * @pattern: the regex pattern to test
+ * @plen: the length of the pattern
+ */
+static int
+graph_match_pattern(void *data, size_t data_len, void *pattern, size_t plen)
+{
+	return 0;
+}
+
 struct graph_node *
 graph_get_node_by_data(struct graph_ctx *graph, void *data, size_t data_len)
 {
