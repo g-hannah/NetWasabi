@@ -319,6 +319,19 @@ graph_get_node_by_data(struct graph_ctx *graph, void *data, size_t data_len)
 
 	while (nptr)
 	{
+		if (memchr(npr->data, '*', nptr->data_len))
+		{
+			if !(graph_match_pattern(data, data_len, nptr->data, nptr->data_len))
+			{
+				nptr = nptr->left;
+				continue;
+			}
+			else
+			{
+				return nptr;
+			}
+		}
+
 		cmp = memcmp(data, nptr->data, data_len);
 
 		if (!cmp)
