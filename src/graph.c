@@ -321,7 +321,38 @@ matrix_bitprint(struct graph_ctx *g)
 static int
 graph_match_pattern(void *data, size_t data_len, void *pattern, size_t plen)
 {
-	return 0;
+	char *e = memchr((char *)pattern, '*', plen);
+	char *pend = ((char *)pattern + plen);
+	char *dend = ((char *)data + data_len);
+	char *d = (char *)data;
+	char *p = (char *)pattern;
+
+	if (!e)
+	{
+		if (data_len != plen)
+			return 0;
+
+		if (memcmp(d, p, data_len))
+			return 0;
+		else
+			return 1;
+	}
+	else
+	{
+		if (memcmp(d, p, (e - pattern)))
+			return 0;
+
+		++e;
+		p = e;
+		if (p < pend)
+		{
+			d += (e - pattern);
+			if (!strstr(d, p))
+				return 0;
+		}
+	}
+
+	return 1;
 }
 
 struct graph_node *
