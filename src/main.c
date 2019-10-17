@@ -2238,9 +2238,8 @@ main(int argc, char *argv[])
 	 * and if so, use it to create a directed network
 	 * of URL tokens.
 	 */
-	if (__get_robots(&conn) < 0)
-		put_error_msg("No robots.txt file");
-
+	//if (__get_robots(&conn) < 0)
+		//put_error_msg("No robots.txt file");
 
 	http_parse_page(argv[1], conn.page);
 	url_len = strlen(argv[1]);
