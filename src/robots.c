@@ -37,6 +37,16 @@ __url_legality(struct graph_ctx *graph, char *url_page, int test_forbidden)
 	if (!e)
 		e = end;
 
+/*
+ * In some robots.txt files, there are pattern matching rules.
+ * For example, "?api*action=". So in that case, we can't just
+ * compare TOKEN1 and TOKEN2. Need to determine if our URL
+ * token matches the pattern stipulated within the data node
+ * of the graph. There will likely be no tokens after this any-
+ * way since the pattern always seem to be in the params given
+ * to the page.
+ */
+
 	while (1)
 	{
 		strncpy(token1, p, (e - p));
