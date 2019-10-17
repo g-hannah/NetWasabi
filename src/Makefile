@@ -23,8 +23,7 @@ PRIMARY_SOURCE = \
 	parse_links.c \
 	robots.c \
 	screen_utils.c \
-	utils_url.c \
-	webreaper.c
+	utils_url.c
 
 PRIMARY_OBJS := $(PRIMARY_SOURCE:.c=.o)
 
