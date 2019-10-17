@@ -327,6 +327,11 @@ graph_match_pattern(void *data, size_t data_len, void *pattern, size_t plen)
 	char *d = (char *)data;
 	char *p = (char *)pattern;
 
+/*
+ * TODO: Either write a module for pattern matching (for practice) or use
+ * the functions provided in regex.h
+ */
+
 	if (!e)
 	{
 		if (data_len != plen)
