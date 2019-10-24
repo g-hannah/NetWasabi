@@ -17,34 +17,6 @@
 #include "malloc.h"
 #include "webreaper.h"
 
-#if 0
-static sigjmp_buf __TIMEOUT__;
-static struct sigaction siga_old;
-static struct sigaction siga_new;
-
-#define __SET_ALARM(s, r)\
-do {\
-	clear_struct(&siga_old);\
-	clear_struct(&siga_new);\
-	siga_new.sa_handler = handle_timeout;\
-	siga_new.sa_flags = 0;\
-	sigemptyset(&siga_new.sa_mask);\
-	if (sigaction(SIGALRM, &siga_new, &siga_old) < 0)\
-		fprintf(stderr, "%s%sFailed to set signal handler for SIGALRM%s\n", COL_RED, ATTENTION_STR, COL_END);\
-	if (sigsetjmp(__TIMEOUT__, 0) != 0)\
-	{\
-		return (r) ? FL_OPERATION_TIMEOUT : -1;\
-	}\
-	alarm((s));\
-} while (0)
-
-#define __RESET_ALARM()\
-do {\
-	alarm(0);\
-	sigaction(SIGALRM, &siga_old, NULL);\
-} while (0)
-#endif
-
 static inline void
 __buf_reset_head(buf_t *buf)
 {
@@ -928,5 +900,64 @@ buf_replace(buf_t *buf, char *pattern, char *with)
 		strncpy(p, with, replace_len);
 	}
 
+	return;
+}
+
+void
+buf_push_tail(buf_t *buf, size_t by)
+{
+	assert(buf);
+
+	if ((buf->buf_tail - by) < buf->buf_head)
+	{
+		__buf_push_tail(buf, (buf->buf_tail - buf->buf_head));
+		return;
+	}
+
+	__buf_push_tail(buf, by);
+	return;
+}
+
+void
+buf_pull_tail(buf_t *buf, size_t by)
+{
+	assert(buf);
+
+	if ((buf->buf_tail + by) > buf->buf_end)
+	{
+		buf_extend(buf, BUF_ALIGN_SIZE((by - (buf->buf_end - buf->buf_tail))));
+	}
+
+	__buf_pull_tail(buf, by);
+	return;
+}
+
+void
+buf_push_head(buf_t *buf, size_t by)
+{
+	assert(buf);
+
+	if ((buf->buf_head - by) < buf->data)
+	{
+		__buf_push_head(buf, (buf->buf_head - buf->data));
+		return;
+	}
+
+	__buf_push_head(buf, by);
+	return;
+}
+
+void
+buf_pull_head(buf_t *buf, size_t by)
+{
+	assert(buf);
+
+	if ((buf->buf_head + by) > buf->buf_tail)
+	{
+		__buf_pull_head(buf, (buf->buf_tail - buf->buf_head));
+		return;
+	}
+
+	__buf_pull_head(buf, by);
 	return;
 }
