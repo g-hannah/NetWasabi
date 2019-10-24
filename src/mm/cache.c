@@ -83,7 +83,7 @@ static inline void *__wr_cache_obj(wr_cache_t *cachep, int idx)
 
 static inline off_t __wr_cache_obj_offset(wr_cache_t *cachep, void *obj)
 {
-	return (off_t)((char *)obj - (char *)cachep->cachep);
+	return (off_t)((char *)obj - (char *)cachep->cache);
 }
 
 static inline int __wr_cache_obj_index(wr_cache_t *cachep, void *obj)
@@ -201,7 +201,6 @@ wr_cache_obj_used(wr_cache_t *cachep, void *obj)
 {
 	int obj_idx;
 	int capacity = cachep->capacity;
-	size_t objsize = cachep->objsize;
 	unsigned char *bm = cachep->free_bitmap;
 
 	obj_idx = __wr_cache_obj_index(cachep, obj);
@@ -238,9 +237,8 @@ wr_cache_create(char *name,
 	int capacity = (WR_CACHE_SIZE / size);
 	int bitmap_size;
 	int	i;
-	void *slot;
 
-	bitmap_size = (capacity / 8);
+	bitmap_size = (capacity >> 3);
 	if (capacity & 0x7)
 		++bitmap_size;
 
@@ -295,9 +293,6 @@ wr_cache_destroy(wr_cache_t *cachep)
 
 	int	i;
 	int capacity = wr_cache_capacity(cachep);
-	void *slot = NULL;
-	void *cache = NULL;
-	size_t objsize = cachep->objsize;
 
 #ifdef DEBUG
 	fprintf(stderr,
@@ -323,12 +318,11 @@ wr_cache_destroy(wr_cache_t *cachep)
 		cachep->free_bitmap = NULL;
 	}
 
-	cache = cachep->cache;
-
 	if (cachep->dtor)
 	{
+		wr_cache_dtor_t dtor = cachep->dtor;
 		for (i = 0; i < capacity; ++i)
-			cachep->dtor(__wr_cache_obj(cachep, i));
+			dtor(__wr_cache_obj(cachep, i));
 	}
 
 	if (cachep->assigned_list)
@@ -365,9 +359,7 @@ wr_cache_alloc(wr_cache_t *cachep, void *ptr_addr)
 {
 	assert(cachep);
 
-	void *cache = cachep->cache;
 	void *slot = NULL;
-	size_t objsize = cachep->objsize;
 	size_t cache_size = cachep->cache_size;
 	size_t new_size;
 	uint16_t bitmap_size = cachep->bitmap_size;
@@ -377,11 +369,10 @@ wr_cache_alloc(wr_cache_t *cachep, void *ptr_addr)
 	int new_capacity;
 	int added_capacity;
 	int i;
-	int in_cache = 0;
 	unsigned char *bm;
 	void *old_cache;
 	void *owner_addr = ptr_addr;
-	off_t owner_off
+	off_t owner_off;
 
 #ifdef DEBUG
 	fprintf(stderr,
@@ -431,7 +422,7 @@ wr_cache_alloc(wr_cache_t *cachep, void *ptr_addr)
 			"New capacity = %d objects\n"
 			"Added capacity = %d objects\n",
 			cachep->name,
-			objsize,
+			cachep->objsize,
 			cache_size,
 			old_capacity,
 			new_size,
@@ -448,7 +439,6 @@ wr_cache_alloc(wr_cache_t *cachep, void *ptr_addr)
 		if (__wr_cache_is_in_cache(cachep, owner_addr))
 		{
 			owner_off = (off_t)((char *)owner_addr - (char *)cachep->cache);
-			in_cache = 1;
 		}
 
 		old_cache = cachep->cache;
@@ -488,8 +478,9 @@ wr_cache_alloc(wr_cache_t *cachep, void *ptr_addr)
 
 		if (cachep->ctor)
 		{
+			wr_cache_ctor_t ctor = cachep->ctor;
 			for (i = old_capacity; i < new_capacity; ++i)
-				cachep->ctor(__wr_cache_obj(cachep, i));
+				ctor(__wr_cache_obj(cachep, i));
 		}
 
 		idx = __wr_cache_next_free_idx(cachep);
@@ -519,9 +510,8 @@ wr_cache_dealloc(wr_cache_t *cachep, void *slot, void *ptr_addr)
 
 	int obj_idx;
 	int nr_assigned = cachep->nr_assigned;
-	size_t objsize = cachep->objsize;
 
-	obj_idx = (int)(((char *)slot - (char *)cachep->cache) / objsize);
+	obj_idx = __wr_cache_obj_index(cachep, slot);
 
 /*
 	fprintf(stderr,
@@ -575,7 +565,6 @@ wr_cache_clear_all(wr_cache_t *cachep)
 {
 	void *slot;
 	void *owner;
-	size_t objsize = cachep->objsize;
 	int capacity = cachep->capacity;
 	int i;
 
