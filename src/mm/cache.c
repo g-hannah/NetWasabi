@@ -410,8 +410,8 @@ wr_cache_alloc(wr_cache_t *cachep, void *ptr_addr)
 		new_capacity = (old_capacity * 2);
 		added_capacity = (new_capacity - old_capacity);
 		new_size = (new_capacity * cachep->objsize);
-		new_bitmap_size = (new_capacity >> 3);
-		if (new_capacity & 0x7)
+		new_bitmap_size = (new_capacity / BITS_PER_CHAR);
+		if (new_capacity & (BITS_PER_CHAR - 1))
 			++new_bitmap_size;
 
 #ifdef DEBUG
