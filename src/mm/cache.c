@@ -6,6 +6,8 @@
 #include "http.h"
 #include "malloc.h"
 
+#define BITS_PER_CHAR (sizeof(char) * 8)
+
 /**
  * __wr_cache_next_free_idx - get index of next free object
  * @cachep: pointer to the metadata cache structure
@@ -238,8 +240,8 @@ wr_cache_create(char *name,
 	int bitmap_size;
 	int	i;
 
-	bitmap_size = (capacity >> 3);
-	if (capacity & 0x7)
+	bitmap_size = (capacity / BITS_PER_CHAR);
+	if (capacity & (BITS_PER_CHAR - 1))
 		++bitmap_size;
 
 	wr_cache_t	*cachep = malloc(sizeof(wr_cache_t));
