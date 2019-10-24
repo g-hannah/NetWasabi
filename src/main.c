@@ -2026,6 +2026,7 @@ __check_directory(void)
 	return;
 }
 
+#if 0
 static int
 __get_robots(connection_t *conn)
 {
@@ -2092,6 +2093,7 @@ __get_robots(connection_t *conn)
 
 	return 0;
 }
+#endif
 
 static int
 __valid_url(char *url)
@@ -2101,7 +2103,7 @@ __valid_url(char *url)
 	if (!strstr(url, "http://") && !strstr(url, "https://"))
 		return 0;
 
-	if (!memchr(url, '.', (url + strlen(url))))
+	if (!memchr(url, '.', strlen(url)))
 		return 0;
 
 	return 1;
