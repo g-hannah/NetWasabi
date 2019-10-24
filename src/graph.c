@@ -311,6 +311,7 @@ matrix_bitprint(struct graph_ctx *g)
 }
 #endif
 
+#if 0
 /**
  * graph_match_pattern - determine if data matches with pattern in node
  * @data: the data to match pattern against
@@ -359,6 +360,7 @@ graph_match_pattern(void *data, size_t data_len, void *pattern, size_t plen)
 
 	return 1;
 }
+#endif
 
 struct graph_node *
 graph_get_node_by_data(struct graph_ctx *graph, void *data, size_t data_len)
@@ -368,7 +370,8 @@ graph_get_node_by_data(struct graph_ctx *graph, void *data, size_t data_len)
 
 	while (nptr)
 	{
-		if (memchr(npr->data, '*', nptr->data_len))
+#if 0
+		if (memchr(nptr->data, '*', nptr->data_len))
 		{
 			if !(graph_match_pattern(data, data_len, nptr->data, nptr->data_len))
 			{
@@ -380,6 +383,7 @@ graph_get_node_by_data(struct graph_ctx *graph, void *data, size_t data_len)
 				return nptr;
 			}
 		}
+#endif
 
 		cmp = memcmp(data, nptr->data, data_len);
 
