@@ -190,10 +190,6 @@ reconnect(connection_t *conn)
 	close(conn->sock);
 	conn->sock = -1;
 
-	//fprintf(stdout, "%sReconnecting to %s\n", ACTION_ING_STR, conn->host);
-	//update_operation_status("Reconnecting to remote host");
-
-
 	if (option_set(OPT_USE_TLS))
 	{
 		SSL_CTX_free(conn->ssl_ctx);
