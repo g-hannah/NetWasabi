@@ -17,6 +17,8 @@
 #include "malloc.h"
 #include "webreaper.h"
 
+#define BUF_ALIGN_SIZE(s) (((s) + 0xf) & ~(0xf))
+
 static inline void
 __buf_reset_head(buf_t *buf)
 {
@@ -114,7 +116,7 @@ buf_shift(buf_t *buf, off_t offset, size_t range)
 	size_t bytes;
 
 	if (range >= slack)
-		buf_extend(buf, __ALIGN(((range - slack) * 2)));
+		buf_extend(buf, BUF_ALIGN_SIZE(((range - slack) * 2)));
 
 	from = (buf->buf_head + offset);
 	to = (from + range);
@@ -187,7 +189,7 @@ buf_append(buf_t *buf, char *str)
 
 	if (len >= slack)
 	{
-		buf_extend(buf, __ALIGN(((len - slack) * 2)));
+		buf_extend(buf, BUF_ALIGN_SIZE(((len - slack) * 2)));
 	}
 
 	strcat(buf->buf_tail, str);
@@ -206,7 +208,7 @@ buf_append_ex(buf_t *buf, char *str, size_t bytes)
 	size_t slack = buf_slack(buf);
 
 	if (bytes >= slack)
-		buf_extend(buf, __ALIGN(((bytes - slack) * 2)));
+		buf_extend(buf, BUF_ALIGN_SIZE(((bytes - slack) * 2)));
 
 	strncpy(buf->buf_tail, str, bytes);
 
@@ -240,7 +242,7 @@ buf_init(buf_t *buf, size_t bufsize)
 
 	memset(buf, 0, sizeof(*buf));
 
-	if (!(buf->data = calloc(__ALIGN(bufsize), 1)))
+	if (!(buf->data = calloc(BUF_ALIGN_SIZE(bufsize), 1)))
 	{
 		perror("buf_init: calloc error");
 		return -1;
@@ -289,7 +291,7 @@ buf_read_fd(int fd, buf_t *buf, size_t bytes)
 		return 0;
 
 	if (bytes > buf_size)
-		buf_extend(buf, __ALIGN((bytes - buf_size)));
+		buf_extend(buf, BUF_ALIGN_SIZE((bytes - buf_size)));
 
 	slack = buf_slack(buf);
 
@@ -311,11 +313,9 @@ buf_read_fd(int fd, buf_t *buf, size_t bytes)
 		total_read += n;
 		slack -= n;
 
-#define __ALIGN(size) (((size) + 0xf) & ~(0xf))
-
 		if (!slack && toread)
 		{
-			buf_extend(buf, __ALIGN(toread));
+			buf_extend(buf, BUF_ALIGN_SIZE(toread));
 			slack = buf_slack(buf);
 		}
 
@@ -367,7 +367,7 @@ buf_read_socket(int sock, buf_t *buf, size_t toread)
 
 		if (toread >= slack)
 		{
-			buf_extend(buf, __ALIGN((toread - slack) * 2));
+			buf_extend(buf, BUF_ALIGN_SIZE((toread - slack) * 2));
 			slack = buf_slack(buf);
 		}
 
@@ -410,7 +410,7 @@ buf_read_socket(int sock, buf_t *buf, size_t toread)
 
 				if (!slack)
 				{
-					buf_extend(buf, __ALIGN((toread * 2)));
+					buf_extend(buf, BUF_ALIGN_SIZE((toread * 2)));
 					slack = buf_slack(buf);
 				}
 			}
@@ -453,7 +453,7 @@ buf_read_socket(int sock, buf_t *buf, size_t toread)
 
 				if (!slack)
 				{
-					buf_extend(buf, __ALIGN((buf->buf_size / 2)));
+					buf_extend(buf, BUF_ALIGN_SIZE((buf->buf_size / 2)));
 					slack = buf_slack(buf);
 				}
 			}
@@ -514,7 +514,7 @@ buf_read_tls(SSL *ssl, buf_t *buf, size_t toread)
 	{
 		if (toread >= slack)
 		{
-			buf_extend(buf, __ALIGN(((toread - slack) * 2)));
+			buf_extend(buf, BUF_ALIGN_SIZE(((toread - slack) * 2)));
 			slack = buf_slack(buf);
 		}
 
@@ -583,7 +583,7 @@ buf_read_tls(SSL *ssl, buf_t *buf, size_t toread)
 
 				if (!slack)
 				{
-					buf_extend(buf, __ALIGN((toread * 2)));
+					buf_extend(buf, BUF_ALIGN_SIZE((toread * 2)));
 					slack = buf_slack(buf);
 				}
 			}
@@ -656,7 +656,7 @@ buf_read_tls(SSL *ssl, buf_t *buf, size_t toread)
 
 				if (!slack)
 				{
-					buf_extend(buf, __ALIGN((buf->buf_size / 2)));
+					buf_extend(buf, BUF_ALIGN_SIZE((buf->buf_size / 2)));
 					slack = buf_slack(buf);
 				}
 			}
@@ -857,7 +857,7 @@ buf_copy(buf_t *to, buf_t *from)
 	assert(from);
 
 	if (to->buf_size < from->buf_size)
-		buf_extend(to, __ALIGN((from->buf_size - to->buf_size)));
+		buf_extend(to, BUF_ALIGN_SIZE((from->buf_size - to->buf_size)));
 
 	memcpy(to->data, from->data, from->buf_size);
 	to->buf_end = (to->data + from->buf_size);
