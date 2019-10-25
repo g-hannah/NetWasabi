@@ -1,1 +1,5 @@
 Correctly handle glob character in robots URL token rules
+
+Concentrate all HTTP-related routines to http.c, which means getting rid of __handle301() from main(). However, in __handle301(), we
+make a decision on whether to archive the old URL in order to avoid asking for it again in the future. We'll have to also build this
+into the http.c file itself.
