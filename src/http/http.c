@@ -14,9 +14,49 @@
 #include "malloc.h"
 #include "webreaper.h"
 
+#define HTTP_SMALL_READ_BLOCK 64
+#define HTTP_MAX_WAIT_TIME 6
+
 static struct sigaction oact;
 static struct sigaction nact;
 static sigjmp_buf TIMEOUT;
+
+//static wr_cache_t *http_cookie_cache;
+/* Generic header pointer to allocate from cache in a loop */
+//static http_header_t *header = NULL;
+
+#if 0
+static void
+__attribute__((constructor)) __http_init(void)
+{
+	if (!(http_cookie_cache = wr_cache_create("http_cookie_cache",
+			sizeof(http_header_t),
+			0,
+			wr_cache_http_header_ctor,
+			wr_cache_http_header_dtor)))
+	{
+		fprintf(stderr, "__http_init: failed to create cache for HTTP cookie objects\n");
+		goto fail;
+	}
+
+	return;
+
+	fail:
+	exit(EXIT_FAILURE);
+}
+
+static void
+__attribute__((destructor)) __http_fini(void)
+{
+	if (http_cookie_cache)
+	{
+		wr_cache_clear_all(http_cookie_cache);
+		wr_cache_destroy(http_cookie_cache);
+	}
+
+	return;
+}
+#endif
 
 static void
 __http_handle_timeout(int signo)
@@ -164,6 +204,44 @@ wr_cache_http_link_dtor(void *http_link)
 	return;
 }
 
+#if 0
+static int
+__http_check_cookies(buf_t *buf)
+{
+	assert(buf);
+
+	if (strstr(buf->buf_head, "Set-Cookie"))
+	{
+		off_t off = 0;
+		wr_cache_clear_all(http_cookie_cache);
+		while (http_check_header(buf, "Set-Cookie", off, &off))
+		{
+			if (!(header = (http_header_t *)wr_cache_alloc(http_cookie_cache, &header)))
+			{
+				fprintf(stderr, "__http_check_cookies: failed to allocate HTTP header cache object\n");
+				goto fail;
+			}
+
+			if (!(http_fetch_header(buf, "Set-Cookie", header, off)))
+			{
+				fprintf(stderr, "__http_check_cookies: failed to extract Set-Cookie header field\n");
+				goto fail_dealloc;
+			}
+
+			++off;
+		}
+	}
+
+	return 0;
+
+	fail_dealloc:
+	wr_cache_clear_all(http_cookie_cache);
+
+	fail:
+	return -1;
+}
+#endif
+
 int
 http_build_request_header(connection_t *conn, const char *http_verb, const char *target)
 {
@@ -235,6 +313,21 @@ http_build_request_header(connection_t *conn, const char *http_verb, const char 
 	}
 
 	buf_append(buf, header_buf);
+
+#if 0
+	int nr_cookies = wr_cache_nr_used(http_cookie_cache);
+	int i;
+	http_header_t *__c = (http_header_t *)http_cookie_cache->cache;
+
+	for (i = 0; i < nr_cookies; ++i)
+	{
+		if (wr_cache_obj_used(http_cookie_cache, __c))
+			http_append_header(buf, __c);
+
+		++__c;
+	}
+#endif
+
 	buf_destroy(&tmp);
 
 	return 0;
@@ -270,8 +363,6 @@ http_send_request(connection_t *conn)
 	return -1;
 }
 
-#define HTTP_SMALL_READ_BLOCK 64
-#define MAX_WAIT_TIME 12
 
 static int
 __http_read_until_eoh(connection_t *conn, char **p)
@@ -298,12 +389,11 @@ __http_read_until_eoh(connection_t *conn, char **p)
 	if (sigsetjmp(TIMEOUT, 1) != 0)
 	{
 		update_operation_status("Timed out waiting for response from server");
-		//fprintf(stderr, "%s%sTimed out waiting for HTTP response from server%s\n", COL_RED, ACTION_DONE_STR, COL_END);
 		sigaction(SIGALRM, &oact, NULL);
 		return FL_OPERATION_TIMEOUT;
 	}
 
-	alarm(MAX_WAIT_TIME);
+	alarm(HTTP_MAX_WAIT_TIME);
 	while (!(*p))
 	{
 		if (option_set(OPT_USE_TLS))
@@ -323,7 +413,6 @@ __http_read_until_eoh(connection_t *conn, char **p)
 				if (!strstr(buf->buf_head, "HTTP/") && strncmp("\r\n", buf->buf_head, 2))
 					goto out;
 				*p = strstr(buf->buf_head, HTTP_EOH_SENTINEL);
-				//fprintf(stderr, "*p == %p\n", *p);
 				if (*p)
 					goto out;
 		}
@@ -613,6 +702,49 @@ __http_do_chunked_recv(connection_t *conn)
 	return 0;
 }
 
+#if 0
+static int
+__http_set_new_location(connection_t *conn)
+{
+	assert(conn);
+
+	http_header_t *location = NULL;
+
+	if (!(location = (http_header_t *)wr_cache_alloc(http_hcache, &location)))
+	{
+		fprintf(stderr, "__http_set_new_location: failed to obtain HTTP header cache object\n");
+		goto fail;
+	}
+
+	if (!http_fetch_header(&conn->read_buf, "Location", location, (off_t)0))
+	{
+		fprintf(stderr, "__http_set_new_location: failed to find HTTP header field \"Location\"\n");
+		goto fail_dealloc;
+	}
+
+	if (!http_parse_host(location->value, conn->host))
+	{
+		fprintf(stderr, "__http_set_new_location: failed to parse host from URL\n");
+		goto fail_dealloc;
+	}
+
+	if (!http_parse_page(location->value, conn->page))
+	{
+		fprintf(stderr, "__http_set_new_location: failed to parse page from URL\n");
+		goto fail_dealloc;
+	}
+
+	wr_cache_dealloc(http_hcache, location, &location);
+	return 0;
+
+	fail_dealloc:
+	wr_cache_dealloc(http_hcache, location, &location);
+
+	fail:
+	return -1;
+}
+#endif
+
 /**
  * http_recv_response - receive HTTP response.
  * @conn: connection context
@@ -627,6 +759,7 @@ http_recv_response(connection_t *conn)
 	size_t overread;
 	ssize_t bytes;
 	int rv;
+	//int http_status_code;
 	http_header_t *content_len = NULL;
 	http_header_t *transfer_enc = NULL;
 	buf_t *buf = &conn->read_buf;
@@ -643,10 +776,35 @@ http_recv_response(connection_t *conn)
 	if (!transfer_enc)
 		goto fail_dealloc;
 
+	//__retry:
 	rv = __http_read_until_eoh(conn, &p);
 
 	if (rv < 0 || FL_OPERATION_TIMEOUT == rv)
 		goto fail_dealloc;
+
+	//__http_check_cookies(buf);
+
+#if 0
+	http_status_code = http_status_code_int(buf);
+	if (HTTP_FOUND == http_status_code || HTTP_MOVED_PERMANENTLY == http_status_code)
+	{
+		if (__http_set_new_location(conn) < 0)
+			goto fail_dealloc;
+
+		buf_clear(&conn->read_buf);
+		buf_clear(&conn->write_buf);
+
+		http_build_request_header(conn, HTTP_GET, conn->page);
+
+		if (http_send_request(conn) < 0)
+		{
+			fprintf(stderr, "http_recv_response: failed to resend HTTP request after \"%s\" response\n", http_status_code_string(http_status_code));
+			goto fail_dealloc;
+		}
+
+		goto __retry;
+	}
+#endif
 
 	if (!p)
 	{
