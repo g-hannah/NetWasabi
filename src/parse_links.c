@@ -35,6 +35,7 @@ __url_acceptable(connection_t *conn, wr_cache_t *e_cache, wr_cache_t *f_cache, b
 		if (url->data_len < httplen || url->data_len < httpslen)
 			return 0;
 
+#if 0
 		if (got_token_graph(wrctx))
 		{
 			http_parse_page(url->buf_head, tmp_page);
@@ -43,6 +44,7 @@ __url_acceptable(connection_t *conn, wr_cache_t *e_cache, wr_cache_t *f_cache, b
 				return 0;
 			}
 		}
+#endif
 	}
 
 	if (local_archive_exists(url->buf_head))
