@@ -1,7 +1,6 @@
 CC := gcc
 CFLAGS := -Wall -Werror
 BUILD := 0.0.1
-VPATH := include
 DEBUG := 0
 
 .PHONY: clean
