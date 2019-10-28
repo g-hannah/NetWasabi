@@ -1426,6 +1426,7 @@ __handle301(connection_t *conn)
 		buf_destroy(&tmp_url);
 		buf_destroy(&tmp_full);
 
+#if 0
 		if (got_token_graph(wrctx))
 		{
 			if (!robots_eval_url(allowed, forbidden, conn->page))
@@ -1434,6 +1435,7 @@ __handle301(connection_t *conn)
 				goto out_dealloc;
 			}
 		}
+#endif
 	}
 	else
 	{
@@ -1471,6 +1473,7 @@ __handle301(connection_t *conn)
 			strncpy(conn->full_url, location->value, location->vlen);
 			conn->full_url[location->vlen] = 0;
 
+#if 0
 			if (got_token_graph(wrctx))
 			{
 				if (!robots_eval_url(allowed, forbidden, conn->page))
@@ -1479,6 +1482,7 @@ __handle301(connection_t *conn)
 					goto out_dealloc;
 				}
 			}
+#endif
 		}
 	}
 
