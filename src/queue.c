@@ -1,5 +1,7 @@
 #include <assert.h>
+#include <errno.h>
 #include <pthread.h>
+#include <stdio.h>
 #include "queue.h"
 #include "webreaper.h"
 
