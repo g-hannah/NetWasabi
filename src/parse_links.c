@@ -31,6 +31,8 @@ static int
 __url_acceptable(connection_t *conn, wr_cache_t *e_cache, wr_cache_t *f_cache, buf_t *url)
 {
 	assert(conn);
+	assert(e_cache);
+	assert(f_cache);
 	assert(url);
 
 	char *tail = url->buf_tail;
