@@ -17,6 +17,16 @@ static int nr_dups = 0;
 static int nr_urls_call = 0;
 static int nr_urls_total = 0;
 
+static const char *const __disallowed_tokens[] =
+{
+	"javascript:",
+	"data:image",
+	".exe",
+	".dll",
+	"cgi-",
+	(char *)NULL
+};
+
 static int
 __url_acceptable(connection_t *conn, wr_cache_t *e_cache, wr_cache_t *f_cache, buf_t *url)
 {
@@ -25,6 +35,7 @@ __url_acceptable(connection_t *conn, wr_cache_t *e_cache, wr_cache_t *f_cache, b
 
 	char *tail = url->buf_tail;
 	static char tmp_page[HTTP_URL_MAX];
+	int i;
 
 	if (url->data_len >= 256)
 		return 0;
@@ -56,20 +67,11 @@ __url_acceptable(connection_t *conn, wr_cache_t *e_cache, wr_cache_t *f_cache, b
 	if (memchr(url->buf_head, '#', tail - url->buf_head))
 		return 0;
 
-	if (strstr(url->buf_head, "javascript:"))
-		return 0;
-
-	if (strstr(url->buf_head, "data:image"))
-		return 0;
-
-	if (strstr(url->buf_head, ".exe"))
-		return 0;
-
-	if (strstr(url->buf_head, ".dll"))
-		return 0;
-
-	if (strstr(url->buf_head, "cgi-"))
-		return 0;
+	for (i = 0; __disallowed_tokens[i] != NULL; ++i)
+	{
+		if (strstr(url->buf_head, __disallowed_tokens[i]))
+			return 0;
+	}
 	
 	if (is_xdomain(conn, url))
 	{
