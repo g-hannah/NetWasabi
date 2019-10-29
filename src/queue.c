@@ -34,18 +34,20 @@ __attribute__((destructor)) __queue_fini(void)
  * @item: the item to enqueue
  */
 int
-enqueue(struct queue *queue, struct queue_item *item)
+enqueue(struct queue *queue, void *data)
 {
 	assert(queue);
 	assert(item);
 
 	int ret;
-	pthread_mutex_lock(&qmtx);
 
-	ret = 1;
+	pthread_mutex_lock(&qmtx);
 
 	if (QUEUE_FULL(queue))
 		goto out_release_mutex;
+
+	struct queue_item *front = malloc(sizeof(struct queue_item));
+	ret = 1;
 
 	item->prev = NULL;
 	item->next = QUEUE_BACK(queue);
