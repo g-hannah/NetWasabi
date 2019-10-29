@@ -77,17 +77,17 @@ dequeue(struct queue *queue)
 	void *ret;
 
 	pthread_mutex_lock(&qmtx);
+
 	ret = (void *)NULL;
 
 	if (QUEUE_EMPTY(queue))
 		goto out_release_mutex;
 
-	struct queue_item *qi = QUEUE_FRONT(queue);
-	qi->prev->next = NULL;
+	struct queue_item *front = QUEUE_FRONT(queue);
+	front->prev->next = NULL;
 	QUEUE_DEC(queue);
-	void *d = qi->data;
-	free(qi);
-	ret = d;
+	ret = front->data;
+	free(front);
 
 	out_release_mutex:
 	pthread_mutex_unlock(&qmtx);
