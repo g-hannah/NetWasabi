@@ -40,7 +40,7 @@ struct queue_item
 	struct queue_item *prev;
 	struct queue_item *next;
 	void *data;
-	size_t data_len;
+	size_t size;
 };
 
 #endif /* !defined QUEUE_H */
