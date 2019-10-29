@@ -47,6 +47,7 @@ enqueue(struct queue *queue, struct queue_item *item)
 	if (QUEUE_FULL(queue))
 		goto out_release_mutex;
 
+	item->prev = NULL;
 	item->next = QUEUE_BACK(queue);
 	QUEUE_BACK(queue)->prev = item;
 	queue->back = item;
