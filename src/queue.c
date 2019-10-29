@@ -34,7 +34,7 @@ __attribute__((destructor)) __queue_fini(void)
  * @item: the item to enqueue
  */
 int
-enqueue(struct queue *queue, void *data)
+enqueue(struct queue *queue, void *data, size_t size)
 {
 	assert(queue);
 	assert(item);
@@ -53,6 +53,7 @@ enqueue(struct queue *queue, void *data)
 	back->next = QUEUE_BACK(queue);
 	QUEUE_BACK(queue)->prev = back;
 	back->data = data;
+	back->size = size;
 
 	QUEUE_BACK(queue) = back;
 	QUEUE_INC(queue);
