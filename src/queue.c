@@ -46,13 +46,15 @@ enqueue(struct queue *queue, void *data)
 	if (QUEUE_FULL(queue))
 		goto out_release_mutex;
 
-	struct queue_item *front = malloc(sizeof(struct queue_item));
+	struct queue_item *back = malloc(sizeof(struct queue_item));
 	ret = 1;
 
-	item->prev = NULL;
-	item->next = QUEUE_BACK(queue);
-	QUEUE_BACK(queue)->prev = item;
-	queue->back = item;
+	back->prev = NULL;
+	back->next = QUEUE_BACK(queue);
+	QUEUE_BACK(queue)->prev = back;
+	back->data = data;
+
+	QUEUE_BACK(queue) = back;
 	QUEUE_INC(queue);
 	ret = 0;
 
