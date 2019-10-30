@@ -43,11 +43,11 @@ enqueue(struct queue *queue, void *data, size_t size)
 
 	pthread_mutex_lock(&qmtx);
 
+	ret = 1;
 	if (QUEUE_FULL(queue))
 		goto out_release_mutex;
 
 	struct queue_item *back = malloc(sizeof(struct queue_item));
-	ret = 1;
 
 	back->prev = NULL;
 	back->next = QUEUE_BACK(queue);
