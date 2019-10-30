@@ -4,6 +4,7 @@
 #include <stdint.h>
 #include <string.h>
 #include <sys/ioctl.h>
+#include "cache.h"
 #include "connection.h"
 #include "graph.h"
 
@@ -124,6 +125,13 @@ struct webreaper_ctx
 	unsigned int nr_requests;
 	unsigned int nr_pages;
 	unsigned int nr_errors;
+};
+
+struct worker_args
+{
+	cache_t *cache1;
+	cache_t *cache2;
+	connection_t *conn;
 };
 
 #define keep_trailing_slash(w) ((w).trailing_slash)
