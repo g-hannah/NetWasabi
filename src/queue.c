@@ -28,6 +28,30 @@ __attribute__((destructor)) __queue_fini(void)
 	pthread_mutex_destroy(&qmtx);
 }
 
+int
+queue_init(struct queue *queue, int max)
+{
+	assert(queue);
+	assert(max > 0);
+
+	if (!(queue = malloc(sizeof(struct queue))))
+	{
+		fprintf(stderr, "queue_init: failed to allocate memory for queue (%s)\n", strerror(errno));
+		goto fail;
+	}
+
+	queue->back = NULL;
+	queue->front = NULL;
+	queue->nr_queue = 0;
+	queue->nr_max = max;
+	queue->full = 0;
+
+	return 0;
+
+	fail:
+	return -1;
+}
+
 /**
  * enqueue - place data into queue
  * @queue: the queue with data
