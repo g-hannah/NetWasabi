@@ -127,13 +127,6 @@ struct webreaper_ctx
 	unsigned int nr_errors;
 };
 
-struct worker_args
-{
-	cache_t *cache1;
-	cache_t *cache2;
-	char *main_url; /* threads will open their own independant connections to the web server */
-};
-
 #define keep_trailing_slash(w) ((w).trailing_slash)
 #define trailing_slash_off(w) ((w).trailing_slash &= ~((w).trailing_slash))
 #define trailing_slash_on(w) ((w).trailing_slash = 1)
@@ -187,7 +180,6 @@ void put_error_msg(const char *, ...) __nonnull ((1));
 
 uint32_t runtime_options;
 
-#define FAST_MODE_NR_WORKERS 4
 #define FAST_MODE 0x100
 
 #define option_set(o) ((o) & runtime_options)
