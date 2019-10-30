@@ -26,15 +26,6 @@ do {\
 	assert((q)->nr_queue >= 0);\
 } while (0)
 
-struct queue
-{
-	void *front;
-	void *back;
-	int nr_queue;
-	int nr_max;
-	int full;
-};
-
 struct queue_item
 {
 	struct queue_item *prev;
@@ -42,6 +33,16 @@ struct queue_item
 	void *data;
 	size_t size;
 };
+
+struct queue
+{
+	struct queue_item *front;
+	struct queue_item *back;
+	int nr_queue;
+	int nr_max;
+	int full;
+};
+
 
 int queue_init(struct queue *, int) __nonnull((1)) __wur;
 int enqueue(struct queue *, void *, size_t) __nonnull((1,2)) __wur;
