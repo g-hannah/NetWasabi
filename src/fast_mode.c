@@ -16,8 +16,6 @@
 
 static pthread_t workers[FAST_MODE_NR_WORKERS];
 static struct worker_ctx worker_ctx[FAST_MODE_NR_WORKERS];
-static pthread_mutex_t cache1_mtx;
-static pthread_mutex_t cache2_mtx;
 static pthread_barrier_t barrier;
 static volatile sig_atomic_t workers_begin = 0;
 static volatile sig_atomic_t cache_switch = 0;
@@ -152,8 +150,6 @@ worker_reap(void *args)
 	}
 
 	while (!workers_begin);
-
-	goal = worker_get_goal();
 
 	while (1)
 	{
