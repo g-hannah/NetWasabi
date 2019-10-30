@@ -17,6 +17,7 @@
 static pthread_t workers[FAST_MODE_NR_WORKERS];
 static struct worker_ctx worker_ctx[FAST_MODE_NR_WORKERS];
 static pthread_barrier_t barrier;
+static pthread_mutex_t cache_switch_mtx;
 static volatile sig_atomic_t workers_begin = 0;
 static volatile sig_atomic_t cache_switch = 0;
 
@@ -96,6 +97,12 @@ __ctor __fast_mode_init(void)
 		goto fail;
 	}
 
+	if (pthread_mutex_init(&cache_switch_mtx, NULL) != 0)
+	{
+		fprintf(stderr, "__fast_mode_init: failed to initialise cache switching mutex\n");
+		goto fail;
+	}
+
 	if (pthread_barrier_init(&barrier, NULL, FAST_MODE_NR_WORKERS) != 0)
 	{
 		fprintf(stderr, "__fast_mode_init: failed to initialise worker barrier\n");
@@ -116,6 +123,8 @@ __dtor __fast_mode_fini(void)
 	wr_cache_clear_all(http_headers);
 	wr_cache_clear_all(http_cookies);
 	wr_cache_clear_all(queue_cache);
+	pthread_mutex_destroy(&cache_switch_mtx);
+	pthread_barrier_destroy(&barrier);
 
 	wr_cache_destroy(cache1);
 	wr_cache_destroy(cache2);
@@ -132,6 +141,8 @@ worker_reap(void *args)
 	struct worker_ctx *ctx = (struct worker_ctx *)args;
 	wr_cache_t *cache1 = ctx->cache1;
 	wr_cache_t *cache2 = ctx->cache2;
+	wr_cache_t *fcache; /* pointer to current filling cache */
+	wr_cache_t *dcache; /* pointer to current draining cache */
 	http_link_t *link = NULL;
 	size_t len;
 	int goal;
@@ -157,6 +168,9 @@ worker_reap(void *args)
 		{
 			wr_cache_lock(&cache1->lock);
 
+			dcache = cache1;
+			fcache = cache2;
+
 			link = wr_cache_next_used(cache1);
 			len = strlen(link->url);
 			strcpy(conn.full_url, link->url);
@@ -167,6 +181,9 @@ worker_reap(void *args)
 		else
 		{
 			wr_cache_lock(&cache2->lock);
+
+			dcache = cache2;
+			fcache = cache1;
 
 			link = wr_cache_next_used(cache2);
 			len = strlen(link->url);
@@ -184,9 +201,6 @@ worker_reap(void *args)
 			case HTTP_NOT_FOUND:
 				break;
 			case HTTP_BAD_REQUEST:
-				if (wr_cache_nr_used(cookies) > 0)
-					wr_cache_clear_all(cookies);
-
 				buf_clear(wbuf);
 				buf_clear(rbuf);
 
@@ -200,9 +214,6 @@ worker_reap(void *args)
 			case HTTP_BAD_GATEWAY:
 			case HTTP_SERVICE_UNAV:
 			case HTTP_GATEWAY_TIMEOUT:
-				if (wr_cache_nr_used(cookies) > 0)
-					wr_cache_clear_all(cookies);
-
 				buf_clear(wbuf);
 				buf_clear(rbuf);
 
@@ -233,6 +244,28 @@ worker_reap(void *args)
 			default:
 				put_error_msg("Unknown HTTP status code returned (%d)", status_code);
 				goto fail;
+		}
+
+		next:
+		wr_cache_lock(dcache);
+
+		if (!wr_cache_nr_used(dcache))
+		{
+			wr_cache_unlock(dcache);
+			pthread_barrier_wait(&barrier);
+
+			pthread_mutex_lock(&cache_switch_mtx);
+
+			if (cache_switch)
+				cache_switch = 0;
+			else
+				cache_switch = 1;
+
+			pthread_mutex_unlock(&cache_switch_mtx);
+		}
+		else
+		{
+			wr_cache_unlock(dcache);
 		}
 	}
 
