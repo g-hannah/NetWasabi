@@ -14,6 +14,8 @@
  */
 static inline int __wr_cache_next_free_idx(wr_cache_t *cachep)
 {
+	wr_cache_lock(&cachep->lock);
+
 	unsigned char *bm = cachep->free_bitmap;
 	unsigned char bit = 1;
 	int capacity = cachep->capacity;
@@ -32,9 +34,13 @@ static inline int __wr_cache_next_free_idx(wr_cache_t *cachep)
 		}
 
 		if (idx >= capacity)
+		{
+			wr_cache_unlock(&cachep->lock);
 			return -1;
+		}
 	}
 
+	wr_cache_unlock(&cachep->lock);
 	return idx;
 }
 
@@ -63,6 +69,11 @@ do {\
 /**
  * wr_cache_nr_used - return the number of objects used
  * @cachep: pointer to the metadata cache structure
+ *
+ *		The cache lock must be held before calling this
+ *		because evidently the result of this call could
+ *		be invalid soon as it returns due to another
+ *		thread adding or removing objects.
  */
 inline int wr_cache_nr_used(wr_cache_t *cachep)
 {
@@ -286,6 +297,8 @@ wr_cache_create(char *name,
 	cachep->ctor = ctor;
 	cachep->dtor = dtor;
 
+	pthread_spin_init(&cachep->lock, 0);
+
 #ifdef DEBUG
 	printf(
 			"Created cache \"%s\"\n"
@@ -360,6 +373,8 @@ wr_cache_destroy(wr_cache_t *cachep)
 		cachep->cache = NULL;
 	}
 
+	pthread_spin_destroy(&cachep->lock);
+
 	clear_struct(cachep);
 	free(cachep);
 	cachep = NULL;
@@ -402,6 +417,8 @@ wr_cache_alloc(wr_cache_t *cachep, void *ptr_addr)
 		COL_END);
 #endif
 
+	wr_cache_lock(&cachep->lock);
+
 	assert(cachep->nr_assigned <= cachep->capacity);
 /*
  * Our bitmap can be deceiving and an index may be return
@@ -417,6 +434,8 @@ wr_cache_alloc(wr_cache_t *cachep, void *ptr_addr)
 		WR_CACHE_ASSIGN_PTR(cachep, owner_addr, slot);
 		WR_CACHE_DEC_FREE(cachep);
 		assert(wr_cache_nr_used(cachep) > 0);
+
+		wr_cache_unlock(&cachep->lock);
 		return slot;
 	}
 	else
@@ -508,9 +527,12 @@ wr_cache_alloc(wr_cache_t *cachep, void *ptr_addr)
 		WR_CACHE_ASSIGN_PTR(cachep, owner_addr, slot);
 		WR_CACHE_DEC_FREE(cachep);
 		assert(wr_cache_nr_used(cachep) > 0);
+
+		wr_cache_unlock(&cachep->lock);
 		return slot;
 	}
 
+	/* shouldn't reach here */
 	return NULL;
 }
 
@@ -527,6 +549,8 @@ wr_cache_dealloc(wr_cache_t *cachep, void *slot, void *ptr_addr)
 
 	int obj_idx;
 	int nr_assigned = cachep->nr_assigned;
+
+	wr_cache_lock(&cachep->lock);
 
 	obj_idx = __wr_cache_obj_index(cachep, slot);
 
@@ -552,6 +576,8 @@ wr_cache_dealloc(wr_cache_t *cachep, void *slot, void *ptr_addr)
 	WR_CACHE_INC_FREE(cachep);
 	__wr_cache_mark_unused(cachep, obj_idx);
 	assert(wr_cache_nr_used(cachep) >= 0);
+
+	wr_cache_unlock(&cachep->lock);
 
 	return;
 }
@@ -585,6 +611,8 @@ wr_cache_clear_all(wr_cache_t *cachep)
 	int capacity = cachep->capacity;
 	int i;
 
+	wr_cache_lock(&cachep);
+
 #ifdef DEBUG
 	fprintf(stderr,
 			"%sClearing all objects from cache \"%s\"\n"
@@ -612,6 +640,8 @@ wr_cache_clear_all(wr_cache_t *cachep)
 		cachep->nr_assigned,
 		COL_END);
 #endif
+
+	wr_cache_unlock(&cachep->lock);
 
 	return;
 }
