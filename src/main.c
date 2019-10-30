@@ -2348,6 +2348,12 @@ get_opts(int argc, char *argv[])
 			assert(crawl_delay(wrctx) < MAX_CRAWL_DELAY);
 		}
 		else
+		if (!strcmp("--fast-mode", argv[i])
+		|| !strcmp("-fm", argv[i]))
+		{
+			o.flags |= FAST_MODE;
+		}
+		else
 		if (!strcmp("--blacklist", argv[i])
 		|| !strcmp("-B", argv[i]))
 		{
@@ -2355,7 +2361,6 @@ get_opts(int argc, char *argv[])
 			int idx = 0;
 			size_t token_len;
 			USER_BLACKLIST_NR_TOKENS = 0;
-
 
 			++i;
 
@@ -2414,8 +2419,10 @@ get_opts(int argc, char *argv[])
 		}
 	}
 
-	//if (!crawl_delay(wrctx))
-		//crawl_delay(wrctx) = CRAWL_DELAY_DEFAULT;
+	if (crawl_delay(wrctx) > 0 && (o.flags & FAST_MODE))
+	{
+			craw_delay(wrctx) = 0;
+	}
 
 	if (!crawl_depth(wrctx))
 		crawl_depth(wrctx) = CRAWL_DEPTH_DEFAULT;
