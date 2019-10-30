@@ -179,6 +179,7 @@ void put_error_msg(const char *, ...) __nonnull ((1));
 
 uint32_t runtime_options;
 
+#define FAST_MODE_NR_WORKERS 4
 #define FAST_MODE 0x100
 
 #define option_set(o) ((o) & runtime_options)
