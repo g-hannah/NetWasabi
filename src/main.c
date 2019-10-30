@@ -17,6 +17,7 @@
 #include "cache.h"
 #include "http.h"
 #include "malloc.h"
+#include "queue.h"
 #include "robots.h"
 #include "screen_utils.h"
 #include "utils_url.h"
@@ -75,6 +76,7 @@ uint32_t runtime_options = 0;
 wr_cache_t *http_hcache;
 wr_cache_t *http_lcache;
 wr_cache_t *http_lcache2;
+struct queue *link_queue;
 wr_cache_t *cookies;
 size_t httplen;
 size_t httpslen;
