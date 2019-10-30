@@ -9,7 +9,7 @@
 pthread_mutex_t qmtx;
 
 static void
-__attribute__((constructor)) __queue_init(void)
+__ctor __queue_init(void)
 {
 	if (pthread_mutex_init(&qmtx) != 0)
 	{
@@ -24,7 +24,7 @@ __attribute__((constructor)) __queue_init(void)
 }
 
 static void
-__attribute__((destructor)) __queue_fini(void)
+__dtor __queue_fini(void)
 {
 	pthread_mutex_destroy(&qmtx);
 }
