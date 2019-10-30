@@ -8,6 +8,18 @@
 
 #define BITS_PER_CHAR (sizeof(char) * 8)
 
+static inline void
+wr_cache_lock(pthread_spinlock_t *lock)
+{
+	pthread_spin_lock(lock);
+}
+
+static inline void
+wr_cache_unlock(pthread_spinlock_t *lock)
+{
+	pthread_spin_unlock(lock);
+}
+
 /**
  * __wr_cache_next_free_idx - get index of next free object
  * @cachep: pointer to the metadata cache structure

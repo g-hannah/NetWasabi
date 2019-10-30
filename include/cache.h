@@ -45,5 +45,7 @@ void *wr_cache_next_used(wr_cache_t *) __nonnull((1)) __wur;
 int wr_cache_nr_used(wr_cache_t *) __nonnull((1)) __wur;
 int wr_cache_capacity(wr_cache_t *) __nonnull((1)) __wur;
 void wr_cache_clear_all(wr_cache_t *) __nonnull((1));
+void wr_cache_lock(pthread_spinlock_t *) __nonnull((1));
+void wr_cache_unlock(pthread_spinlock_t *) __nonnull((1));
 
 #endif /* WR_CACHE_H */
