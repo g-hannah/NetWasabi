@@ -221,6 +221,21 @@ wr_cache_obj_used(wr_cache_t *cachep, void *obj)
 	return (*bm & (1 << (obj_idx & 7))) ? 1 : 0;
 }
 
+void *
+wr_cache_next_used(wr_cache_t *cachep)
+{
+	int idx = 0;
+	int capacity = cachep->capacity;
+
+	while (!wr_cache_obj_used(cachep, __wr_cache_obj(cachep, idx)) && idx < capacity)
+		++idx;
+
+	if (idx == capacity)
+		return (void *)NULL;
+	else
+		return __wr_cache_obj(cachep, idx);
+}
+
 /**
  * wr_cache_create - create a new cache
  * @name: name of the cache for statistics
