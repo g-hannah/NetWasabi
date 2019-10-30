@@ -131,7 +131,7 @@ struct worker_args
 {
 	cache_t *cache1;
 	cache_t *cache2;
-	connection_t *conn;
+	char *main_url; /* threads will open their own independant connections to the web server */
 };
 
 #define keep_trailing_slash(w) ((w).trailing_slash)
