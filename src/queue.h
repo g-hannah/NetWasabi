@@ -43,4 +43,7 @@ struct queue_item
 	size_t size;
 };
 
+int enqueue(struct queue *, void *, size_t) __nonnull((1,2)) __wur;
+void *dequeue(struct queue *) __nonnull((1)) __wur;
+
 #endif /* !defined QUEUE_H */
