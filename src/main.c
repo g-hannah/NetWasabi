@@ -82,6 +82,7 @@ struct queue link_queue;
 pthread_t workers[FAST_MODE_NR_WORKERS];
 pthread_mutex_t cache1_mtx;
 pthread_mutex_t cache2_mtx;
+pthread_barrier_t barrier;
 
 size_t httplen;
 size_t httpslen;
@@ -2273,6 +2274,31 @@ __valid_url(char *url)
 	return 1;
 }
 
+static int
+do_fast_mode(const char *main_url)
+{
+	int i;
+	int k;
+	int nr_per_thread = (wr_cache_nr_used(http_lcache) / FAST_MODE_NR_THREADS);
+	worker_threads_begin = 0;
+
+	struct worker_args __args[FAST_MODE_NR_WORKERS];
+
+	for (i = 0, k = 0; i < FAST_MODE_NR_WORKERS; ++i)
+	{
+		__args[i].cachep = http_lcache;
+		__args[i].cachep2 = http_lcache2;
+		__args[i].main_url = strdup(conn.full_url);
+		__args[i].start = k;
+
+		k += nr_per_thread;
+
+		__args[i].end = (k-1);
+
+		if (pthread_create(workers[i], NULL, worker_reap, 
+	}
+}
+
 /*
  * ./webreaper <url> [options]
  */
@@ -2388,6 +2414,11 @@ main(int argc, char *argv[])
 			http_cookie_ctor,
 			http_cookie_dtor);
 
+	if (option_set(FAST_MODE))
+	{
+		do_fast_mode(conn.full_url);
+	}
+
 	/*
 	 * Catch SIGINT and SIGQUIT so we can release cache memory, etc.
 	 */
@@ -2460,6 +2491,7 @@ main(int argc, char *argv[])
 			//update_operation_status("Disconnecting...");
 			goto out_disconnect;
 	}
+
 
 	parse_links(http_lcache, http_lcache2, &cache1_url_root, &conn);
 	update_cache1_count(wr_cache_nr_used(http_lcache));
