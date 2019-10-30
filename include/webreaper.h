@@ -144,7 +144,6 @@ struct webreaper_ctx
 
 #define NR_URL_TYPES 11
 struct url_types url_types[NR_URL_TYPES];
-extern uint32_t runtime_options;
 int path_max;
 char **user_blacklist;
 int USER_BLACKLIST_NR_TOKENS;
@@ -177,6 +176,10 @@ void update_cache_status(int, int);
 void put_error_msg(const char *, ...) __nonnull ((1));
 
 #define TOKEN_MAX 64
+
+uint32_t runtime_options;
+
+#define FAST_MODE 0x100
 
 #define option_set(o) ((o) & runtime_options)
 #define set_option(o) (runtime_options |= (o))
