@@ -73,11 +73,14 @@ static int get_opts(int, char *[]) __nonnull((2)) __wur;
  */
 struct webreaper_ctx wrctx = {0};
 uint32_t runtime_options = 0;
+
 wr_cache_t *http_hcache;
 wr_cache_t *http_lcache;
 wr_cache_t *http_lcache2;
-struct queue *link_queue;
 wr_cache_t *cookies;
+struct queue link_queue;
+pthread_t workers[FAST_MODE_NR_WORKERS];
+
 size_t httplen;
 size_t httpslen;
 char **user_blacklist;
@@ -85,8 +88,10 @@ int USER_BLACKLIST_NR_TOKENS;
 volatile int cache_switch = 0;
 static int nr_reaped = 0;
 static int current_depth = 0;
+
 http_link_t *cache1_url_root;
 http_link_t *cache2_url_root;
+
 struct winsize winsize;
 int url_cnt = 0;
 pthread_t thread_screen_tid;
@@ -261,6 +266,8 @@ __noret usage(int exit_status)
 		"    (each URL cache clear + sibling URL cache (re)fill == 1)\n"
 		"-cD/--crawl-delay     delay (seconds) between each request\n"
 		"    (default is 3 seconds)\n"
+		"-fm/--fast-mode       Request more than one URL per second\n"
+		"    (this option supercedes any crawl delay specified)\n"
 		"-X/--xdomain          follow URLs into other domains\n"
 		"-B/--blacklist        blacklist tokens in URLs\n"
 		"--help/-h             display this information\n");
