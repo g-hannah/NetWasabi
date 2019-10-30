@@ -80,6 +80,8 @@ wr_cache_t *http_lcache2;
 wr_cache_t *cookies;
 struct queue link_queue;
 pthread_t workers[FAST_MODE_NR_WORKERS];
+pthread_mutex_t cache1_mtx;
+pthread_mutex_t cache2_mtx;
 
 size_t httplen;
 size_t httpslen;
@@ -1619,6 +1621,281 @@ deconstruct_btree(http_link_t *root, wr_cache_t *cache)
 	root->parent = NULL;
 
 	return;
+}
+
+static void *
+worker_reap(void *args)
+{
+	struct worker_args *wa = (struct worker_args *)args;
+
+	wr_cache_t *cachep = wa->cache1;
+	wr_cache_t *cachep2 = wa->cache2;
+	connection_t *conn = wa->conn;
+
+	assert(cachep);
+	assert(cachep2);
+	assert(conn);
+
+	int nr_links = 0;
+	int nr_links_sibling;
+	int fill = 1;
+	int status_code = 0;
+	int i;
+	size_t len;
+	http_link_t *link;
+	buf_t *wbuf = &conn->write_buf;
+	buf_t *rbuf = &conn->read_buf;
+
+	trailing_slash_off(wrctx);
+/*
+ * As we archive the pages from URLs stored in one cache,
+ * we fill the sibling cache with URLs to follow in the next
+ * iteration of the while loop. We use the CACHE_SWITCH flag
+ * for using one while filling the other. Fill until we pass
+ * a threshold number of URLs we wish to have for archiving
+ * next. Stop filling when FILL == 0.
+ *
+ * Base case for the loop is our 'crawl depth' being equal
+ * to CRAWL_DEPTH (#iterations of while loop).
+ */
+
+	if (!wr_cache_nr_used(cachep))
+		cache_switch = 1;
+	else
+		cache_switch = 0;
+
+	while (1)
+	{
+		fill = 1;
+
+		if (!cache_switch)
+		{
+			link = (http_link_t *)cachep->cache;
+			nr_links = wr_cache_nr_used(cachep);
+
+#ifdef DEBUG
+			fprintf(stderr, "Deconstructing binary tree in cache 2\n");
+#endif
+			deconstruct_btree(cache2_url_root, http_lcache2);
+
+			wr_cache_clear_all(cachep2);
+			if (cachep2->nr_assigned > 0)
+				cachep2->nr_assigned = 0;
+
+			assert(wr_cache_nr_used(cachep2) == 0);
+			cache2_url_root = NULL;
+
+			update_cache_status(1, FL_CACHE_STATUS_DRAINING);
+
+			if (fill)
+				update_cache_status(2, FL_CACHE_STATUS_FILLING);
+
+			update_operation_status("Draining URL cache 1");
+		}
+		else
+		{
+			link = (http_link_t *)cachep2->cache;
+			nr_links = wr_cache_nr_used(cachep2);
+
+#ifdef DEBUG
+			fprintf(stderr, "Deconstructing binary tree in cache 1\n");
+#endif
+			deconstruct_btree(cache1_url_root, http_lcache);
+
+			wr_cache_clear_all(cachep);
+			if (cachep->nr_assigned > 0)
+				cachep->nr_assigned = 0;
+
+			assert(wr_cache_nr_used(cachep) == 0);
+			cache1_url_root = NULL;
+
+			update_cache_status(2, FL_CACHE_STATUS_DRAINING);
+
+			if (fill)
+				update_cache_status(1, FL_CACHE_STATUS_FILLING);
+
+			update_operation_status("Draining URL cache 2");
+		}
+
+		if (!nr_links)
+			break;
+
+		url_cnt = nr_links;
+
+		for (i = 0; i < nr_links; ++i)
+		{
+			buf_clear(wbuf);
+			len = strlen(link->url);
+
+			if (!len)
+			{
+				++link;
+				continue;
+			}
+
+			assert(len < HTTP_URL_MAX);
+
+			strncpy(conn->full_url, link->url, len);
+			conn->full_url[len] = 0;
+
+			if (!http_parse_page(conn->full_url, conn->page))
+				continue;
+
+			BLOCK_SIGNAL(SIGINT);
+			sleep(crawl_delay(wrctx));
+			UNBLOCK_SIGNAL(SIGINT);
+
+			__check_host(conn);
+
+			resend:
+			if (link->nr_requests > 2) /* loop */
+			{
+				++link;
+				continue;
+			}
+
+			update_current_url(conn->full_url);
+
+			status_code = __do_request(conn);
+
+			if (status_code < 0)
+				goto fail;
+
+			++(link->nr_requests);
+
+			switch((unsigned int)status_code)
+			{
+				case HTTP_OK:
+				case HTTP_GONE:
+				case HTTP_NOT_FOUND: /* don't want to keep requesting the link and getting 404, so just archive it */
+					break;
+				case HTTP_MOVED_PERMANENTLY:
+				/*
+				 * Shouldn't get here, because __do_request() first
+				 * sends a HEAD request, and handles 301/302 for us.
+				 */
+					__handle301(conn);
+					buf_clear(wbuf);
+					goto resend;
+					break;
+				case HTTP_BAD_REQUEST:
+					//__show_request_header(wbuf);
+
+					if (wr_cache_nr_used(cookies) > 0)
+						wr_cache_clear_all(cookies);
+
+					buf_clear(wbuf);
+					buf_clear(rbuf);
+
+					reconnect(conn);
+
+					goto next;
+					break;
+				case HTTP_METHOD_NOT_ALLOWED:
+				case HTTP_FORBIDDEN:
+				case HTTP_INTERNAL_ERROR:
+				case HTTP_BAD_GATEWAY:
+				case HTTP_SERVICE_UNAV:
+				case HTTP_GATEWAY_TIMEOUT:
+					//__show_response_header(rbuf);
+
+					if (wr_cache_nr_used(cookies) > 0)
+						wr_cache_clear_all(cookies);
+
+					buf_clear(wbuf);
+					buf_clear(rbuf);
+
+					reconnect(conn);
+
+					goto next;
+					break;
+				case HTTP_IS_XDOMAIN:
+				case HTTP_ALREADY_EXISTS:
+				/*
+				 * Ignore 302 Found because it is used a lot for obtaining a random
+				 * link, for example a random wiki article (Special:Random).
+				 */
+				case HTTP_FOUND:
+				case FL_HTTP_SKIP_LINK:
+					goto next;
+				case FL_OPERATION_TIMEOUT:
+
+					buf_clear(rbuf);
+
+					if (!conn->host[0])
+						strcpy(conn->host, conn->primary_host);
+
+					reconnect(conn);
+
+					goto next;
+					break;
+				default:
+					put_error_msg("Unknown HTTP status code returned (%d)", status_code);
+					goto fail;
+			}
+
+			if (fill)
+			{
+				if (__url_parseable(conn->full_url))
+				{
+					if (!cache_switch)
+					{
+						parse_links(cachep2, cachep, &cache2_url_root, conn);
+						nr_links_sibling = wr_cache_nr_used(cachep2);
+						update_cache2_count(nr_links_sibling);
+					}
+					else
+					{
+						parse_links(cachep, cachep2, &cache1_url_root, conn);
+						nr_links_sibling = wr_cache_nr_used(cachep);
+						update_cache1_count(nr_links_sibling);
+					}
+
+					if (nr_links_sibling >= NR_LINKS_THRESHOLD)
+					{
+						fill = 0;
+						update_cache_status(!cache_switch ? 2 : 1, FL_CACHE_STATUS_FULL);
+					/*fprintf(stdout, "%s%sURL threshold reached%s\n",
+						COL_DARKORANGE,
+						ACTION_DONE_STR,
+						COL_END);*/
+					}
+				}
+			}
+
+			__archive_page(conn);
+
+			next:
+			++link;
+			--url_cnt;
+			if (!cache_switch)
+				update_cache1_count(url_cnt);
+			else
+				update_cache2_count(url_cnt);
+
+			clear_error_msg();
+
+			trailing_slash_off(wrctx);
+		} /* for (i = 0; i < nr_links; ++i) */
+
+		++current_depth;
+
+		if (cache_switch)
+			cache_switch = 0;
+		else
+			cache_switch = 1;
+
+		if (current_depth >= crawl_depth(wrctx))
+		{
+			update_operation_status("Reached maximum crawl depth");
+			break;
+		}
+	} /* while (1) */
+
+	pthread_exit((void *)0);
+
+	fail:
+	pthread_exit((void *)-1);
 }
 
 /**
