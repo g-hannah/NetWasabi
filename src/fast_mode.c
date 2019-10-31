@@ -29,9 +29,11 @@ static wr_cache_t *cache2;
 static wr_cache_t *http_headers;
 static wr_cache_t *http_cookies;
 static wr_cache_t *queue_cache;
-
 static wr_cache_t *filling;
 static wr_cache_t *draining;
+
+static http_link_t *cache1_root;
+static http_link_t *cache2_root;
 
 static int
 queue_cache_ctor(void *obj)
@@ -283,8 +285,14 @@ do_fast_mode(connection_t *conn, const char *remote_host)
 	int status_code;
 
 	status_code = do_request(conn);
+
 	if (!http_status_ok(status_code))
+	{
+		fprintf(stderr, "do_fast_mode: failed to get page from web server (HTTP status code: %u)\n", (unsigned int)status_code);
 		goto fail;
+	}
+
+	if (parse_links(
 
 	for (i = 0; i < FAST_MODE_NR_WORKERS; ++i)
 	{
