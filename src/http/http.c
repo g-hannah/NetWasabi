@@ -21,19 +21,47 @@ static struct sigaction oact;
 static struct sigaction nact;
 static sigjmp_buf TIMEOUT;
 
+static wr_cache_t *http_hcache;
+
+/*
+ * If we are in a multithreaded environment, we need each thread
+ * to have its own private cookie cache. So we will keep an array
+ * of them and give each thread its index into the array.
+ */
+static wr_cache_t *c_caches = NULL;
+static int nr_ccaches = 0;
+
 //static wr_cache_t *http_cookie_cache;
 /* Generic header pointer to allocate from cache in a loop */
 //static http_header_t *header = NULL;
 
-#if 0
 static void
-__attribute__((constructor)) __http_init(void)
+__ctor __http_init(void)
 {
-	if (!(http_cookie_cache = wr_cache_create("http_cookie_cache",
+	if (!(http_hcache = wr_cache_create(
+			"http_header_cache",
 			sizeof(http_header_t),
 			0,
-			wr_cache_http_header_ctor,
-			wr_cache_http_header_dtor)))
+			http_header_cache_ctor,
+			http_header_cache_dtor)))
+	{
+		fprintf(stderr, "__http_init: failed to create cache for HTTP header field objects\n");
+		goto fail;
+	}
+
+	nr_ccaches = 1;
+	if (!(c_caches = calloc(nr_ccaches, sizeof(wr_cache_t))))
+	{
+		fprintf(stderr, "__http_init: failed to allocate memory for cookie cache array\n");
+		goto fail;
+	}
+
+	if (!(c_caches[0] = wr_cache_create(
+			"http_cookie_cache",
+			sizeof(http_cookie_t),
+			0,
+			http_cookie_cache_ctor,
+			http_cookie_cache_dtor)))
 	{
 		fprintf(stderr, "__http_init: failed to create cache for HTTP cookie objects\n");
 		goto fail;
@@ -46,17 +74,13 @@ __attribute__((constructor)) __http_init(void)
 }
 
 static void
-__attribute__((destructor)) __http_fini(void)
+__dtor __http_fini(void)
 {
-	if (http_cookie_cache)
-	{
-		wr_cache_clear_all(http_cookie_cache);
-		wr_cache_destroy(http_cookie_cache);
-	}
+	wr_cache_clear_all(http_hcache);
+	wr_cache_destroy(http_hcache);
 
 	return;
 }
-#endif
 
 static void
 __http_handle_timeout(int signo)
@@ -213,7 +237,9 @@ __http_check_cookies(buf_t *buf)
 	if (strstr(buf->buf_head, "Set-Cookie"))
 	{
 		off_t off = 0;
+
 		wr_cache_clear_all(http_cookie_cache);
+
 		while (http_check_header(buf, "Set-Cookie", off, &off))
 		{
 			if (!(header = (http_header_t *)wr_cache_alloc(http_cookie_cache, &header)))
@@ -702,7 +728,6 @@ __http_do_chunked_recv(connection_t *conn)
 	return 0;
 }
 
-#if 0
 static int
 __http_set_new_location(connection_t *conn)
 {
@@ -710,11 +735,15 @@ __http_set_new_location(connection_t *conn)
 
 	http_header_t *location = NULL;
 
+	wr_cache_lock(http_hcache);
+
 	if (!(location = (http_header_t *)wr_cache_alloc(http_hcache, &location)))
 	{
 		fprintf(stderr, "__http_set_new_location: failed to obtain HTTP header cache object\n");
-		goto fail;
+		goto fail_release_lock;
 	}
+
+	wr_cache_unlock(http_hcache);
 
 	if (!http_fetch_header(&conn->read_buf, "Location", location, (off_t)0))
 	{
@@ -734,16 +763,22 @@ __http_set_new_location(connection_t *conn)
 		goto fail_dealloc;
 	}
 
+	wr_cache_lock(http_hcache);
 	wr_cache_dealloc(http_hcache, location, &location);
+	wr_cache_unlock(http_hcache);
+
 	return 0;
 
 	fail_dealloc:
+	wr_cache_lock(http_hcache);
 	wr_cache_dealloc(http_hcache, location, &location);
+
+	fail_release_lock:
+	wr_cache_unlock(http_hcache);
 
 	fail:
 	return -1;
 }
-#endif
 
 /**
  * http_recv_response - receive HTTP response.
@@ -766,12 +801,16 @@ http_recv_response(connection_t *conn)
 
 	update_operation_status("Receiving data from server");
 
+	wr_cache_lock(http_hcache);
 	content_len = (http_header_t *)wr_cache_alloc(http_hcache, &content_len);
+	wr_cache_unlock(http_hcache);
 
 	if (!content_len)
 		goto fail;
 
+	wr_cache_lock(http_hcache);
 	transfer_enc = (http_header_t *)wr_cache_alloc(http_hcache, &transfer_enc);
+	wr_cache_unlock(http_hcache);
 
 	if (!transfer_enc)
 		goto fail_dealloc;
@@ -784,7 +823,6 @@ http_recv_response(connection_t *conn)
 
 	//__http_check_cookies(buf);
 
-#if 0
 	http_status_code = http_status_code_int(buf);
 	if (HTTP_FOUND == http_status_code || HTTP_MOVED_PERMANENTLY == http_status_code)
 	{
@@ -804,7 +842,6 @@ http_recv_response(connection_t *conn)
 
 		goto __retry;
 	}
-#endif
 
 	if (!p)
 	{
@@ -895,12 +932,18 @@ http_recv_response(connection_t *conn)
 	out_dealloc:
 	assert(conn->read_buf.magic == BUFFER_MAGIC);
 
+	wr_cache_lock(http_hcache);
+
 	wr_cache_dealloc(http_hcache, (void *)content_len, &content_len);
 	wr_cache_dealloc(http_hcache, (void *)transfer_enc, &transfer_enc);
+
+	wr_cache_unlock(http_hcache);
 
 	return 0;
 
 	fail_dealloc:
+	wr_cache_lock(http_cache);
+
 	if (content_len)
 	{
 		wr_cache_dealloc(http_hcache, (void *)content_len, &content_len);
@@ -910,6 +953,8 @@ http_recv_response(connection_t *conn)
 	{
 		wr_cache_dealloc(http_hcache, (void *)transfer_enc, &transfer_enc);
 	}
+
+	wr_cache_unlock(http_hcache);
 
 	fail:
 	return rv;
