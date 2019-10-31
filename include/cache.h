@@ -31,7 +31,7 @@ typedef struct wr_cache_t
 	size_t cache_size;
 	uint16_t bitmap_size;
 	char *name;
-	pthread_spinlock_t lock;
+	pthread_mutex_t lock;
 	wr_cache_ctor_t ctor;
 	wr_cache_dtor_t dtor;
 } wr_cache_t;
