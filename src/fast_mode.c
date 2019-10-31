@@ -10,7 +10,6 @@
 #include "fast_mode.h"
 #include "http.h"
 #include "misc.h"
-#include "queue.h"
 #include "request.h"
 #include "webreaper.h"
 
