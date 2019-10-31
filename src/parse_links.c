@@ -123,24 +123,28 @@ __url_acceptable(connection_t *conn, struct cache_ctx *fctx, struct cache_ctx *d
 	return 1;
 }
 
+/**
+ * __insert_link - insert a URL into the current "filling" cache
+ * @fctx: context holding cache pointer and binary tree root
+ * @url: url to add to cache
+ */
 static int
 __insert_link(struct cache_ctx *fctx, buf_t *url)
 {
-	assert(cachep);
+	assert(fctx);
 	assert(url);
-
-	//int loops = 0;
 
 	if (!(fctx->root))
 	{
-		fctx->root = (http_link_t *)wr_cache_alloc(cachep, &fctx->root);
+		http_link_t *r = fctx->root;
+		r = (http_link_t *)wr_cache_alloc(fctx->cache, &fctx->root);
 
-		strncpy(fctx->root->url, url->buf_head, url->data_len);
-		fctx->root->url[url->data_len] = 0;
+		strncpy(r->url, url->buf_head, url->data_len);
+		r->url[url->data_len] = 0;
 
-		fctx->root->left = NULL;
-		fctx->root->right = NULL;
-		fctx->root->parent = NULL;
+		r->left = NULL;
+		r->right = NULL;
+		r->parent = NULL;
 
 		return 0;
 	}
