@@ -119,12 +119,6 @@ __ctor __fast_mode_init(void)
 		goto fail;
 	}
 
-	if (pthread_cond_init(&cache_switch_cond, NULL) != 0)
-	{
-		fprintf(stderr, "__fast_mode_init: failed to initialise condition variable\n");
-		goto fail;
-	}
-
 	return;
 
 	fail:
