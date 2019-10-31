@@ -29,11 +29,11 @@ static const char *const __disallowed_tokens[] =
 };
 
 static int
-__url_acceptable(connection_t *conn, wr_cache_t *e_cache, wr_cache_t *f_cache, buf_t *url)
+__url_acceptable(connection_t *conn, struct cache_ctx *fctx, struct cache_ctx *dctx, buf_t *url)
 {
 	assert(conn);
-	assert(e_cache);
-	assert(f_cache);
+	assert(fctx);
+	assert(dctx);
 	assert(url);
 
 	char *tail = url->buf_tail;
@@ -83,12 +83,15 @@ __url_acceptable(connection_t *conn, wr_cache_t *e_cache, wr_cache_t *f_cache, b
 	}
 
 
-	if (f_cache)
+/*
+ * Check the current "draining" cache for duplicate URLs
+ */
+	if (dctx->cache)
 	{
-		wr_cache_lock(f_cache);
+		wr_cache_lock(dctx->cache);
 
 		int cmp = 0;
-		http_link_t *nptr = f_cache == http_lcache ? cache1_url_root : cache2_url_root;
+		http_link_t *nptr = dctx->root;
 
 		while (nptr)
 		{
@@ -97,7 +100,7 @@ __url_acceptable(connection_t *conn, wr_cache_t *e_cache, wr_cache_t *f_cache, b
 			if (url->buf_head[0] && nptr->url[0] && !cmp)
 			{
 				++nr_twins;
-				wr_cache_unlock(&f_cache->lock);
+				wr_cache_unlock(dctx->cache);
 				return 0;
 			}
 			else
@@ -114,34 +117,30 @@ __url_acceptable(connection_t *conn, wr_cache_t *e_cache, wr_cache_t *f_cache, b
 				break;
 		}
 
-		wr_cache_unlock(f_cache);
+		wr_cache_unlock(dctx->cache);
 	}
 
 	return 1;
 }
 
 static int
-__insert_link(wr_cache_t *cachep, http_link_t **root, buf_t *url)
+__insert_link(struct cache_ctx *fctx, buf_t *url)
 {
 	assert(cachep);
 	assert(url);
 
 	//int loops = 0;
 
-	if (!(*root))
+	if (!(fctx->root))
 	{
-		*root = (http_link_t *)wr_cache_alloc(cachep, root);
-		assert(*root);
-		assert(wr_cache_obj_used(cachep, (void *)*root));
+		fctx->root = (http_link_t *)wr_cache_alloc(cachep, &fctx->root);
 
-		strncpy((*root)->url, url->buf_head, url->data_len);
-		(*root)->url[url->data_len] = 0;
+		strncpy(fctx->root->url, url->buf_head, url->data_len);
+		fctx->root->url[url->data_len] = 0;
 
-		(*root)->left = NULL;
-		(*root)->right = NULL;
-		(*root)->parent = NULL;
-
-		//fprintf(stderr, "%d\n", wr_cache_nr_used(cachep));
+		fctx->root->left = NULL;
+		fctx->root->right = NULL;
+		fctx->root->parent = NULL;
 
 		return 0;
 	}
@@ -156,7 +155,7 @@ __insert_link(wr_cache_t *cachep, http_link_t **root, buf_t *url)
  * to iteratively insert nodes into the tree.
  */
 
-	http_link_t *nptr = *root;
+	http_link_t *nptr = fctx->root;
 	int cmp;
 	off_t nptr_offset;
 	void *nptr_stack = &nptr;
@@ -190,7 +189,6 @@ __insert_link(wr_cache_t *cachep, http_link_t **root, buf_t *url)
 				nptr->left->url[url->data_len] = 0;
 				nptr->left->parent = nptr;
 
-				//fprintf(stderr, "copied %s to node @ %p (%d)\n", url->buf_head, nptr->left, wr_cache_nr_used(cachep));
 				break;
 			}
 			else
