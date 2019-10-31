@@ -9,15 +9,15 @@
 #define BITS_PER_CHAR (sizeof(char) * 8)
 
 static inline void
-wr_cache_lock(pthread_spinlock_t *lock)
+wr_cache_lock(wr_cache_t *cachep)
 {
-	pthread_spin_lock(lock);
+	pthread_mutex_lock(&cachep->lock);
 }
 
 static inline void
-wr_cache_unlock(pthread_spinlock_t *lock)
+wr_cache_unlock(wr_cache_t *cachep)
 {
-	pthread_spin_unlock(lock);
+	pthread_mutex_lock(&cachep->lock);
 }
 
 /**
