@@ -17,11 +17,9 @@
 static pthread_t workers[FAST_MODE_NR_WORKERS];
 static struct worker_ctx worker_ctx[FAST_MODE_NR_WORKERS];
 static pthread_barrier_t barrier;
+static pthread_barrier_t start_barrier;
 static pthread_mutex_t cache_switch_mtx;
-static volatile sig_atomic_t workers_begin = 0;
 static volatile sig_atomic_t cache_switch = 0;
-
-static int goal;
 
 static wr_cache_t cache1;
 static wr_cache_t cache2;
@@ -109,6 +107,12 @@ __ctor __fast_mode_init(void)
 		goto fail;
 	}
 
+	if (pthread_barrier_init(&start_barrier, NULL, (FAST_MODE_NR_WORKERS + 1)) != 0)
+	{
+		fprintf(stderr, "__fast_mode_init: failed to initialise start barrier\n");
+		goto fail;
+	}
+
 	return;
 
 	fail:
@@ -125,6 +129,7 @@ __dtor __fast_mode_fini(void)
 	wr_cache_clear_all(queue_cache);
 	pthread_mutex_destroy(&cache_switch_mtx);
 	pthread_barrier_destroy(&barrier);
+	pthread_barrier_destroy(&start_barrier);
 
 	wr_cache_destroy(cache1);
 	wr_cache_destroy(cache2);
@@ -160,7 +165,7 @@ worker_reap(void *args)
 		goto thread_fail;
 	}
 
-	while (!workers_begin);
+	pthread_barrier_wait(&start_barrier);
 
 	while (1)
 	{
@@ -298,8 +303,6 @@ do_fast_mode(connection_t *conn, const char *remote_host)
 			goto fail;
 		}
 	}
-
-	workers_begin = 1;
 
 	for (i = 0; i < FAST_MODE_NR_WORKERS; ++i)
 		pthread_join(workers[i]);
