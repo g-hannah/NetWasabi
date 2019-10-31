@@ -1,6 +1,8 @@
 #ifndef QUEUE_H
 #define QUEUE_H 1
 
+#include <pthread.h>
+
 #define FL_QUEUE_FULL 0x1
 #define FL_QUEUE_ERR 0x2
 
@@ -41,8 +43,8 @@ struct queue
 	int nr_queue;
 	int nr_max;
 	int full;
+	pthread_spinlock_t lock;
 };
-
 
 int queue_init(struct queue *, int) __nonnull((1)) __wur;
 int enqueue(struct queue *, void *, size_t) __nonnull((1,2)) __wur;
