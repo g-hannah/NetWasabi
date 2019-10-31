@@ -6,6 +6,7 @@
 #include <unistd.h>
 #include "buffer.h"
 #include "cache.h"
+#include "fast_mode.h"
 #include "http.h"
 #include "robots.h"
 #include "utils_url.h"
@@ -84,7 +85,7 @@ __url_acceptable(connection_t *conn, wr_cache_t *e_cache, wr_cache_t *f_cache, b
 
 	if (f_cache)
 	{
-		wr_cache_lock(&f_cache->lock);
+		wr_cache_lock(f_cache);
 
 		int cmp = 0;
 		http_link_t *nptr = f_cache == http_lcache ? cache1_url_root : cache2_url_root;
@@ -113,7 +114,7 @@ __url_acceptable(connection_t *conn, wr_cache_t *e_cache, wr_cache_t *f_cache, b
 				break;
 		}
 
-		wr_cache_unlock(&f_cache->lock);
+		wr_cache_unlock(f_cache);
 	}
 
 	return 1;
@@ -337,6 +338,120 @@ parse_links(wr_cache_t *e_cache, wr_cache_t *f_cache, http_link_t **tree_root, c
 		nr_dups,
 		nr_dups == 1 ? "" : "s");
 #endif
+
+	return 0;
+
+	fail_destroy_bufs:
+	buf_destroy(&url);
+	buf_destroy(&full_url);
+	buf_destroy(&path);
+	return -1;
+}
+
+/**
+ * parse_links_ex - parse links from page and store in URL cache within fctx
+ *			checking for duplicate URLs in URL cache within dctx.
+ * @fctx: context of cache we are filling
+ * @dctx: context of cache within which we are checking for duplicates
+ * @conn: the context of the connection to remote webserver
+ */
+int
+parse_links_ex(struct cache_ctx *fctx, struct cache_ctx *dctx, connection_t *conn)
+{
+	assert(fctx);
+	assert(dctx);
+	assert(conn);
+
+	char					*p = NULL;
+	char					*savep = NULL;
+	char					*tail;
+	char delim;
+	int url_type_idx = 0;
+	size_t url_len = 0;
+	buf_t *buf = &conn->read_buf;
+	buf_t url;
+	buf_t full_url;
+	buf_t path;
+
+	buf_init(&url, HTTP_URL_MAX);
+	buf_init(&full_url, HTTP_URL_MAX);
+	buf_init(&path, path_max);
+
+	tail = buf->buf_tail;
+	savep = buf->buf_head;
+
+	nr_already = 0;
+	nr_twins = 0;
+	nr_dups = 0;
+	nr_urls_call = 0;
+	nr_urls_total = wr_cache_nr_used(fctx->cache);
+
+	while (1)
+	{
+		buf_clear(&url);
+		buf_clear(&full_url);
+		buf_clear(&path);
+
+		p = strstr(savep, url_types[url_type_idx].string);
+		delim = url_types[url_type_idx].delim;
+
+		if (!p || p >= tail)
+		{
+			++url_type_idx;
+
+			if (url_types[url_type_idx].delim == 0)
+				break;
+
+			savep = buf->buf_head;
+			continue;
+		}
+
+		savep = (p += url_types[url_type_idx].len);
+		p = memchr(savep, delim, (tail - savep));
+
+		if (!p)
+		{
+			++url_type_idx;
+
+			if (url_types[url_type_idx].delim == 0)
+				break;
+
+			savep = buf->buf_head;
+			continue;
+		}
+
+		url_len = (p - savep);
+
+		if (!url_len || url_len >= HTTP_URL_MAX)
+		{
+			savep = ++p;
+			continue;
+		}
+
+		assert(url_len > 0);
+		assert(url_len < HTTP_URL_MAX);
+
+		buf_append_ex(&url, savep, url_len);
+		make_full_url(conn, &url, &full_url);
+
+		if (!__url_acceptable(conn, fctx->cache, dctx->cache, &full_url))
+		{
+			savep = ++p;
+			continue;
+		}
+
+		//fprintf(stderr, "inserting URL %s to tree\n", full_url.buf_head);
+
+		if (__insert_link(fctx->cache, &fctx->root, &full_url) < 0)
+			goto fail_destroy_bufs;
+
+		savep = ++p;
+		++nr_urls_call;
+	}
+
+	buf_destroy(&url);
+	buf_destroy(&full_url);
+	buf_destroy(&path);
 
 	return 0;
 
