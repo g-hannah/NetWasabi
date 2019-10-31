@@ -26,23 +26,11 @@ static volatile sig_atomic_t nr_workers_eoc = 0;
 static wr_cache_t *cache1;
 static wr_cache_t *cache2;
 static wr_cache_t *http_headers;
-static wr_cache_t *http_cookies;
-static wr_cache_t *queue_cache;
 static wr_cache_t *filling;
 static wr_cache_t *draining;
 
-static http_link_t *cache1_root;
-static http_link_t *cache2_root;
-
-static int
-queue_cache_ctor(void *obj)
-{
-	struct queue_item *qi = (struct queue_item *)obj;
-
-	qi->next = qi->prev = NULL;
-	qi->data = (void *)NULL;
-	qi->size = (size_t)0;
-}
+struct cache_ctx cache_ctx1;
+struct cache_ctx cache_ctx2;
 
 static void
 __ctor __fast_mode_init(void)
@@ -91,17 +79,6 @@ __ctor __fast_mode_init(void)
 		goto fail;
 	}
 
-	if (!(queue_cache = wr_cache_create(
-			"fast_mode_queue_cache",
-			0,
-			sizeof(struct queue_item),
-			queue_cache_ctor,
-			NULL)))
-	{
-		fprintf(stderr, "__fast_mode_init: failed to create queue items cache\n");
-		goto fail;
-	}
-
 	if (pthread_mutex_init(&cache_switch_mtx, NULL) != 0)
 	{
 		fprintf(stderr, "__fast_mode_init: failed to initialise cache switching mutex\n");
@@ -120,6 +97,11 @@ __ctor __fast_mode_init(void)
 		goto fail;
 	}
 
+	cache_ctx1.cache = cache1;
+	cache_ctx1.root = NULL;
+	cache_ctx2.cache = cache2;
+	cache_ctx2.root = NULL;
+
 	return;
 
 	fail:
@@ -133,7 +115,6 @@ __dtor __fast_mode_fini(void)
 	wr_cache_clear_all(cache2);
 	wr_cache_clear_all(http_headers);
 	wr_cache_clear_all(http_cookies);
-	wr_cache_clear_all(queue_cache);
 	pthread_mutex_destroy(&cache_switch_mtx);
 	pthread_barrier_destroy(&barrier);
 	pthread_barrier_destroy(&start_barrier);
@@ -142,7 +123,6 @@ __dtor __fast_mode_fini(void)
 	wr_cache_destroy(cache2);
 	wr_cache_destroy(http_headers);
 	wr_cache_destroy(http_cookies);
-	wr_cache_destroy(queue_cache);
 
 	return;
 }
