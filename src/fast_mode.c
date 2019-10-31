@@ -200,12 +200,18 @@ worker_reap(void *args)
 
 	while (1)
 	{
-		wr_cache_lock(draining);
+		wr_cache_lock(&draining->lock);
 
 		link = wr_cache_next_used(draining);
 
 		if (!link)
 		{
+			if (!wr_cache_nr_used(filling))
+			{
+				wr_cache_unlock(&draining->lock);
+				goto thread_exit;
+			}
+
 			worker_signal_eoc();
 			pthread_cond_wait(&cache_switch_cond, &draining->lock);
 			continue;
@@ -267,6 +273,7 @@ worker_reap(void *args)
 		next:
 	}
 
+	thread_exit:
 	pthread_exit((void *)0);
 
 	thread_fail:
