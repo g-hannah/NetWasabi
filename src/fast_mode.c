@@ -17,10 +17,12 @@
 static pthread_t workers[FAST_MODE_NR_WORKERS];
 static struct worker_ctx worker_ctx[FAST_MODE_NR_WORKERS];
 static pthread_barrier_t barrier;
-static pthread_once_t once = PTHREAD_ONCE_INIT;
 static pthread_barrier_t start_barrier;
+static pthread_once_t once = PTHREAD_ONCE_INIT;
+static pthread_cond_t cache_switch_cond;
 static pthread_mutex_t cache_switch_mtx;
-static volatile sig_atomic_t cache_switch = 0;
+static volatile sig_atomic_t do_switch = 0;
+static volatile sig_atomic_t nr_workers_eoc = 0;
 
 static wr_cache_t *cache1;
 static wr_cache_t *cache2;
@@ -117,6 +119,12 @@ __ctor __fast_mode_init(void)
 		goto fail;
 	}
 
+	if (pthread_cond_init(&cache_switch_cond, NULL) != 0)
+	{
+		fprintf(stderr, "__fast_mode_init: failed to initialise condition variable\n");
+		goto fail;
+	}
+
 	return;
 
 	fail:
@@ -149,6 +157,16 @@ init_worker_environ(void)
 {
 	draining = cache1;
 	filling = cache2;
+	return;
+}
+
+/**
+ * worker_signal_eoc - signal that thread has reached end of a cycle
+ */
+static inline void
+worker_signal_eoc(void)
+{
+	++nr_workers_eoc;
 	return;
 }
 
@@ -188,7 +206,9 @@ worker_reap(void *args)
 
 		if (!link)
 		{
-			if (
+			worker_signal_eoc();
+			pthread_cond_wait(&cache_switch_cond, &draining->lock);
+			continue;
 		}
 
 		status_code = do_request(conn);
@@ -275,6 +295,33 @@ do_fast_mode(connection_t *conn, const char *remote_host)
 			fprintf(stderr, "do_fast_mode: failed to create worker thread (%s)\n", strerror(err));
 			goto fail;
 		}
+	}
+
+	pthread_barrier_wait(&start_barrier);
+
+	while (1)
+	{
+		while (nr_workers_eoc < FAST_MODE_NR_WORKERS);
+
+		nr_workers_eoc = 0;
+		if (draining == cache1)
+		{
+			draining = cache2;
+			filling = cache1;
+		}
+		else
+		{
+			draining = cache1;
+			filling = cache2;
+		}
+
+		wr_cache_lock(&draining->lock);
+
+		pthread_cond_broadcast(&cache_switch_cond);
+		pthread_cond_destroy(&cache_switch_cond);
+		cache_switch_cond = PTHREAD_COND_INITIALIZER;
+
+		wr_cache_unlock(&draining->lock);
 	}
 
 	for (i = 0; i < FAST_MODE_NR_WORKERS; ++i)
