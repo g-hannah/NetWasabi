@@ -200,7 +200,7 @@ worker_reap(void *args)
 
 	while (1)
 	{
-		wr_cache_lock(&draining->lock);
+		wr_cache_lock(draining);
 
 		link = wr_cache_next_used(draining);
 
@@ -208,7 +208,7 @@ worker_reap(void *args)
 		{
 			if (!wr_cache_nr_used(filling))
 			{
-				wr_cache_unlock(&draining->lock);
+				wr_cache_unlock(draining);
 				goto thread_exit;
 			}
 
@@ -322,13 +322,13 @@ do_fast_mode(connection_t *conn, const char *remote_host)
 			filling = cache2;
 		}
 
-		wr_cache_lock(&draining->lock);
+		wr_cache_lock(draining);
 
 		pthread_cond_broadcast(&cache_switch_cond);
 		pthread_cond_destroy(&cache_switch_cond);
 		cache_switch_cond = PTHREAD_COND_INITIALIZER;
 
-		wr_cache_unlock(&draining->lock);
+		wr_cache_unlock(draining);
 	}
 
 	for (i = 0; i < FAST_MODE_NR_WORKERS; ++i)
