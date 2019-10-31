@@ -94,7 +94,7 @@ __http_handle_timeout(int signo)
  *  -- called in wr_cache_create()
  */
 int
-wr_cache_http_header_ctor(void *hh)
+http_header_cache_ctor(void *hh)
 {
 	http_header_t *ch = (http_header_t *)hh;
 	clear_struct(ch);
@@ -122,7 +122,7 @@ wr_cache_http_header_ctor(void *hh)
  * @hh: pointer to object in cache
  */
 void
-wr_cache_http_header_dtor(void *hh)
+http_header_cache_dtor(void *hh)
 {
 	assert(hh);
 
@@ -193,7 +193,7 @@ http_cookie_dtor(void *cookie)
 }
 
 int
-wr_cache_http_link_ctor(void *http_link)
+http_link_cache_ctor(void *http_link)
 {
 	http_link_t *hl = (http_link_t *)http_link;
 	clear_struct(hl);
@@ -212,7 +212,7 @@ wr_cache_http_link_ctor(void *http_link)
 }
 
 void
-wr_cache_http_link_dtor(void *http_link)
+http_link_cache_dtor(void *http_link)
 {
 	assert(http_link);
 
@@ -226,6 +226,31 @@ wr_cache_http_link_dtor(void *http_link)
 
 	clear_struct(hl);
 	return;
+}
+
+int
+http_new_cookie_cache(void)
+{
+	if (nr_ccaches == 1)
+		return 0;
+
+	++nr_ccaches;
+	c_caches = realloc(c_caches, (sizeof(wr_cache_t) * nr_ccaches));
+	if (!(c_caches[nr_ccaches - 1] = wr_cache_create(
+			"http_cookie_cache",
+			sizeof(http_cookie_t),
+			0,
+			http_cookie_cache_ctor,
+			http_cookie_cache_dtor)))
+	{
+		fprintf(stderr, "http_new_cookie_cache: failed to create new cookie cache\n");
+		goto fail;
+	}
+
+	return (nr_ccaches - 1);
+
+	fail:
+	return -1;
 }
 
 #if 0
