@@ -19,13 +19,11 @@ static pthread_barrier_t barrier;
 static pthread_barrier_t start_barrier;
 static pthread_once_t once = PTHREAD_ONCE_INIT;
 static pthread_cond_t cache_switch_cond;
-static pthread_mutex_t cache_switch_mtx;
 static volatile sig_atomic_t do_switch = 0;
 static volatile sig_atomic_t nr_workers_eoc = 0;
 
 static wr_cache_t *cache1;
 static wr_cache_t *cache2;
-static wr_cache_t *http_headers;
 static wr_cache_t *filling;
 static wr_cache_t *draining;
 
@@ -37,8 +35,8 @@ __ctor __fast_mode_init(void)
 {
 	if (!(cache1 = wr_cache_create(
 			"fast_mode_url_cache1",
-			0,
 			sizeof(http_link_t),
+			0,
 			http_link_cache_ctor,
 			http_link_cache_dtor)))
 	{
@@ -48,40 +46,12 @@ __ctor __fast_mode_init(void)
 
 	if (!(cache2 = wr_cache_create(
 			"fast_mode_url_cache2",
-			0,
 			sizeof(http_link_t),
+			0,
 			http_link_cache_ctor,
 			http_link_cache_dtor)))
 	{
 		fprintf(stderr, "__fast_mode_init: failed to create cache2\n");
-		goto fail;
-	}
-
-	if (!(http_headers = wr_cache_create(
-			"fast_mode_header_cache",
-			0,
-			sizeof(http_header_t),
-			http_header_cache_ctor,
-			http_header_cache_dtor)))
-	{
-		fprintf(stderr, "__fast_mode_init: failed to create HTTP header cache\n");
-		goto fail;
-	}
-
-	if (!(http_cookies = wr_cache_create(
-			"fast_mode_cookie_cache",
-			0,
-			sizeof(http_header_t),
-			http_header_cache_ctor,
-			http_header_cache_dtor)))
-	{
-		fprintf(stderr, "__fast_mode_init: failed to create HTTP cookie cache\n");
-		goto fail;
-	}
-
-	if (pthread_mutex_init(&cache_switch_mtx, NULL) != 0)
-	{
-		fprintf(stderr, "__fast_mode_init: failed to initialise cache switching mutex\n");
 		goto fail;
 	}
 
@@ -113,16 +83,11 @@ __dtor __fast_mode_fini(void)
 {
 	wr_cache_clear_all(cache1);
 	wr_cache_clear_all(cache2);
-	wr_cache_clear_all(http_headers);
-	wr_cache_clear_all(http_cookies);
-	pthread_mutex_destroy(&cache_switch_mtx);
 	pthread_barrier_destroy(&barrier);
 	pthread_barrier_destroy(&start_barrier);
 
 	wr_cache_destroy(cache1);
 	wr_cache_destroy(cache2);
-	wr_cache_destroy(http_headers);
-	wr_cache_destroy(http_cookies);
 
 	return;
 }
