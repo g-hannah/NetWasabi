@@ -305,7 +305,7 @@ wr_cache_create(char *name,
 	cachep->ctor = ctor;
 	cachep->dtor = dtor;
 
-	pthread_spin_init(&cachep->lock, 0);
+	pthread_mutex_init(&cachep->lock, NULL);
 
 #ifdef DEBUG
 	printf(
@@ -381,7 +381,7 @@ wr_cache_destroy(wr_cache_t *cachep)
 		cachep->cache = NULL;
 	}
 
-	pthread_spin_destroy(&cachep->lock);
+	pthread_mutex_destroy(&cachep->lock);
 
 	clear_struct(cachep);
 	free(cachep);
