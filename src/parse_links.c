@@ -84,6 +84,8 @@ __url_acceptable(connection_t *conn, wr_cache_t *e_cache, wr_cache_t *f_cache, b
 
 	if (f_cache)
 	{
+		wr_cache_lock(&f_cache->lock);
+
 		int cmp = 0;
 		http_link_t *nptr = f_cache == http_lcache ? cache1_url_root : cache2_url_root;
 
@@ -94,6 +96,7 @@ __url_acceptable(connection_t *conn, wr_cache_t *e_cache, wr_cache_t *f_cache, b
 			if (url->buf_head[0] && nptr->url[0] && !cmp)
 			{
 				++nr_twins;
+				wr_cache_unlock(&f_cache->lock);
 				return 0;
 			}
 			else
@@ -109,6 +112,8 @@ __url_acceptable(connection_t *conn, wr_cache_t *e_cache, wr_cache_t *f_cache, b
 			if (!nptr)
 				break;
 		}
+
+		wr_cache_unlock(&f_cache->lock);
 	}
 
 	return 1;
