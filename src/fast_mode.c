@@ -17,15 +17,19 @@
 static pthread_t workers[FAST_MODE_NR_WORKERS];
 static struct worker_ctx worker_ctx[FAST_MODE_NR_WORKERS];
 static pthread_barrier_t barrier;
+static pthread_once_t once = PTHREAD_ONCE_INIT;
 static pthread_barrier_t start_barrier;
 static pthread_mutex_t cache_switch_mtx;
 static volatile sig_atomic_t cache_switch = 0;
 
-static wr_cache_t cache1;
-static wr_cache_t cache2;
-static wr_cache_t http_headers;
-static wr_cache_t http_cookies;
-static wr_cache_t queue_cache;
+static wr_cache_t *cache1;
+static wr_cache_t *cache2;
+static wr_cache_t *http_headers;
+static wr_cache_t *http_cookies;
+static wr_cache_t *queue_cache;
+
+static wr_cache_t *filling;
+static wr_cache_t *draining;
 
 static int
 queue_cache_ctor(void *obj)
@@ -140,6 +144,14 @@ __dtor __fast_mode_fini(void)
 	return;
 }
 
+static void
+init_worker_environ(void)
+{
+	draining = cache1;
+	filling = cache2;
+	return;
+}
+
 static void *
 worker_reap(void *args)
 {
@@ -166,36 +178,17 @@ worker_reap(void *args)
 	}
 
 	pthread_barrier_wait(&start_barrier);
+	pthread_once(&once, init_worker_environ);
 
 	while (1)
 	{
-		if (!cache_switch)
+		wr_cache_lock(draining);
+
+		link = wr_cache_next_used(draining);
+
+		if (!link)
 		{
-			wr_cache_lock(&cache1->lock);
-
-			dcache = cache1;
-			fcache = cache2;
-
-			link = wr_cache_next_used(cache1);
-			len = strlen(link->url);
-			strcpy(conn.full_url, link->url);
-			wr_cache_dealloc(cachep, (void *)link);
-
-			wr_cache_unlock(&cache1->lock);
-		}
-		else
-		{
-			wr_cache_lock(&cache2->lock);
-
-			dcache = cache2;
-			fcache = cache1;
-
-			link = wr_cache_next_used(cache2);
-			len = strlen(link->url);
-			strcpy(conn.full_url, link->url);
-			wr_cache_dealloc(cache2, (void *)link);
-
-			wr_cache_unlock(&cache2->lock);
+			if (
 		}
 
 		status_code = do_request(conn);
@@ -252,26 +245,6 @@ worker_reap(void *args)
 		}
 
 		next:
-		wr_cache_lock(dcache);
-
-		if (!wr_cache_nr_used(dcache))
-		{
-			wr_cache_unlock(dcache);
-			pthread_barrier_wait(&barrier);
-
-			pthread_mutex_lock(&cache_switch_mtx);
-
-			if (cache_switch)
-				cache_switch = 0;
-			else
-				cache_switch = 1;
-
-			pthread_mutex_unlock(&cache_switch_mtx);
-		}
-		else
-		{
-			wr_cache_unlock(dcache);
-		}
 	}
 
 	pthread_exit((void *)0);
