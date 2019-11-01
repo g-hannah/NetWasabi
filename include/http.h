@@ -149,9 +149,9 @@ wr_cache_t *http_lcache2;
 size_t httplen;
 size_t httpslen;
 
-int http_build_request_header(connection_t *, const char *, const char *) __nonnull((1,2,3)) __wur;
-int http_send_request(connection_t *) __nonnull((1)) __wur;
-int http_recv_response(connection_t *) __nonnull((1)) __wur;
+int http_build_request_header(struct http_t *, const char *http_verb) __nonnull((1,2)) __wur;
+int http_send_request(struct http_t *) __nonnull((1)) __wur;
+int http_recv_response(struct http_t *) __nonnull((1)) __wur;
 int http_append_header(buf_t *, http_header_t *) __nonnull((1,2)) __wur;
 int http_status_code_int(buf_t *) __nonnull((1)) __wur;
 ssize_t http_response_header_len(buf_t *) __nonnull((1)) __wur;
@@ -170,5 +170,13 @@ int http_cookie_cache_ctor(void *) __nonnull((1)) __wur;
 void http_cookie_cache_dtor(void *) __nonnull((1));
 int http_cookie_ctor(void *) __nonnull((1)) __wur;
 void http_cookie_dtor(void *) __nonnull((1));
+
+/*
+ * Connection-related functions
+ */
+int http_connect(struct http_t *) __nonnull((1)) __wur;
+void http_disconnect(struct http_t *) __nonnull((1));
+int http_reconnect(struct http_t *) __nonnull((1)) __wur;
+int http_switch_tls(struct http_t *) __nonnull((1)) __wur;
 
 #endif /* !defined HTTP_H */
