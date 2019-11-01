@@ -21,16 +21,6 @@ static struct sigaction oact;
 static struct sigaction nact;
 static sigjmp_buf TIMEOUT;
 
-static wr_cache_t *http_hcache;
-
-/*
- * If we are in a multithreaded environment, we need each thread
- * to have its own private cookie cache. So we will keep an array
- * of them and give each thread its index into the array.
- */
-static wr_cache_t *c_caches = NULL;
-static int nr_ccaches = 0;
-
 //static wr_cache_t *http_cookie_cache;
 /* Generic header pointer to allocate from cache in a loop */
 //static http_header_t *header = NULL;
@@ -46,24 +36,6 @@ __ctor __http_init(void)
 			http_header_cache_dtor)))
 	{
 		fprintf(stderr, "__http_init: failed to create cache for HTTP header field objects\n");
-		goto fail;
-	}
-
-	nr_ccaches = 1;
-	if (!(c_caches = calloc(nr_ccaches, sizeof(wr_cache_t))))
-	{
-		fprintf(stderr, "__http_init: failed to allocate memory for cookie cache array\n");
-		goto fail;
-	}
-
-	if (!(c_caches[0] = wr_cache_create(
-			"http_cookie_cache",
-			sizeof(http_cookie_t),
-			0,
-			http_cookie_cache_ctor,
-			http_cookie_cache_dtor)))
-	{
-		fprintf(stderr, "__http_init: failed to create cache for HTTP cookie objects\n");
 		goto fail;
 	}
 
@@ -226,31 +198,6 @@ http_link_cache_dtor(void *http_link)
 
 	clear_struct(hl);
 	return;
-}
-
-int
-http_new_cookie_cache(void)
-{
-	if (nr_ccaches == 1)
-		return 0;
-
-	++nr_ccaches;
-	c_caches = realloc(c_caches, (sizeof(wr_cache_t) * nr_ccaches));
-	if (!(c_caches[nr_ccaches - 1] = wr_cache_create(
-			"http_cookie_cache",
-			sizeof(http_cookie_t),
-			0,
-			http_cookie_cache_ctor,
-			http_cookie_cache_dtor)))
-	{
-		fprintf(stderr, "http_new_cookie_cache: failed to create new cookie cache\n");
-		goto fail;
-	}
-
-	return (nr_ccaches - 1);
-
-	fail:
-	return -1;
 }
 
 #if 0
@@ -1357,4 +1304,25 @@ http_append_header(buf_t *buf, http_header_t *hh)
 	buf_destroy(&tmp);
 
 	return 0;
+}
+
+struct http_t *
+http_new(void)
+{
+	struct http_t *__http = malloc(sizeof(http_t));
+
+	if (!__http)
+	{
+		fprintf(stderr, "http_new: failed to allocate memory for new HTTP object\n");
+		goto fail;
+	}
+
+	if (__http_init_obj(__http) < 0)
+	{
+		fprintf(stderr, "http_new: failed to initialise HTTP object\n");
+		goto fail;
+	}
+
+	fail:
+	return NULL;
 }
