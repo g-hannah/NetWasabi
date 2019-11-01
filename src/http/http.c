@@ -346,7 +346,7 @@ http_build_request_header(struct http_t *http, const char *http_verb, const char
 }
 
 int
-http_send_request(connection_t *conn)
+http_send_request(struct http_t *http)
 {
 	assert(conn);
 
@@ -377,7 +377,7 @@ http_send_request(connection_t *conn)
 
 
 static int
-__http_read_until_eoh(connection_t *conn, char **p)
+__http_read_until_eoh(struct http_t *http, char **p)
 {
 	assert(conn);
 
@@ -463,7 +463,7 @@ __dump_buf(buf_t *buf)
 #endif
 
 static ssize_t
-__read_bytes(connection_t *conn, size_t toread)
+__read_bytes(struct http_t *http, size_t toread)
 {
 	assert(conn);
 	assert(toread > 0);
@@ -496,7 +496,7 @@ __read_bytes(connection_t *conn, size_t toread)
 #define HTTP_MAX_CHUNK_STR 10
 
 static void
-__http_read_until_next_chunk_size(connection_t *conn, buf_t *buf, char **cur_pos)
+__http_read_until_next_chunk_size(struct http_t *http, buf_t *buf, char **cur_pos)
 {
 	assert(conn);
 	assert(buf);
@@ -553,7 +553,7 @@ __http_read_until_next_chunk_size(connection_t *conn, buf_t *buf, char **cur_pos
 }
 
 static size_t
-__http_do_chunked_recv(connection_t *conn)
+__http_do_chunked_recv(struct http_t *http)
 {
 	assert(conn);
 
@@ -715,7 +715,7 @@ __http_do_chunked_recv(connection_t *conn)
 }
 
 static int
-__http_set_new_location(connection_t *conn)
+__http_set_new_location(struct http_t *http)
 {
 	assert(conn);
 
@@ -771,7 +771,7 @@ __http_set_new_location(connection_t *conn)
  * @conn: connection context
  */
 int
-http_recv_response(connection_t *conn)
+http_recv_response(struct http_t *http)
 {
 	assert(conn);
 
