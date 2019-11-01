@@ -21,24 +21,11 @@ static struct sigaction oact;
 static struct sigaction nact;
 static sigjmp_buf TIMEOUT;
 
-//static wr_cache_t *http_cookie_cache;
-/* Generic header pointer to allocate from cache in a loop */
-//static http_header_t *header = NULL;
+static http_header_t *header = NULL;
 
 static void
 __ctor __http_init(void)
 {
-	if (!(http_hcache = wr_cache_create(
-			"http_header_cache",
-			sizeof(http_header_t),
-			0,
-			http_header_cache_ctor,
-			http_header_cache_dtor)))
-	{
-		fprintf(stderr, "__http_init: failed to create cache for HTTP header field objects\n");
-		goto fail;
-	}
-
 	return;
 
 	fail:
@@ -48,9 +35,6 @@ __ctor __http_init(void)
 static void
 __dtor __http_fini(void)
 {
-	wr_cache_clear_all(http_hcache);
-	wr_cache_destroy(http_hcache);
-
 	return;
 }
 
@@ -200,8 +184,15 @@ http_link_cache_dtor(void *http_link)
 	return;
 }
 
+/**
+ * __http_check_cookies - check for Set-Cookie header fields in response header
+ *			and clear all old cookies if there are new ones specified.
+ *
+ * @buf: the receive buffer
+ * @http: the HTTP object containing the cookie object cache
+ */
 static int
-__http_check_cookies(buf_t *buf)
+__http_check_cookies(buf_t *buf, struct http_t *http)
 {
 	assert(buf);
 
@@ -209,11 +200,11 @@ __http_check_cookies(buf_t *buf)
 	{
 		off_t off = 0;
 
-		wr_cache_clear_all(http_cookie_cache);
+		wr_cache_clear_all(http->cookies);
 
 		while (http_check_header(buf, "Set-Cookie", off, &off))
 		{
-			if (!(header = (http_header_t *)wr_cache_alloc(http_cookie_cache, &header)))
+			if (!(header = (http_header_t *)wr_cache_alloc(http->cookies, &header)))
 			{
 				fprintf(stderr, "__http_check_cookies: failed to allocate HTTP header cache object\n");
 				goto fail;
@@ -232,14 +223,14 @@ __http_check_cookies(buf_t *buf)
 	return 0;
 
 	fail_dealloc:
-	wr_cache_clear_all(http_cookie_cache);
+	wr_cache_clear_all(http->cookies);
 
 	fail:
 	return -1;
 }
 
 int
-http_build_request_header(connection_t *conn, const char *http_verb, const char *target)
+http_build_request_header(struct http_t *http, const char *http_verb, const char *target)
 {
 	assert(conn);
 	assert(http_verb);
@@ -310,19 +301,19 @@ http_build_request_header(connection_t *conn, const char *http_verb, const char 
 
 	buf_append(buf, header_buf);
 
-#if 0
-	int nr_cookies = wr_cache_nr_used(http_cookie_cache);
-	int i;
-	http_header_t *__c = (http_header_t *)http_cookie_cache->cache;
+	int __nr_cookies = wr_cache_nr_used(http->cookies);
 
-	for (i = 0; i < nr_cookies; ++i)
+	if (__nr_cookies)
 	{
-		if (wr_cache_obj_used(http_cookie_cache, __c))
-			http_append_header(buf, __c);
+		struct http_cookie_t *__c = (struct http_cookie_t *)http->cookies->cache;
+		int i;
 
-		++__c;
+		for (i = 0; i < __nr_cookies; ++i)
+		{
+			http_append_header(buf, __c);
+			++__c;
+		}
 	}
-#endif
 
 	buf_destroy(&tmp);
 
