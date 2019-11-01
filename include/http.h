@@ -1,11 +1,11 @@
 #ifndef HTTP_H
 #define HTTP_H 1
 
+#include <openssl/ssl.h>
 #include <stdint.h>
 #include <time.h>
 #include "buffer.h"
 #include "cache.h"
-#include "connection.h"
 
 #define HTTP_OK 200u
 #define HTTP_MOVED_PERMANENTLY 301u
@@ -115,8 +115,20 @@ struct http_cookie_t
 
 struct http_t
 {
-	wr_cache_t *headers;
-	wr_cache_t *cookies;
+	char *host;
+	char *page;
+	char *full_url;
+	char *primary_host;
+
+	struct conn
+	{
+		int sock;
+		SSL *ssl;
+		buf_t read_buf;
+		buf_t write_buf;
+		char *host_ipv4;
+		SSL_CTX *ssl_ctx;
+	};
 };
 
 http_header_t **hh_loop;
