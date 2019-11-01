@@ -118,6 +118,7 @@ http_header_cache_dtor(void *hh)
 	return;
 }
 
+#if 0
 #define TIME_STRING_MAX 64
 
 int
@@ -171,6 +172,7 @@ http_cookie_dtor(void *cookie)
 
 	return;
 }
+#endif
 
 int
 http_link_cache_ctor(void *http_link)
@@ -1344,8 +1346,8 @@ __http_init_obj(struct __http_t *__http)
 			__http_cache_name,
 			sizeof(http_header_t),
 			0,
-			http_cookie_cache_ctor,
-			http_cookie_cache_dtor)))
+			http_header_cache_ctor,
+			http_header_cache_dtor)))
 	{
 		fprintf(stderr, "__http_init_obj: failed to create cache for HTTP cookie objects\n");
 		goto fail_destroy_cache;
