@@ -73,6 +73,8 @@ do {\
 	___p_t_r;\
 })
 
+#define __HTTP_ALIGN_SIZE(s) (((s) + 0xf) & ~(0xf))
+
 typedef struct http_link_t
 {
 	char *url;
