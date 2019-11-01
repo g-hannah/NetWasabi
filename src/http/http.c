@@ -1352,19 +1352,25 @@ __http_init_obj(struct __http_t *__http)
 	}
 
 	__http->host = calloc(HTTP_HOST_MAX+1, 1);
+	__http->host_ipv4 = calloc(__HTTP_ALIGN_SIZE(INET_ADDRSTRLEN+1), 1);
 	__http->primary_host = calloc(HTTP_HOST_MAX+1, 1);
 	__http->page = calloc(HTTP_URL_MAX+1, 1);
 	__http->full_url = calloc(HTTP_URL_MAX+1, 1);
 
 	if (buf_init(&__http->conn.read_buf, HTTP_DEFAULT_READ_BUF_SIZE) < 0)
 	{
+		fprintf(stderr, "__http_init_obj: failed to initialise read buf\n");
+		goto fail_destroy_cache;
 	}
 
 	if (buf_init(&__http->conn.write_buf, HTTP_DEFAULT_WRITE_BUF_SIZE) < 0)
 	{
+		fprintf(stderr, "__http_init_obj: failed to initialise write buf\n");
+		goto fail_release_mem;
 	}
 
 	assert(__http->host);
+	assert(__http->host_ipv4);
 	assert(__http->primary_host);
 	assert(__http->page);
 	assert(__http->full_url);
@@ -1372,6 +1378,9 @@ __http_init_obj(struct __http_t *__http)
 	++__http_obj_cnt;
 
 	return 0;
+
+	fail_release_mem:
+	buf_destroy(&__http->conn.read_buf);
 
 	fail_destroy_cache:
 	wr_cache_destroy(http->headers);
