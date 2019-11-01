@@ -10,6 +10,7 @@ struct worker_ctx
 {
 	wr_cache_t *cache1; /* shared */
 	wr_cache_t *cache2; /* shared */
+	struct http_t http; /* private */
 };
 
 struct cache_ctx
