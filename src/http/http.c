@@ -1352,7 +1352,7 @@ __http_init_obj(struct __http_t *__http)
 	}
 
 	__http->host = calloc(HTTP_HOST_MAX+1, 1);
-	__http->host_ipv4 = calloc(__HTTP_ALIGN_SIZE(INET_ADDRSTRLEN+1), 1);
+	__http->conn.host_ipv4 = calloc(__HTTP_ALIGN_SIZE(INET_ADDRSTRLEN+1), 1);
 	__http->primary_host = calloc(HTTP_HOST_MAX+1, 1);
 	__http->page = calloc(HTTP_URL_MAX+1, 1);
 	__http->full_url = calloc(HTTP_URL_MAX+1, 1);
@@ -1370,7 +1370,7 @@ __http_init_obj(struct __http_t *__http)
 	}
 
 	assert(__http->host);
-	assert(__http->host_ipv4);
+	assert(__http->conn.host_ipv4);
 	assert(__http->primary_host);
 	assert(__http->page);
 	assert(__http->full_url);
@@ -1410,4 +1410,29 @@ http_new(void)
 
 	fail:
 	return NULL;
+}
+
+void
+http_delete(struct http_t *http)
+{
+	assert(http);
+
+	struct __http_t *__http = (struct __http_t *)http;
+
+	free(__http->host);
+	free(__http->primary_host);
+	free(__http->conn.host_ipv4);
+	free(__http->page);
+	free(__http->full_url);
+
+	wr_cache_clear_all(__http->headers);
+	wr_cache_destroy(__http->headers);
+
+	wr_cache_clear_all(__http->cookies);
+	wr_cache_destroy(__http->cookies);
+
+	buf_destroy(&__http->conn.read_buf);
+	buf_destroy(&__http->conn.write_buf);
+
+	return;
 }
