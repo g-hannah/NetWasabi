@@ -17,7 +17,6 @@
 #include "cache.h"
 #include "http.h"
 #include "malloc.h"
-#include "queue.h"
 #include "robots.h"
 #include "screen_utils.h"
 #include "utils_url.h"
@@ -74,15 +73,8 @@ static int get_opts(int, char *[]) __nonnull((2)) __wur;
 struct webreaper_ctx wrctx = {0};
 uint32_t runtime_options = 0;
 
-wr_cache_t *http_hcache;
 wr_cache_t *http_lcache;
 wr_cache_t *http_lcache2;
-wr_cache_t *cookies;
-struct queue link_queue;
-pthread_t workers[FAST_MODE_NR_WORKERS];
-pthread_mutex_t cache1_mtx;
-pthread_mutex_t cache2_mtx;
-pthread_barrier_t barrier;
 
 size_t httplen;
 size_t httpslen;
@@ -101,6 +93,7 @@ pthread_t thread_screen_tid;
 pthread_attr_t thread_screen_attr;
 pthread_mutex_t screen_mutex;
 static volatile sig_atomic_t screen_updater_stop = 0;
+
 struct graph_ctx *allowed;
 struct graph_ctx *forbidden;
 
@@ -468,7 +461,7 @@ update_operation_status(const char *status_string, ...)
 }
 
 void
-update_connection_state(connection_t *conn, int state)
+update_connection_state(struct http_t *http, int state)
 {
 	pthread_mutex_lock(&screen_mutex);
 
@@ -481,13 +474,13 @@ update_connection_state(connection_t *conn, int state)
 	{
 		default:
 		case FL_CONNECTION_CONNECTED:
-			fprintf(stderr, "%sConnected%s to %s%s%s (%s)", COL_DARKGREEN, COL_END, COL_RED, conn->host, COL_END, conn->host_ipv4);
+			fprintf(stderr, "%sConnected%s to %s%s%s (%s)", COL_DARKGREEN, COL_END, COL_RED, http->host, COL_END, http->conn.host_ipv4);
 			break;
 		case FL_CONNECTION_DISCONNECTED:
 			fprintf(stderr, "%sDisconnected%s", COL_LIGHTGREY, COL_END);
 			break;
 		case FL_CONNECTION_CONNECTING:
-			fprintf(stderr, "Connecting to server %s at %s", conn->host, conn->host_ipv4);
+			fprintf(stderr, "Connecting to server %s at %s", http->host, http->conn.host_ipv4);
 			break;
 	}
 
@@ -758,6 +751,7 @@ __url_parseable(char *url)
 	return 1;
 }
 
+#if 0
 /**
  * __handle301 - handle 301 Moved Permanently
  * @conn: struct holding connection context
@@ -942,6 +936,7 @@ __handle301(connection_t *conn)
 
 	return rv;
 }
+#endif
 
 static void
 deconstruct_btree(http_link_t *root, wr_cache_t *cache)
@@ -959,7 +954,7 @@ deconstruct_btree(http_link_t *root, wr_cache_t *cache)
 #ifdef DEBUG
 		fprintf(stderr, "node @ %p is beyond our cache... (cache %p to %p)\n",
 		root,
-		cache->cache,
+		ctx->cache->cache,
 		(void *)((char *)cache->cache + cache->cache_size));
 #endif
 
@@ -971,7 +966,7 @@ deconstruct_btree(http_link_t *root, wr_cache_t *cache)
 #ifdef DEBUG
 		fprintf(stderr, "Going left from %p to %p\n", root, root->left);
 #endif
-		deconstruct_btree(root->left, cache);
+		deconstruct_btree(root->left, ctx->cache);
 	}
 
 	if (root->right)
@@ -1000,11 +995,11 @@ deconstruct_btree(http_link_t *root, wr_cache_t *cache)
  * @conn: our struct with connection context
  */
 static int
-reap(wr_cache_t *cachep, wr_cache_t *cachep2, connection_t *conn)
+reap(wr_cache_t *cachep, wr_cache_t *cachep2, struct http_t *http)
 {
 	assert(cachep);
 	assert(cachep2);
-	assert(conn);
+	assert(http);
 
 	int nr_links = 0;
 	int nr_links_sibling;
@@ -1013,8 +1008,8 @@ reap(wr_cache_t *cachep, wr_cache_t *cachep2, connection_t *conn)
 	int i;
 	size_t len;
 	http_link_t *link;
-	buf_t *wbuf = &conn->write_buf;
-	buf_t *rbuf = &conn->read_buf;
+	buf_t *wbuf = &http_wbuf(http);
+	buf_t *rbuf = &http_rbuf(http);
 
 	trailing_slash_off(wrctx);
 /*
@@ -1106,10 +1101,10 @@ reap(wr_cache_t *cachep, wr_cache_t *cachep2, connection_t *conn)
 
 			assert(len < HTTP_URL_MAX);
 
-			strncpy(conn->full_url, link->url, len);
-			conn->full_url[len] = 0;
+			strncpy(http->full_url, link->url, len);
+			http->full_url[len] = 0;
 
-			if (!http_parse_page(conn->full_url, conn->page))
+			if (!http_parse_page(http->full_url, http->page))
 				continue;
 
 			BLOCK_SIGNAL(SIGINT);
@@ -1125,7 +1120,7 @@ reap(wr_cache_t *cachep, wr_cache_t *cachep2, connection_t *conn)
 				continue;
 			}
 
-			update_current_url(conn->full_url);
+			update_current_url(http->full_url);
 
 			status_code = __do_request(conn);
 
@@ -1193,10 +1188,10 @@ reap(wr_cache_t *cachep, wr_cache_t *cachep2, connection_t *conn)
 
 					buf_clear(rbuf);
 
-					if (!conn->host[0])
-						strcpy(conn->host, conn->primary_host);
+					if (!http->host[0])
+						strcpy(http->host, http->primary_host);
 
-					reconnect(conn);
+					http_reconnect(http);
 
 					goto next;
 					break;
@@ -1207,17 +1202,17 @@ reap(wr_cache_t *cachep, wr_cache_t *cachep2, connection_t *conn)
 
 			if (fill)
 			{
-				if (__url_parseable(conn->full_url))
+				if (__url_parseable(http->full_url))
 				{
 					if (!cache_switch)
 					{
-						parse_links(cachep2, cachep, &cache2_url_root, conn);
+						parse_links(cachep2, cachep, &cache2_url_root, http);
 						nr_links_sibling = wr_cache_nr_used(cachep2);
 						update_cache2_count(nr_links_sibling);
 					}
 					else
 					{
-						parse_links(cachep, cachep2, &cache1_url_root, conn);
+						parse_links(cachep, cachep2, &cache1_url_root, http);
 						nr_links_sibling = wr_cache_nr_used(cachep);
 						update_cache1_count(nr_links_sibling);
 					}
@@ -1234,7 +1229,7 @@ reap(wr_cache_t *cachep, wr_cache_t *cachep2, connection_t *conn)
 				}
 			}
 
-			__archive_page(conn);
+			__archive_page(http);
 
 			next:
 			++link;
@@ -1429,6 +1424,10 @@ main(int argc, char *argv[])
 		goto fail;
 	}
 
+	pthread_mutex_init(&screen_mutex, NULL);
+	pthread_attr_setdetachstate(&thread_screen_attr, PTHREAD_CREATE_DETACHED);
+	pthread_create(&thread_screen_tid, &thread_screen_attr, screen_updater_thread, NULL);
+
 	if (option_set(FAST_MODE))
 	{
 		do_fast_mode(argv[1]);
@@ -1459,7 +1458,7 @@ main(int argc, char *argv[])
 
 	__check_directory();
 
-	connection_t conn;
+	struct http_t *http;
 	int status_code;
 	int do_not_archive = 0;
 	int rv;
@@ -1476,16 +1475,22 @@ main(int argc, char *argv[])
 
 	__print_information_layout();
 
-	conn_init(&conn);
+	//conn_init(&conn);
+	if (!(http = http_new()))
+	{
+		fprintf(stderr, "reap: failed to obtain new HTTP object\n");
+		goto fail;
+	}
 
-	http_parse_host(argv[1], conn.host);
-	strcpy(conn.primary_host, conn.host);
+	http_parse_host(argv[1], http->host);
+	strcpy(http->primary_host, http->host);
 
-	if (open_connection(&conn) < 0)
+	//if (open_connection(&conn) < 0)
+	if (http_connect(http) < 0)
 		goto fail;
 
-	rbuf = &conn.read_buf;
-	wbuf = &conn.write_buf;
+	rbuf = &http_rbuf(http);
+	wbuf = &http_wbuf(http);
 
 
 	/*
@@ -1505,31 +1510,11 @@ main(int argc, char *argv[])
 			wr_cache_http_link_ctor,
 			wr_cache_http_link_dtor);
 
-	/*
-	 * Create a cache for HTTP header fields.
-	 */
-	http_hcache = wr_cache_create(
-			"http_header_field_cache",
-			sizeof(http_header_t),
-			0,
-			wr_cache_http_header_ctor,
-			wr_cache_http_header_dtor);
-
-	/*
-	 * Create a cache for cookies; separate cache because we want
-	 * a different struct to separate and easily access cookie
-	 * params (like domain, path, etc).
-	 */
-	cookies = wr_cache_create(
-			"cookie_cache",
-			sizeof(struct http_cookie_t),
-			0,
-			http_cookie_ctor,
-			http_cookie_dtor);
-
 	if (option_set(FAST_MODE))
 	{
-		do_fast_mode(conn.full_url);
+		http_delete(http);
+		do_fast_mode(argv[1]);
+		goto out;
 	}
 
 	/*
@@ -1551,25 +1536,22 @@ main(int argc, char *argv[])
 	//if (__get_robots(&conn) < 0)
 		//put_error_msg("No robots.txt file");
 
-	http_parse_page(argv[1], conn.page);
+	http_parse_page(argv[1], http->page);
 	url_len = strlen(argv[1]);
 
 	assert(url_len < HTTP_URL_MAX);
 
-	strncpy(conn.full_url, argv[1], url_len);
-	conn.full_url[url_len] = 0;
+	strncpy(http->full_url, argv[1], url_len);
+	http->full_url[url_len] = 0;
 
 	buf_clear(rbuf);
 	buf_clear(wbuf);
 
-	update_current_url(conn.full_url);
+	update_current_url(http->full_url);
 
-	pthread_mutex_init(&screen_mutex, NULL);
-	pthread_attr_setdetachstate(&thread_screen_attr, PTHREAD_CREATE_DETACHED);
-	pthread_create(&thread_screen_tid, &thread_screen_attr, screen_updater_thread, NULL);
 
 	resend:
-	status_code = __do_request(&conn);
+	status_code = __do_request(http);
 
 	//__update_status_code(status_code);
 	//fprintf(stdout, "%s%s\n", ACTION_ING_STR, http_status_code_string(status_code));
@@ -1578,15 +1560,9 @@ main(int argc, char *argv[])
 	{
 		case HTTP_OK:
 			break;
-		case HTTP_MOVED_PERMANENTLY:
-		case HTTP_FOUND:
-		case HTTP_SEE_OTHER:
-			__handle301(&conn);
-			goto resend;
-			break;
 		case HTTP_ALREADY_EXISTS:
 			do_not_archive = 1;
-			status_code = __send_get_request(&conn); /* in this case we still need to get it to extract URLs */
+			status_code = send_get_request(http); /* in this case we still need to get it to extract URLs */
 			update_status_code(status_code);
 			break;
 		case HTTP_BAD_REQUEST:
@@ -1606,12 +1582,12 @@ main(int argc, char *argv[])
 	}
 
 
-	parse_links(http_lcache, http_lcache2, &cache1_url_root, &conn);
+	parse_links(http_lcache, http_lcache2, &cache1_url_root, http);
 	update_cache1_count(wr_cache_nr_used(http_lcache));
 
 	if (!do_not_archive)
 	{
-		__archive_page(&conn);
+		__archive_page(http);
 	}
 
 	if (!wr_cache_nr_used(http_lcache))
@@ -1620,7 +1596,7 @@ main(int argc, char *argv[])
 		goto out_disconnect;
 	}
 
-	rv = reap(http_lcache, http_lcache2, &conn);
+	rv = reap(http_lcache, http_lcache2, http);
 
 	if (rv < 0)
 	{
@@ -1631,22 +1607,15 @@ main(int argc, char *argv[])
 
 	out_disconnect:
 	screen_updater_stop = 1;
-	close_connection(&conn);
-	conn_destroy(&conn);
+	http_disconnect(http);
 
 	if (wr_cache_nr_used(http_lcache) > 0)
 		wr_cache_clear_all(http_lcache);
 	if (wr_cache_nr_used(http_lcache2) > 0)
 		wr_cache_clear_all(http_lcache2);
-	if (wr_cache_nr_used(http_hcache) > 0)
-		wr_cache_clear_all(http_hcache);
-	if (wr_cache_nr_used(cookies) > 0)
-		wr_cache_clear_all(cookies);
 
 	wr_cache_destroy(http_lcache);
 	wr_cache_destroy(http_lcache2);
-	wr_cache_destroy(http_hcache);
-	wr_cache_destroy(cookies);
 
 	if (allowed)
 		destroy_graph(allowed);
@@ -1661,22 +1630,15 @@ main(int argc, char *argv[])
 	exit(EXIT_SUCCESS);
 
 	fail_disconnect:
-	close_connection(&conn);
-	conn_destroy(&conn);
+	http_disconnect(http);
 
 	if (wr_cache_nr_used(http_lcache) > 0)
 		wr_cache_clear_all(http_lcache);
 	if (wr_cache_nr_used(http_lcache2) > 0)
 		wr_cache_clear_all(http_lcache2);
-	if (wr_cache_nr_used(http_hcache) > 0)
-		wr_cache_clear_all(http_hcache);
-	if (wr_cache_nr_used(cookies) > 0)
-		wr_cache_clear_all(cookies);
 
 	wr_cache_destroy(http_lcache);
 	wr_cache_destroy(http_lcache2);
-	wr_cache_destroy(http_hcache);
-	wr_cache_destroy(cookies);
 
 	if (allowed)
 		destroy_graph(allowed);
