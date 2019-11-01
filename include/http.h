@@ -113,6 +113,12 @@ struct http_cookie_t
 	time_t expires_ts;
 };
 
+struct http_t
+{
+	wr_cache_t *headers;
+	wr_cache_t *cookies;
+};
+
 http_header_t **hh_loop;
 http_link_t **hl_loop;
 struct http_cookie_t **hc_loop;
