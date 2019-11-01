@@ -200,7 +200,6 @@ http_link_cache_dtor(void *http_link)
 	return;
 }
 
-#if 0
 static int
 __http_check_cookies(buf_t *buf)
 {
@@ -238,7 +237,6 @@ __http_check_cookies(buf_t *buf)
 	fail:
 	return -1;
 }
-#endif
 
 int
 http_build_request_header(connection_t *conn, const char *http_verb, const char *target)
