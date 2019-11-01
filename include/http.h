@@ -163,15 +163,13 @@ char *http_fetch_header(buf_t *, const char *, http_header_t *, off_t) __nonnull
 char *http_parse_host(char *, char *) __nonnull((1,2)) __wur;
 char *http_parse_page(char *, char *) __nonnull((1,2)) __wur;
 int parse_links(wr_cache_t *, wr_cache_t *, http_link_t **, connection_t *) __nonnull((1,2,3,4)) __wur;
-int http_new_cookie_cache(void) __wur;
 int http_link_cache_ctor(void *) __nonnull((1)) __wur;
 void http_link_cache_dtor(void *) __nonnull((1));
 int http_header_cache_ctor(void *) __nonnull((1)) __wur;
 void http_header_cache_dtor(void *) __nonnull((1));
-int http_cookie_cache_ctor(void *) __nonnull((1)) __wur;
-void http_cookie_cache_dtor(void *) __nonnull((1));
-int http_cookie_ctor(void *) __nonnull((1)) __wur;
-void http_cookie_dtor(void *) __nonnull((1));
+
+struct http_t *http_new(void) __wur;
+void http_delete(struct http_t *) __nonnull((1));
 
 /*
  * Connection-related functions
