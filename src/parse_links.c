@@ -6,8 +6,8 @@
 #include <unistd.h>
 #include "buffer.h"
 #include "cache.h"
-#include "fast_mode.h"
 #include "http.h"
+#include "misc.h"
 #include "robots.h"
 #include "utils_url.h"
 #include "webreaper.h"
@@ -28,8 +28,17 @@ static const char *const __disallowed_tokens[] =
 	(char *)NULL
 };
 
+/**
+ * __url_acceptable - determine if parsed URL is acceptable by searching for certain tokens
+ *				and checking if the URL is already present in the DRAINING cache.
+ *
+ * @http: our HTTP object with remote host info
+ * @fctx: the FILLING cache context with binary tree root
+ * @dctx: the DRAINING cache contetx with binary tree root
+ * @url: the parsed URL to check
+ */
 static int
-__url_acceptable(connection_t *conn, struct cache_ctx *fctx, struct cache_ctx *dctx, buf_t *url)
+__url_acceptable(struct http_t *http, struct cache_ctx *fctx, struct cache_ctx *dctx, buf_t *url)
 {
 	assert(conn);
 	assert(fctx);
@@ -116,10 +125,9 @@ __url_acceptable(connection_t *conn, struct cache_ctx *fctx, struct cache_ctx *d
 			if (!nptr)
 				break;
 		}
-
-		wr_cache_unlock(dctx->cache);
 	}
 
+	wr_cache_unlock(dctx->cache);
 	return 1;
 }
 
@@ -136,6 +144,8 @@ __insert_link(struct cache_ctx *fctx, buf_t *url)
 
 	if (!(fctx->root))
 	{
+		wr_cache_lock(fctx->cache);
+
 		http_link_t *r = fctx->root;
 		r = (http_link_t *)wr_cache_alloc(fctx->cache, &fctx->root);
 
@@ -145,6 +155,8 @@ __insert_link(struct cache_ctx *fctx, buf_t *url)
 		r->left = NULL;
 		r->right = NULL;
 		r->parent = NULL;
+
+		wr_cache_unlock(fctx->cache);
 
 		return 0;
 	}
@@ -164,6 +176,8 @@ __insert_link(struct cache_ctx *fctx, buf_t *url)
 	off_t nptr_offset;
 	void *nptr_stack = &nptr;
 	http_link_t *new_addr;
+
+	wr_cache_lock(fctx->cache);
 
 	while (1)
 	{
@@ -228,11 +242,14 @@ __insert_link(struct cache_ctx *fctx, buf_t *url)
 		}
 	}
 
+	wr_cache_unlock(fctx->cache);
+
 	return 0;
 }
 
+#if 0
 int
-parse_links(wr_cache_t *e_cache, wr_cache_t *f_cache, http_link_t **tree_root, connection_t *conn)
+parse_links(struct http_t *http, wr_cache_t *e_cache, wr_cache_t *f_cache)
 {
 	assert(e_cache);
 	assert(f_cache);
@@ -349,16 +366,17 @@ parse_links(wr_cache_t *e_cache, wr_cache_t *f_cache, http_link_t **tree_root, c
 	buf_destroy(&path);
 	return -1;
 }
+#endif
 
 /**
- * parse_links_ex - parse links from page and store in URL cache within fctx
+ * parse_links - parse links from page and store in URL cache within fctx
  *			checking for duplicate URLs in URL cache within dctx.
+ * @http: our HTTP object with remote host info
  * @fctx: context of cache we are filling
  * @dctx: context of cache within which we are checking for duplicates
- * @conn: the context of the connection to remote webserver
  */
 int
-parse_links_ex(struct cache_ctx *fctx, struct cache_ctx *dctx, connection_t *conn)
+parse_links(struct http_t *http, struct cache_ctx *fctx, struct cache_ctx *dctx)
 {
 	assert(fctx);
 	assert(dctx);
@@ -370,14 +388,19 @@ parse_links_ex(struct cache_ctx *fctx, struct cache_ctx *dctx, connection_t *con
 	char delim;
 	int url_type_idx = 0;
 	size_t url_len = 0;
-	buf_t *buf = &conn->read_buf;
+	buf_t *buf = &http_rbuf(http);
 	buf_t url;
 	buf_t full_url;
 	buf_t path;
 
-	buf_init(&url, HTTP_URL_MAX);
-	buf_init(&full_url, HTTP_URL_MAX);
-	buf_init(&path, path_max);
+	if (buf_init(&url, HTTP_URL_MAX) < 0)
+		goto fail;
+
+	if (buf_init(&full_url, HTTP_URL_MAX) < 0)
+		goto fail_destroy_bufs;
+
+	if (buf_init(&path, path_max) < 0)
+		goto fail_destroy_bufs;
 
 	tail = buf->buf_tail;
 	savep = buf->buf_head;
@@ -386,7 +409,6 @@ parse_links_ex(struct cache_ctx *fctx, struct cache_ctx *dctx, connection_t *con
 	nr_twins = 0;
 	nr_dups = 0;
 	nr_urls_call = 0;
-	nr_urls_total = wr_cache_nr_used(fctx->cache);
 
 	while (1)
 	{
@@ -434,15 +456,13 @@ parse_links_ex(struct cache_ctx *fctx, struct cache_ctx *dctx, connection_t *con
 		assert(url_len < HTTP_URL_MAX);
 
 		buf_append_ex(&url, savep, url_len);
-		make_full_url(conn, &url, &full_url);
+		make_full_url(http, &url, &full_url);
 
-		if (!__url_acceptable(conn, fctx->cache, dctx->cache, &full_url))
+		if (!__url_acceptable(http, fctx->cache, dctx->cache, &full_url))
 		{
 			savep = ++p;
 			continue;
 		}
-
-		//fprintf(stderr, "inserting URL %s to tree\n", full_url.buf_head);
 
 		if (__insert_link(fctx->cache, &fctx->root, &full_url) < 0)
 			goto fail_destroy_bufs;
@@ -461,5 +481,6 @@ parse_links_ex(struct cache_ctx *fctx, struct cache_ctx *dctx, connection_t *con
 	buf_destroy(&url);
 	buf_destroy(&full_url);
 	buf_destroy(&path);
+
 	return -1;
 }
