@@ -113,6 +113,11 @@ struct http_cookie_t
 	time_t expires_ts;
 };
 
+#define http_socket(h) ((h)->conn.sock)
+#define http_tls(h) ((h)->conn.ssl)
+#define http_rbuf(h) ((h)->conn.read_buf)
+#define http_wbuf(h) ((h)->conn.write_buf)
+
 struct http_t
 {
 	char *host;
