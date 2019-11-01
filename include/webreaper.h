@@ -5,8 +5,8 @@
 #include <string.h>
 #include <sys/ioctl.h>
 #include "cache.h"
-#include "connection.h"
 #include "graph.h"
+#include "http.h"
 
 #define WEBREAPER_BUILD		"0.0.2"
 #define WEBREAPER_DIR			"WR_Reaped"
@@ -117,6 +117,7 @@ struct url_types
 
 struct webreaper_ctx
 {
+	pthread_mutex_t lock;
 	unsigned char trailing_slash;
 	unsigned int crawl_delay;
 	unsigned int crawl_depth;
@@ -125,6 +126,16 @@ struct webreaper_ctx
 	unsigned int nr_requests;
 	unsigned int nr_pages;
 	unsigned int nr_errors;
+};
+
+struct cache_ctx
+{
+	wr_cache_t *cache;
+	http_link_t *root;
+	enum {
+		DRAINING = 0,
+		FILLING = 1
+	} cache_state;
 };
 
 #define keep_trailing_slash(w) ((w).trailing_slash)
@@ -137,6 +148,8 @@ struct webreaper_ctx
 #define total_requests(w) ((w).nr_requests)
 #define total_pages(w) ((w).nr_pages)
 #define total_errors(w) ((w).nr_errors)
+#define wrstats_lock(w) (pthread_mutex_lock(&(w).lock))
+#define wrstats_unlock(w) (pthread_mutex_unlock(&(w).lock))
 
 #define STATS_INC_ERRORS(w) ++((w).nr_errors)
 #define STATS_INC_PAGES(w) ++((w).nr_pages)
@@ -167,7 +180,7 @@ struct graph_ctx *forbidden;
 #define FL_CONNECTION_CONNECTING 0x4
 
 void update_operation_status(const char *, ...) __nonnull((1));
-void update_connection_state(connection_t *, int) __nonnull((1));
+void update_connection_state(struct http_t *, int) __nonnull((1));
 void update_current_url(const char *) __nonnull((1));
 void update_current_local(const char *) __nonnull((1));
 void update_bytes(size_t);
