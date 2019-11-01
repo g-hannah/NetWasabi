@@ -65,7 +65,7 @@ http_connect(struct http_t *http)
 	if (!aip)
 		goto fail;
 
-	sprintf(http->host_ipv4, "%s", inet_ntoa(sock4.sin_addr));
+	sprintf(http->conn.host_ipv4, "%s", inet_ntoa(sock4.sin_addr));
 
 	update_connection_state(http, FL_CONNECTION_CONNECTING);
 
@@ -174,7 +174,7 @@ http_reconnect(struct http_t *http)
 	if (!aip)
 		goto fail;
 
-	sprintf(http->host_ipv4, "%s", inet_ntoa(sock4.sin_addr));
+	sprintf(http->conn.host_ipv4, "%s", inet_ntoa(sock4.sin_addr));
 
 	update_connection_state(http, FL_CONNECTION_CONNECTING);
 
