@@ -1306,6 +1306,48 @@ http_append_header(buf_t *buf, http_header_t *hh)
 	return 0;
 }
 
+static int __http_obj_cnt = 0;
+static char __http_cache_name[64];
+
+static int
+__http_init_obj(struct http_t *http)
+{
+	sprintf(__http_cache_name, "http_header_cache%d", __http_obj_cnt);
+
+	if (!(http->headers = wr_cache_create(
+			__http_cache_name,
+			sizeof(http_header_t),
+			0,
+			http_header_cache_ctor,
+			http_header_cache_dtor)))
+	{
+		fprintf(stderr, "__http_init_obj: failed to create cache for HTTP header objects\n");
+		goto fail;
+	}
+
+	sprintf(__http_cache_name, "http_cookie_cache%d", __http_obj_cnt);
+	if (!(http->cookies = wr_cache_create(
+			__http_cache_name,
+			sizeof(http_cookie_t),
+			0,
+			http_cookie_cache_ctor,
+			http_cookie_cache_dtor)))
+	{
+		fprintf(stderr, "__http_init_obj: failed to create cache for HTTP cookie objects\n");
+		goto fail_destroy_cache;
+	}
+
+	++__http_obj_cnt;
+
+	return 0;
+
+	fail_destroy_cache:
+	wr_cache_destroy(http->headers);
+
+	fail:
+	return -1;
+}
+
 struct http_t *
 http_new(void)
 {
@@ -1322,6 +1364,8 @@ http_new(void)
 		fprintf(stderr, "http_new: failed to initialise HTTP object\n");
 		goto fail;
 	}
+
+	return __http;
 
 	fail:
 	return NULL;
