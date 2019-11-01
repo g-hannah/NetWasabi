@@ -13,10 +13,4 @@ struct worker_ctx
 	struct http_t *http; /* private */
 };
 
-struct cache_ctx
-{
-	wr_cache_t *cache;
-	http_link_t *root;
-};
-
 #endif /* !defined FAST_MODE_H */
