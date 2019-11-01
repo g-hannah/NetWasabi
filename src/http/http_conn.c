@@ -16,47 +16,6 @@
 #include "malloc.h"
 #include "webreaper.h"
 
-void
-http_conn_init(struct http_t *http)
-{
-	assert(conn);
-
-	clear_struct(conn);
-	conn->host = wr_calloc(HTTP_URL_MAX+1, 1);
-	conn->host_ipv4 = wr_calloc(__ALIGN((INET_ADDRSTRLEN+1)), 1);
-	conn->page = wr_calloc(HTTP_URL_MAX+1, 1);
-	conn->full_url = wr_calloc(HTTP_URL_MAX+1, 1);
-	conn->primary_host = wr_calloc(HTTP_URL_MAX+1,1);
-
-	return;
-}
-
-void
-http_conn_destroy(struct http_t *http)
-{
-	assert(conn);
-
-	free(conn->host);
-	free(conn->host_ipv4);
-	free(conn->page);
-	free(conn->full_url);
-	free(conn->primary_host);
-
-	clear_struct(conn);
-
-	return;
-}
-
-inline int __http_socket(struct http_t *http)
-{
-	return http->conn.sock;
-}
-
-inline SSL *__http_tls(struct http_t *http)
-{
-	return http->conn.ssl;
-}
-
 /**
  * __init_openssl - initialise the openssl library
  */
