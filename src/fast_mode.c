@@ -27,8 +27,8 @@ static wr_cache_t *cache2;
 static wr_cache_t *filling;
 static wr_cache_t *draining;
 
-struct cache_ctx cache_ctx1;
-struct cache_ctx cache_ctx2;
+struct cache_ctx fctx;
+struct cache_ctx dctx;
 
 static void
 __ctor __fast_mode_init(void)
@@ -67,10 +67,10 @@ __ctor __fast_mode_init(void)
 		goto fail;
 	}
 
-	cache_ctx1.cache = cache1;
-	cache_ctx1.root = NULL;
-	cache_ctx2.cache = cache2;
-	cache_ctx2.root = NULL;
+	fctx.cache = cache1;
+	fctx.root = NULL;
+	dctx.cache = cache2;
+	dctx.root = NULL;
 
 	return;
 
@@ -133,24 +133,25 @@ worker_reap(void *args)
 	wr_cache_t *cache1 = ctx->cache1;
 	wr_cache_t *cache2 = ctx->cache2;
 	http_link_t *link = NULL;
+	struct http_t *http = NULL;
 	size_t len;
-	connection_t conn;
 
-	conn_init(ctx->conn);
-
-	strcpy(ctx->conn->full_url, ctx->main_url);
-	http_parse_host(conn->full_url, conn->host);
-	http_parse_page(conn->full_url, conn->page);
-
-	if (open_connection(ctx->conn) < 0)
+	if (!(http = http_new()))
 	{
-		fprintf(stderr, "0x%lx: failed to connect to remote server\n", pthread_self());
+		wprintf("failed to get new HTTP object");
 		goto thread_fail;
 	}
 
-	if (!(ctx->http = http_new()))
+	strcpy(http->full_url, ctx->main_url);
+	if (!http_parse_host(http->full_url, http->host))
+		goto thread_fail;
+
+	if (!http_parse_page(http->full_url, http->page))
+		goto thread_fail;
+
+	if (http_connect(http) < 0)
 	{
-		fprintf(stderr, "0x%lx: failed to get new HTTP object\n", pthread_self());
+		wprintf("failed to connect to remove server");
 		goto thread_fail;
 	}
 
@@ -231,14 +232,19 @@ worker_reap(void *args)
 		}
 
 		next:
+
+		if (parse_links(http, &fctx, &dctx) < 0)
+			put_error_msg("0x%lx: failed to parse URLs from page", pthread_self());
 	}
 
 	thread_exit:
-	if (ctx->conn)
+
+	if (http)
 	{
-		close_connection(ctx->conn);
-		conn_destroy(ctx->conn);
+		http_disconnect(http);
+		http_delete(http);
 	}
+
 	pthread_exit((void *)0);
 
 	thread_fail:
@@ -246,12 +252,19 @@ worker_reap(void *args)
 	pthread_exit((void *)-1);
 }
 
+/**
+ * do_fast_mode - create FAST_MODE_NR_WORKERS threads to crawl the target website
+ *				controlling the switching of caches from DRAINING to FILLING.
+ *
+ * @remote_host: the target website to crawl
+ */
 int
-do_fast_mode(connection_t *conn, const char *remote_host)
+do_fast_mode(const char *remote_host)
 {
 	int i;
 	int err;
 	int status_code;
+	http_link_t *swap_root;
 
 	status_code = do_request(conn);
 
@@ -261,9 +274,11 @@ do_fast_mode(connection_t *conn, const char *remote_host)
 		goto fail;
 	}
 
-	/*
-	 * TODO: fill cache 1 with URLs from start page.
-	 */
+	if (parse_links(http, &cache_ctx1, &cache_ctx2) < 0)
+	{
+		fprintf(stderr, "do_fast_mode: failed to parse links from starting page\n");
+		goto fail;
+	}
 
 	for (i = 0; i < FAST_MODE_NR_WORKERS; ++i)
 	{
@@ -288,11 +303,23 @@ do_fast_mode(connection_t *conn, const char *remote_host)
 		{
 			draining = cache2;
 			filling = cache1;
+			dctx.cache = cache2;
+			fctx.cache = cache1;
+
+			swap_root = dctx.root;
+			dctx.root = fctx.root;
+			fctx.root = swap_root;
 		}
 		else
 		{
 			draining = cache1;
 			filling = cache2;
+			dctx.cache = cache1;
+			fctx.cache = cache2;
+
+			swap_root = dctx.root;
+			dctx.root = fctx.root;
+			fctx.root = swap_root;
 		}
 
 		wr_cache_lock(draining);
