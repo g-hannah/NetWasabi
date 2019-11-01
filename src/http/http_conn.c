@@ -16,11 +16,8 @@
 #include "malloc.h"
 #include "webreaper.h"
 
-#define __http_socket(h) ((h)->conn.sock)
-#define __http_tls(h) ((h)->conn.ssl)
-
 void
-http_conn_init(connection_t *conn)
+http_conn_init(struct http_t *http)
 {
 	assert(conn);
 
@@ -35,7 +32,7 @@ http_conn_init(connection_t *conn)
 }
 
 void
-http_conn_destroy(connection_t *conn)
+http_conn_destroy(struct http_t *http)
 {
 	assert(conn);
 
@@ -50,12 +47,12 @@ http_conn_destroy(connection_t *conn)
 	return;
 }
 
-inline int __http_socket(connection_t *conn)
+inline int __http_socket(struct http_t *http)
 {
 	return http->conn.sock;
 }
 
-inline SSL *__http_tls(connection_t *conn)
+inline SSL *__http_tls(struct http_t *http)
 {
 	return http->conn.ssl;
 }
@@ -78,7 +75,7 @@ __init_openssl(void)
  * @conn: &connection_t that is initialised in this function
  */
 int
-open_connection(connection_t *conn)
+open_connection(struct http_t *http)
 {
 	assert(conn);
 
@@ -155,7 +152,7 @@ open_connection(connection_t *conn)
 }
 
 void
-close_connection(connection_t *conn)
+close_connection(struct http_t *http)
 {
 	assert(conn);
 
@@ -180,7 +177,7 @@ close_connection(connection_t *conn)
 }
 
 int
-reconnect(connection_t *conn)
+reconnect(struct http_t *http)
 {
 	assert(conn);
 
@@ -269,7 +266,7 @@ reconnect(connection_t *conn)
 }
 
 int
-conn_switch_to_tls(connection_t *conn)
+conn_switch_to_tls(struct http_t *http)
 {
 	close_connection(conn);
 
