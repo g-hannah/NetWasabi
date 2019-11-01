@@ -9,7 +9,6 @@
 #include <unistd.h>
 #include "buffer.h"
 #include "cache.h"
-#include "connection.h"
 #include "http.h"
 #include "malloc.h"
 #include "webreaper.h"
@@ -257,11 +256,10 @@ __http_check_cookies(buf_t *buf, struct http_t *http)
 int
 http_build_request_header(struct http_t *http, const char *http_verb)
 {
-	assert(conn);
+	assert(http);
 	assert(http_verb);
-	assert(target);
 
-	buf_t *buf = &http->conn.write_buf;
+	buf_t *buf = &http_wbuf(http);
 	buf_t tmp;
 	static char header_buf[4096];
 
@@ -293,8 +291,8 @@ http_build_request_header(struct http_t *http, const char *http_verb)
 	if (!strcmp("HEAD", http_verb))
 	{
 		buf_append(&tmp, "https://");
-		buf_append(&tmp, conn->host);
-		buf_append(&tmp, conn->page);
+		buf_append(&tmp, http->host);
+		buf_append(&tmp, http->page);
 
 		sprintf(header_buf,
 			"HEAD %s HTTP/%s\r\n"
@@ -306,7 +304,7 @@ http_build_request_header(struct http_t *http, const char *http_verb)
 	}
 	else
 	{
-		buf_append(&tmp, conn->host);
+		buf_append(&tmp, http->host);
 
 		if (*(tmp.buf_tail - 1) == '/')
 			buf_snip(&tmp, 1);
@@ -326,11 +324,11 @@ http_build_request_header(struct http_t *http, const char *http_verb)
 
 	buf_append(buf, header_buf);
 
-	int __nr_cookies = wr_cache_nr_used(http->cookies);
+	int __nr_cookies = wr_cache_nr_used(((struct __http_t *)http)->cookies);
 
 	if (__nr_cookies)
 	{
-		struct http_cookie_t *__c = (struct http_cookie_t *)http->cookies->cache;
+		struct http_cookie_t *__c = (struct http_cookie_t *)((struct __http_t *)http)->cookies->cache;
 		int i;
 
 		for (i = 0; i < __nr_cookies; ++i)
@@ -348,13 +346,13 @@ http_build_request_header(struct http_t *http, const char *http_verb)
 int
 http_send_request(struct http_t *http)
 {
-	assert(conn);
+	assert(http);
 
-	buf_t *buf = &http->conn.write_buf;
+	buf_t *buf = &http_wbuf(http);
 
 	if (option_set(OPT_USE_TLS))
 	{
-		if (buf_write_tls(__http_tls(http), buf) == -1)
+		if (buf_write_tls(http_tls(http), buf) == -1)
 		{
 			fprintf(stderr, "http_send_request: failed to write to SSL socket (%s)\n", strerror(errno));
 			goto fail;
@@ -362,7 +360,7 @@ http_send_request(struct http_t *http)
 	}
 	else
 	{
-		if (buf_write_socket(__http_socket(http), buf) == -1)
+		if (buf_write_socket(http_socket(http), buf) == -1)
 		{
 			fprintf(stderr, "http_send_request: failed to write to socket (%s)\n", strerror(errno));
 			goto fail;
@@ -379,10 +377,10 @@ http_send_request(struct http_t *http)
 static int
 __http_read_until_eoh(struct http_t *http, char **p)
 {
-	assert(conn);
+	assert(http);
 
 	ssize_t n;
-	buf_t *buf = &conn->read_buf;
+	buf_t *buf = &http_rbuf(http);
 
 	clear_struct(&oact);
 	clear_struct(&nact);
@@ -409,9 +407,9 @@ __http_read_until_eoh(struct http_t *http, char **p)
 	while (!(*p))
 	{
 		if (option_set(OPT_USE_TLS))
-			n = buf_read_tls(conn->ssl, buf, HTTP_SMALL_READ_BLOCK);
+			n = buf_read_tls(http_tls(http), buf, HTTP_SMALL_READ_BLOCK);
 		else
-			n = buf_read_socket(conn->sock, buf, HTTP_SMALL_READ_BLOCK);
+			n = buf_read_socket(http_socket(http), buf, HTTP_SMALL_READ_BLOCK);
 
 		if (n == -1)
 			return -1;
@@ -465,21 +463,19 @@ __dump_buf(buf_t *buf)
 static ssize_t
 __read_bytes(struct http_t *http, size_t toread)
 {
-	assert(conn);
+	assert(http);
 	assert(toread > 0);
 
 	ssize_t n;
-	SSL *ssl = conn->ssl;
-	int sock = conn->sock;
 	size_t r = toread;
-	buf_t *buf = &conn->read_buf;
+	buf_t *buf = &http_rbuf(http);
 
 	while (r)
 	{
 		if (option_set(OPT_USE_TLS))
-			n = buf_read_tls(ssl, buf, r);
+			n = buf_read_tls(http_tls(http), buf, r);
 		else
-			n = buf_read_socket(sock, buf, r);
+			n = buf_read_socket(http_socket(http), buf, r);
 
 		if (n < 0)
 			return -1;
@@ -498,7 +494,7 @@ __read_bytes(struct http_t *http, size_t toread)
 static void
 __http_read_until_next_chunk_size(struct http_t *http, buf_t *buf, char **cur_pos)
 {
-	assert(conn);
+	assert(http);
 	assert(buf);
 	assert(cur_pos);
 	assert(buf_integrity(buf));
@@ -530,7 +526,7 @@ __http_read_until_next_chunk_size(struct http_t *http, buf_t *buf, char **cur_po
 		}
 	}
 
-	__read_bytes(conn, 2);
+	__read_bytes(http, 2);
 	*cur_pos = (buf->buf_head + cur_pos_off);
 	tail = buf->buf_tail;
 	*cur_pos += 2;
@@ -538,7 +534,7 @@ __http_read_until_next_chunk_size(struct http_t *http, buf_t *buf, char **cur_po
 
 	while (1)
 	{
-		__read_bytes(conn, 1);
+		__read_bytes(http, 1);
 		tail = buf->buf_tail;
 		*cur_pos = (buf->buf_head + cur_pos_off);
 		q = memchr(*cur_pos, 0x0a, (tail - *cur_pos));
@@ -555,12 +551,12 @@ __http_read_until_next_chunk_size(struct http_t *http, buf_t *buf, char **cur_po
 static size_t
 __http_do_chunked_recv(struct http_t *http)
 {
-	assert(conn);
+	assert(http);
 
 	char *p;
 	char *e;
 	off_t chunk_offset;
-	buf_t *buf = &conn->read_buf;
+	buf_t *buf = &http_rbuf(http);
 	size_t chunk_size;
 	size_t save_size;
 	size_t overread;
@@ -575,7 +571,7 @@ __http_do_chunked_recv(struct http_t *http)
 
 	while (!p)
 	{
-		__read_bytes(conn, 1);
+		__read_bytes(http, 1);
 		p = HTTP_EOH(buf);
 	}
 
@@ -585,7 +581,7 @@ __http_do_chunked_recv(struct http_t *http)
 		return -1;
 	}
 
-	__http_read_until_next_chunk_size(conn, buf, &p);
+	__http_read_until_next_chunk_size(http, buf, &p);
 
 	while (1)
 	{
@@ -661,6 +657,9 @@ __http_do_chunked_recv(struct http_t *http)
 
 		save_size = chunk_size;
 
+/*
+ * XXX: Protect the wrctx struct with a lock
+ */
 		STATS_ADD_BYTES(wrctx, save_size);
 		update_bytes(total_bytes(wrctx));
 
@@ -676,17 +675,17 @@ __http_do_chunked_recv(struct http_t *http)
 		if (overread >= chunk_size)
 		{
 			p = (e + save_size);
-			__http_read_until_next_chunk_size(conn, buf, &p);
+			__http_read_until_next_chunk_size(http, buf, &p);
 		}
 		else
 		{
 			chunk_size -= overread;
 		}
 
-		__read_bytes(conn, chunk_size);
+		__read_bytes(http, chunk_size);
 
 		p = (buf->buf_head + chunk_offset + save_size);
-		__http_read_until_next_chunk_size(conn, buf, &p);
+		__http_read_until_next_chunk_size(http, buf, &p);
 
 #if 0
 /*
@@ -717,50 +716,52 @@ __http_do_chunked_recv(struct http_t *http)
 static int
 __http_set_new_location(struct http_t *http)
 {
-	assert(conn);
+	assert(http);
+
+	struct __http_t *__http = (struct __http_t *)http;
 
 	http_header_t *location = NULL;
 
-	wr_cache_lock(http_hcache);
+	wr_cache_lock(__http->headers);
 
-	if (!(location = (http_header_t *)wr_cache_alloc(http_hcache, &location)))
+	if (!(location = (http_header_t *)wr_cache_alloc(__http->headers, &location)))
 	{
 		fprintf(stderr, "__http_set_new_location: failed to obtain HTTP header cache object\n");
 		goto fail_release_lock;
 	}
 
-	wr_cache_unlock(http_hcache);
+	wr_cache_unlock(__http->headers);
 
-	if (!http_fetch_header(&conn->read_buf, "Location", location, (off_t)0))
+	if (!http_fetch_header(&http_rbuf(http), "Location", location, (off_t)0))
 	{
 		fprintf(stderr, "__http_set_new_location: failed to find HTTP header field \"Location\"\n");
 		goto fail_dealloc;
 	}
 
-	if (!http_parse_host(location->value, conn->host))
+	if (!http_parse_host(location->value, http->host))
 	{
 		fprintf(stderr, "__http_set_new_location: failed to parse host from URL\n");
 		goto fail_dealloc;
 	}
 
-	if (!http_parse_page(location->value, conn->page))
+	if (!http_parse_page(location->value, http->page))
 	{
 		fprintf(stderr, "__http_set_new_location: failed to parse page from URL\n");
 		goto fail_dealloc;
 	}
 
-	wr_cache_lock(http_hcache);
-	wr_cache_dealloc(http_hcache, location, &location);
-	wr_cache_unlock(http_hcache);
+	wr_cache_lock(__http->headers);
+	wr_cache_dealloc(__http->headers, location, &location);
+	wr_cache_unlock(__http->headers);
 
 	return 0;
 
 	fail_dealloc:
-	wr_cache_lock(http_hcache);
-	wr_cache_dealloc(http_hcache, location, &location);
+	wr_cache_lock(__http->headers);
+	wr_cache_dealloc(__http->headers, location, &location);
 
 	fail_release_lock:
-	wr_cache_unlock(http_hcache);
+	wr_cache_unlock(__http->headers);
 
 	fail:
 	return -1;
@@ -773,7 +774,7 @@ __http_set_new_location(struct http_t *http)
 int
 http_recv_response(struct http_t *http)
 {
-	assert(conn);
+	assert(http);
 
 	char *p = NULL;
 	size_t clen;
@@ -816,12 +817,12 @@ http_recv_response(struct http_t *http)
 		if (__http_set_new_location(http) < 0)
 			goto fail_dealloc;
 
-		buf_clear(&http->conn.read_buf);
-		buf_clear(&http->conn.write_buf);
+		buf_clear(&http_rbuf(http));
+		buf_clear(&http_wbuf(http));
 
 		http_build_request_header(http, HTTP_GET);
 
-		if (http_send_request(conn) < 0)
+		if (http_send_request(http) < 0)
 		{
 			fprintf(stderr, "http_recv_response: failed to resend HTTP request after \"%s\" response\n", http_status_code_string(http_status_code));
 			goto fail_dealloc;
@@ -842,14 +843,14 @@ http_recv_response(struct http_t *http)
  *         p
  */
 
-	if (strstr(conn->write_buf.buf_head, "HEAD"))
+	if (strstr(http_wbuf(http).buf_head, "HEAD"))
 		goto out_dealloc;
 
-	if (http_fetch_header(&conn->read_buf, "Transfer-Encoding", transfer_enc, (off_t)0))
+	if (http_fetch_header(&http_rbuf(http), "Transfer-Encoding", transfer_enc, (off_t)0))
 	{
 		if (!strncmp("chunked", transfer_enc->value, transfer_enc->vlen))
 		{
-			if (__http_do_chunked_recv(conn) == -1)
+			if (__http_do_chunked_recv(http) == -1)
 				goto fail_dealloc;
 
 			goto out_dealloc;
@@ -872,9 +873,9 @@ http_recv_response(struct http_t *http)
 			while (clen)
 			{
 				if (option_set(OPT_USE_TLS))
-					bytes = buf_read_tls(conn->ssl, buf, clen);
+					bytes = buf_read_tls(http_tls(http), buf, clen);
 				else
-					bytes = buf_read_socket(conn->sock, buf, clen);
+					bytes = buf_read_socket(http_socket(http), buf, clen);
 
 				rv = bytes;
 
@@ -896,9 +897,9 @@ http_recv_response(struct http_t *http)
 		p = NULL;
 
 		if (option_set(OPT_USE_TLS))
-			bytes = buf_read_tls(conn->ssl, buf, 0);
+			bytes = buf_read_tls(http_tls(http), buf, 0);
 		else
-			bytes = buf_read_socket(conn->sock, buf, 0);
+			bytes = buf_read_socket(http_socket(http), buf, 0);
 
 		rv = bytes;
 
@@ -917,14 +918,12 @@ http_recv_response(struct http_t *http)
 	}
 
 	out_dealloc:
-	assert(conn->read_buf.magic == BUFFER_MAGIC);
+	wr_cache_lock(__http->headers);
 
-	wr_cache_lock(http_hcache);
+	wr_cache_dealloc(__http->headers, (void *)content_len, &content_len);
+	wr_cache_dealloc(__http->headers, (void *)transfer_enc, &transfer_enc);
 
-	wr_cache_dealloc(http_hcache, (void *)content_len, &content_len);
-	wr_cache_dealloc(http_hcache, (void *)transfer_enc, &transfer_enc);
-
-	wr_cache_unlock(http_hcache);
+	wr_cache_unlock(__http->headers);
 
 	return 0;
 
@@ -933,15 +932,15 @@ http_recv_response(struct http_t *http)
 
 	if (content_len)
 	{
-		wr_cache_dealloc(http_hcache, (void *)content_len, &content_len);
+		wr_cache_dealloc(__http->headers, (void *)content_len, &content_len);
 	}
 
 	if (transfer_enc)
 	{
-		wr_cache_dealloc(http_hcache, (void *)transfer_enc, &transfer_enc);
+		wr_cache_dealloc(__http->headers, (void *)transfer_enc, &transfer_enc);
 	}
 
-	wr_cache_unlock(http_hcache);
+	wr_cache_unlock(__http->headers);
 
 	fail:
 	return rv;
@@ -1356,6 +1355,14 @@ __http_init_obj(struct __http_t *__http)
 	__http->primary_host = calloc(HTTP_HOST_MAX+1, 1);
 	__http->page = calloc(HTTP_URL_MAX+1, 1);
 	__http->full_url = calloc(HTTP_URL_MAX+1, 1);
+
+	if (buf_init(&__http->conn.read_buf, HTTP_DEFAULT_READ_BUF_SIZE) < 0)
+	{
+	}
+
+	if (buf_init(&__http->conn.write_buf, HTTP_DEFAULT_WRITE_BUF_SIZE) < 0)
+	{
+	}
 
 	assert(__http->host);
 	assert(__http->primary_host);
