@@ -8,9 +8,9 @@
 
 struct worker_ctx
 {
-	wr_cache_t *cache1; /* shared */
-	wr_cache_t *cache2; /* shared */
-	struct http_t http; /* private */
+	wr_cache_t *cache1; /* shared with other workers */
+	wr_cache_t *cache2; /* shared with other workers */
+	struct http_t *http; /* private */
 };
 
 struct cache_ctx
