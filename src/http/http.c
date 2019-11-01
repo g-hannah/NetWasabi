@@ -255,13 +255,13 @@ __http_check_cookies(buf_t *buf, struct http_t *http)
 }
 
 int
-http_build_request_header(struct http_t *http, const char *http_verb, const char *target)
+http_build_request_header(struct http_t *http, const char *http_verb)
 {
 	assert(conn);
 	assert(http_verb);
 	assert(target);
 
-	buf_t *buf = &conn->write_buf;
+	buf_t *buf = &http->conn.write_buf;
 	buf_t tmp;
 	static char header_buf[4096];
 
@@ -301,7 +301,7 @@ http_build_request_header(struct http_t *http, const char *http_verb, const char
 			"Host: %s\r\n"
 			"User-Agent: %s%s",
 			tmp.buf_head, HTTP_VERSION,
-			conn->host,
+			http->host,
 			HTTP_USER_AGENT, HTTP_EOH_SENTINEL);
 	}
 	else
@@ -317,7 +317,7 @@ http_build_request_header(struct http_t *http, const char *http_verb, const char
 			"Accept: %s\r\n"
 			"Host: %s\r\n"
 			"Connection: keep-alive%s",
-			target, HTTP_VERSION,
+			http->full_url, HTTP_VERSION,
 			HTTP_USER_AGENT,
 			HTTP_ACCEPT,
 			tmp.buf_head,
@@ -350,11 +350,11 @@ http_send_request(struct http_t *http)
 {
 	assert(conn);
 
-	buf_t *buf = &conn->write_buf;
+	buf_t *buf = &http->conn.write_buf;
 
 	if (option_set(OPT_USE_TLS))
 	{
-		if (buf_write_tls(conn_tls(conn), buf) == -1)
+		if (buf_write_tls(__http_tls(http), buf) == -1)
 		{
 			fprintf(stderr, "http_send_request: failed to write to SSL socket (%s)\n", strerror(errno));
 			goto fail;
@@ -362,7 +362,7 @@ http_send_request(struct http_t *http)
 	}
 	else
 	{
-		if (buf_write_socket(conn_socket(conn), buf) == -1)
+		if (buf_write_socket(__http_socket(http), buf) == -1)
 		{
 			fprintf(stderr, "http_send_request: failed to write to socket (%s)\n", strerror(errno));
 			goto fail;
@@ -780,6 +780,7 @@ http_recv_response(struct http_t *http)
 	size_t overread;
 	ssize_t bytes;
 	int rv;
+	struct __http_t *__http = (struct __http_t *)http;
 	//int http_status_code;
 	http_header_t *content_len = NULL;
 	http_header_t *transfer_enc = NULL;
@@ -787,38 +788,38 @@ http_recv_response(struct http_t *http)
 
 	update_operation_status("Receiving data from server");
 
-	wr_cache_lock(http_hcache);
-	content_len = (http_header_t *)wr_cache_alloc(http_hcache, &content_len);
-	wr_cache_unlock(http_hcache);
+	wr_cache_lock(__http->headers);
+	content_len = (http_header_t *)wr_cache_alloc(__http->headers, &content_len);
+	wr_cache_unlock(__http->headers);
 
 	if (!content_len)
 		goto fail;
 
-	wr_cache_lock(http_hcache);
-	transfer_enc = (http_header_t *)wr_cache_alloc(http_hcache, &transfer_enc);
-	wr_cache_unlock(http_hcache);
+	wr_cache_lock(__http->headers);
+	transfer_enc = (http_header_t *)wr_cache_alloc(__http->headers, &transfer_enc);
+	wr_cache_unlock(__http->headers);
 
 	if (!transfer_enc)
 		goto fail_dealloc;
 
 	//__retry:
-	rv = __http_read_until_eoh(conn, &p);
+	rv = __http_read_until_eoh(http, &p);
 
 	if (rv < 0 || FL_OPERATION_TIMEOUT == rv)
 		goto fail_dealloc;
 
-	//__http_check_cookies(buf);
+	__http_check_cookies(buf, http);
 
 	http_status_code = http_status_code_int(buf);
 	if (HTTP_FOUND == http_status_code || HTTP_MOVED_PERMANENTLY == http_status_code)
 	{
-		if (__http_set_new_location(conn) < 0)
+		if (__http_set_new_location(http) < 0)
 			goto fail_dealloc;
 
-		buf_clear(&conn->read_buf);
-		buf_clear(&conn->write_buf);
+		buf_clear(&http->conn.read_buf);
+		buf_clear(&http->conn.write_buf);
 
-		http_build_request_header(conn, HTTP_GET, conn->page);
+		http_build_request_header(http, HTTP_GET);
 
 		if (http_send_request(conn) < 0)
 		{
