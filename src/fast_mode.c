@@ -100,6 +100,22 @@ init_worker_environ(void)
 	return;
 }
 
+static int
+__worker_do_request(struct worker_ctx *ctx)
+{
+	int status;
+
+	__resend_head:
+	status = send_head_request(ctx->conn);
+
+	if (HTTP_OK != status)
+		return status;
+
+	status = send_get_request(ctx->conn);
+
+	return status;
+}
+
 /**
  * worker_signal_eoc - signal that thread has reached end of a cycle
  */
@@ -116,22 +132,25 @@ worker_reap(void *args)
 	struct worker_ctx *ctx = (struct worker_ctx *)args;
 	wr_cache_t *cache1 = ctx->cache1;
 	wr_cache_t *cache2 = ctx->cache2;
-	wr_cache_t *fcache; /* pointer to current filling cache */
-	wr_cache_t *dcache; /* pointer to current draining cache */
 	http_link_t *link = NULL;
 	size_t len;
-	int goal;
 	connection_t conn;
 
-	conn_init(&conn);
+	conn_init(ctx->conn);
 
-	strcpy(conn.full_url, ctx->main_url);
-	http_parse_host(conn.full_url, conn.host);
-	http_parse_page(conn.full_url, conn.page);
+	strcpy(ctx->conn->full_url, ctx->main_url);
+	http_parse_host(conn->full_url, conn->host);
+	http_parse_page(conn->full_url, conn->page);
 
-	if (open_connection(&conn) < 0)
+	if (open_connection(ctx->conn) < 0)
 	{
 		fprintf(stderr, "0x%lx: failed to connect to remote server\n", pthread_self());
+		goto thread_fail;
+	}
+
+	if (!(ctx->http = http_new()))
+	{
+		fprintf(stderr, "0x%lx: failed to get new HTTP object\n", pthread_self());
 		goto thread_fail;
 	}
 
@@ -157,7 +176,8 @@ worker_reap(void *args)
 			continue;
 		}
 
-		status_code = do_request(conn);
+		status_code = __worker_do_request(ctx);
+
 		switch((unsigned int)status_code)
 		{
 			case HTTP_OK:
@@ -214,6 +234,11 @@ worker_reap(void *args)
 	}
 
 	thread_exit:
+	if (ctx->conn)
+	{
+		close_connection(ctx->conn);
+		conn_destroy(ctx->conn);
+	}
 	pthread_exit((void *)0);
 
 	thread_fail:
@@ -236,7 +261,9 @@ do_fast_mode(connection_t *conn, const char *remote_host)
 		goto fail;
 	}
 
-	if (parse_links(
+	/*
+	 * TODO: fill cache 1 with URLs from start page.
+	 */
 
 	for (i = 0; i < FAST_MODE_NR_WORKERS; ++i)
 	{
@@ -269,16 +296,9 @@ do_fast_mode(connection_t *conn, const char *remote_host)
 		}
 
 		wr_cache_lock(draining);
-
 		pthread_cond_broadcast(&cache_switch_cond);
-		pthread_cond_destroy(&cache_switch_cond);
-		cache_switch_cond = PTHREAD_COND_INITIALIZER;
-
 		wr_cache_unlock(draining);
 	}
-
-	for (i = 0; i < FAST_MODE_NR_WORKERS; ++i)
-		pthread_join(workers[i]);
 
 	return 0;
 
