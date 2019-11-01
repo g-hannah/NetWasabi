@@ -17,6 +17,31 @@
 #define HTTP_SMALL_READ_BLOCK 64
 #define HTTP_MAX_WAIT_TIME 6
 
+/*
+ * User gets struct http_t which does not
+ * include the caches.
+ */
+struct __http_t
+{
+	char *host;
+	char *page;
+	char *full_url;
+	char *primary_host;
+
+	struct conn
+	{
+		int sock;
+		SSL *ssl;
+		buf_t read_buf;
+		buf_t write_buf;
+		char *host_ipv4;
+		SSL_CTX *ssl_ctx;
+	};
+
+	wr_cache_t *headers;
+	wr_cache_t *cookies;
+};
+
 static struct sigaction oact;
 static struct sigaction nact;
 static sigjmp_buf TIMEOUT;
@@ -1299,11 +1324,11 @@ static int __http_obj_cnt = 0;
 static char __http_cache_name[64];
 
 static int
-__http_init_obj(struct http_t *http)
+__http_init_obj(struct __http_t *__http)
 {
 	sprintf(__http_cache_name, "http_header_cache%d", __http_obj_cnt);
 
-	if (!(http->headers = wr_cache_create(
+	if (!(__http->headers = wr_cache_create(
 			__http_cache_name,
 			sizeof(http_header_t),
 			0,
@@ -1315,9 +1340,9 @@ __http_init_obj(struct http_t *http)
 	}
 
 	sprintf(__http_cache_name, "http_cookie_cache%d", __http_obj_cnt);
-	if (!(http->cookies = wr_cache_create(
+	if (!(__http->cookies = wr_cache_create(
 			__http_cache_name,
-			sizeof(http_cookie_t),
+			sizeof(http_header_t),
 			0,
 			http_cookie_cache_ctor,
 			http_cookie_cache_dtor)))
@@ -1325,6 +1350,16 @@ __http_init_obj(struct http_t *http)
 		fprintf(stderr, "__http_init_obj: failed to create cache for HTTP cookie objects\n");
 		goto fail_destroy_cache;
 	}
+
+	__http->host = calloc(HTTP_HOST_MAX+1, 1);
+	__http->primary_host = calloc(HTTP_HOST_MAX+1, 1);
+	__http->page = calloc(HTTP_URL_MAX+1, 1);
+	__http->full_url = calloc(HTTP_URL_MAX+1, 1);
+
+	assert(__http->host);
+	assert(__http->primary_host);
+	assert(__http->page);
+	assert(__http->full_url);
 
 	++__http_obj_cnt;
 
@@ -1340,7 +1375,7 @@ __http_init_obj(struct http_t *http)
 struct http_t *
 http_new(void)
 {
-	struct http_t *__http = malloc(sizeof(http_t));
+	struct __http_t *__http = malloc(sizeof(struct __http_t));
 
 	if (!__http)
 	{
@@ -1354,7 +1389,7 @@ http_new(void)
 		goto fail;
 	}
 
-	return __http;
+	return (struct http_t *)__http;
 
 	fail:
 	return NULL;
