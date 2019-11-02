@@ -1099,7 +1099,7 @@ reap(struct http_t *http)
 			sleep(crawl_delay(wrctx));
 			UNBLOCK_SIGNAL(SIGINT);
 
-			check_host(conn);
+			http_check_host(conn);
 
 			resend:
 			if (link->nr_requests > 2) /* loop */
