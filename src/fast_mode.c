@@ -22,13 +22,13 @@ static pthread_cond_t cache_switch_cond;
 static volatile sig_atomic_t do_switch = 0;
 static volatile sig_atomic_t nr_workers_eoc = 0;
 
-static wr_cache_t *cache1;
-static wr_cache_t *cache2;
+//static wr_cache_t *cache1;
+//static wr_cache_t *cache2;
 static wr_cache_t *filling;
 static wr_cache_t *draining;
 
-struct cache_ctx fctx;
-struct cache_ctx dctx;
+struct cache_ctx cache1;
+struct cache_ctx cache2;
 
 static void
 __ctor __fast_mode_init(void)
@@ -95,25 +95,9 @@ __dtor __fast_mode_fini(void)
 static void
 init_worker_environ(void)
 {
-	draining = cache1;
-	filling = cache2;
+	draining = cache1.cache;
+	filling = cache2.cache;
 	return;
-}
-
-static int
-__worker_do_request(struct worker_ctx *ctx)
-{
-	int status;
-
-	__resend_head:
-	status = send_head_request(ctx->conn);
-
-	if (HTTP_OK != status)
-		return status;
-
-	status = send_get_request(ctx->conn);
-
-	return status;
 }
 
 /**
@@ -126,12 +110,13 @@ worker_signal_eoc(void)
 	return;
 }
 
+#define __filling(c1, c2) ((c1).state == FILLING ? (c1) : (c2))
+#define __draining(c1, c2) ((c1).state == DRAINING ? (c1) : (c2))
+
 static void *
 worker_reap(void *args)
 {
-	struct worker_ctx *ctx = (struct worker_ctx *)args;
-	wr_cache_t *cache1 = ctx->cache1;
-	wr_cache_t *cache2 = ctx->cache2;
+	char *main_url = (char *)args;
 	http_link_t *link = NULL;
 	struct http_t *http = NULL;
 	size_t len;
@@ -142,7 +127,7 @@ worker_reap(void *args)
 		goto thread_fail;
 	}
 
-	strcpy(http->full_url, ctx->main_url);
+	strcpy(http->full_url, main_url);
 	if (!http_parse_host(http->full_url, http->host))
 		goto thread_fail;
 
@@ -177,7 +162,8 @@ worker_reap(void *args)
 			continue;
 		}
 
-		status_code = __worker_do_request(ctx);
+		status_code = do_request(http);
+		//status_code = __worker_do_request(ctx);
 
 		switch((unsigned int)status_code)
 		{
@@ -222,7 +208,7 @@ worker_reap(void *args)
 				if (!conn->host[0])
 					strcpy(conn->host, conn->primary_host);
 
-				reconnect(conn);
+				http_reconnect(ctx->http);
 
 				goto next;
 				break;
@@ -233,7 +219,7 @@ worker_reap(void *args)
 
 		next:
 
-		if (parse_links(http, &fctx, &dctx) < 0)
+		if (parse_links(http, &__filling(cache1, cache2), &__draining(cache1, cache2)) < 0)
 			put_error_msg("0x%lx: failed to parse URLs from page", pthread_self());
 	}
 
@@ -299,27 +285,22 @@ do_fast_mode(const char *remote_host)
 		while (nr_workers_eoc < FAST_MODE_NR_WORKERS);
 
 		nr_workers_eoc = 0;
-		if (draining == cache1)
-		{
-			draining = cache2;
-			filling = cache1;
-			dctx.cache = cache2;
-			fctx.cache = cache1;
 
-			swap_root = dctx.root;
-			dctx.root = fctx.root;
-			fctx.root = swap_root;
+		if (draining == cache1.cache)
+		{
+			draining = cache2.cache;
+			filling = cache1.cache;
+
+			cache2.state = DRAINING;
+			cache1.state = FILLING;
 		}
 		else
 		{
-			draining = cache1;
-			filling = cache2;
-			dctx.cache = cache1;
-			fctx.cache = cache2;
+			draining = cache1.cache;
+			filling = cache2.cache;
 
-			swap_root = dctx.root;
-			dctx.root = fctx.root;
-			fctx.root = swap_root;
+			cache1.state = DRAINING;
+			cache2.state = FILLING;
 		}
 
 		wr_cache_lock(draining);
