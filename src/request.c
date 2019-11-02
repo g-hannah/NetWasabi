@@ -4,18 +4,18 @@
 #include <stdio.h>
 #include <unistd.h>
 #include "buffer.h"
-#include "connection.h"
 #include "http.h"
+#include "misc.h"
 #include "webreaper.h"
 
 int
-send_head_request(connection_t *conn)
+send_head_request(struct http_t *http)
 {
-	assert(conn);
+	assert(http);
 
-	buf_t *wbuf = &conn->write_buf;
-	buf_t *rbuf = &conn->read_buf;
-	char *tmp_cbuf = NULL;
+	buf_t *wbuf = &http_wbuf(http);
+	buf_t *rbuf = &http_rbuf(http);
+	//char *tmp_cbuf = NULL;
 	int status_code = 0;
 	int rv;
 
@@ -28,24 +28,28 @@ send_head_request(connection_t *conn)
 	if (!(tmp_cbuf = wr_calloc(8192, 1)))
 		goto fail_free_bufs;
 
+	http_build_request_header(http, HTTP_HEAD);
+
+#if 0
 	sprintf(tmp_cbuf,
 			"HEAD %s HTTP/%s\r\n"
 			"User-Agent: %s\r\n"
 			"Host: %s\r\n"
 			"Connection: keep-alive%s",
-			conn->full_url, HTTP_VERSION,
+			http->full_url, HTTP_VERSION,
 			HTTP_USER_AGENT,
-			conn->host,
+			http->host,
 			HTTP_EOH_SENTINEL);
 
 	buf_append(wbuf, tmp_cbuf);
 
-	check_cookies(conn);
+	//check_cookies(conn);
+#endif
 
 	buf_clear(rbuf);
 
-	free(tmp_cbuf);
-	tmp_cbuf = NULL;
+	//free(tmp_cbuf);
+	//tmp_cbuf = NULL;
 
 	if (http_send_request(conn) < 0)
 		goto fail;
@@ -59,25 +63,18 @@ send_head_request(connection_t *conn)
 
 	return status_code;
 
-	fail_free_bufs:
-	if (tmp_cbuf)
-	{
-		free(tmp_cbuf);
-		tmp_cbuf = NULL;
-	}
-
 	fail:
 	return rv;
 }
 
 int
-send_get_request(connection_t *conn)
+send_get_request(struct http_t *http)
 {
-	assert(conn);
+	assert(http);
 
-	buf_t *wbuf = &conn->write_buf;
-	buf_t *rbuf = &conn->read_buf;
-	char *tmp_cbuf = NULL;
+	buf_t *wbuf = &http_wbuf(http);
+	buf_t *rbuf = &http_rbuf(http);
+	//char *tmp_cbuf = NULL;
 	int status_code = 0;
 	int rv;
 
@@ -85,8 +82,11 @@ send_get_request(connection_t *conn)
 
 	update_operation_status("Sending GET request to server");
 
-	check_host(conn);
+	check_host(http);
 
+	http_build_request_header(http, HTTP_GET);
+
+#if 0
 	if (!(tmp_cbuf = wr_calloc(8192, 1)))
 		goto fail_free_bufs;
 
@@ -103,16 +103,17 @@ send_get_request(connection_t *conn)
 	buf_append(wbuf, tmp_cbuf);
 
 	check_cookies(conn);
+#endif
 
 	buf_clear(rbuf);
 
-	free(tmp_cbuf);
-	tmp_cbuf = NULL;
+	//free(tmp_cbuf);
+	//tmp_cbuf = NULL;
 
-	if (http_send_request(conn) < 0)
+	if (http_send_request(http) < 0)
 		goto fail;
 
-	rv = http_recv_response(conn);
+	rv = http_recv_response(http);
 
 	if (rv < 0 || FL_OPERATION_TIMEOUT == rv)
 		goto fail;
@@ -121,21 +122,14 @@ send_get_request(connection_t *conn)
 
 	return status_code;
 
-	fail_free_bufs:
-	if (tmp_cbuf)
-	{
-		free(tmp_cbuf);
-		tmp_cbuf = NULL;
-	}
-
 	fail:
 	return rv;
 }
 
 int
-do_request(connection_t *conn)
+do_request(struct http_t *http)
 {
-	assert(conn);
+	assert(http);
 
 	int status_code = 0;
 	int rv;
@@ -144,22 +138,12 @@ do_request(connection_t *conn)
 	 * Save bandwidth: send HEAD first.
 	 */
 	resend_head:
-	status_code = send_head_request(conn);
+	status_code = send_head_request(http);
 
 	update_status_code(status_code);
 
 	switch(status_code)
 	{
-		case HTTP_MOVED_PERMANENTLY:
-		case HTTP_FOUND:
-		case HTTP_SEE_OTHER:
-			rv = __handle301(conn);
-
-			if (HTTP_IS_XDOMAIN == (unsigned int)rv)
-				return rv;
-			else
-			if (rv < 0)
-				return -1;
 /*
  * Check here too because 301 may send different
  * spelling (upper-case vs lower-case... etc)
