@@ -250,7 +250,7 @@ do_fast_mode(const char *remote_host)
 	int i;
 	int err;
 	int status_code;
-	http_link_t *swap_root;
+	int __done = 0;
 	struct http_t *http = NULL;
 
 	if (!(http = http_new()))
@@ -287,6 +287,9 @@ do_fast_mode(const char *remote_host)
 		}
 	}
 
+	http_disconnect(http);
+	http_delete(http);
+
 	pthread_barrier_wait(&start_barrier);
 
 	while (1)
@@ -295,7 +298,7 @@ do_fast_mode(const char *remote_host)
 
 		nr_workers_eoc = 0;
 
-		if (draining == cache1.cache)
+		if (cache1.state == DRAINING)
 		{
 			draining = cache2.cache;
 			filling = cache1.cache;
@@ -312,10 +315,19 @@ do_fast_mode(const char *remote_host)
 			cache2.state = FILLING;
 		}
 
+		if (!wr_cache_nr_used(draining) && !wr_cache_nr_used(filling))
+			__done = 1;
+
 		wr_cache_lock(draining);
 		pthread_cond_broadcast(&cache_switch_cond);
 		wr_cache_unlock(draining);
+
+		if (__done)
+			break;
 	}
+
+	for (i = 0; i < FAST_MODE_NR_WORKERS; ++i)
+		pthread_join(workers[i], NULL);
 
 	return 0;
 
