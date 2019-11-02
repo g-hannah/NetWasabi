@@ -17,6 +17,7 @@ static pthread_t workers[FAST_MODE_NR_WORKERS];
 static pthread_barrier_t start_barrier;
 static pthread_once_t once = PTHREAD_ONCE_INIT;
 static pthread_cond_t cache_switch_cond;
+static pthread_mutex_t eoc_mtx;
 static volatile sig_atomic_t do_switch = 0;
 static volatile sig_atomic_t nr_workers_eoc = 0;
 
@@ -57,6 +58,12 @@ __ctor __fast_mode_init(void)
 		goto fail;
 	}
 
+	if (pthread_mutex_init(&eoc_mtx, NULL) != 0)
+	{
+		fprintf(stderr, "__fast_mode_init: failed to initialise eoc mutex\n");
+		goto fail;
+	}
+
 	cache1.root = NULL;
 	cache2.root = NULL;
 
@@ -72,6 +79,7 @@ __dtor __fast_mode_fini(void)
 	wr_cache_clear_all(cache1.cache);
 	wr_cache_clear_all(cache2.cache);
 	pthread_barrier_destroy(&start_barrier);
+	pthread_mutex_destroy(&eoc_mtx);
 
 	wr_cache_destroy(cache1.cache);
 	wr_cache_destroy(cache2.cache);
@@ -97,7 +105,9 @@ init_worker_environ(void)
 static inline void
 worker_signal_eoc(void)
 {
+	pthread_mutex_lock(&eoc_mtx);
 	++nr_workers_eoc;
+	pthread_mutex_unlock(&eoc_mtx);
 	return;
 }
 
