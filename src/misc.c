@@ -1,9 +1,9 @@
 #include "misc.h"
 
 void
-check_cookies(connection_t *conn)
+check_cookies(struct http_t *http)
 {
-	assert(conn);
+	assert(http);
 
 	off_t offset = 0;
 	struct http_cookie_t *cookie = NULL;
@@ -19,23 +19,23 @@ check_cookies(connection_t *conn)
 	 * header and we have cached cookies, append them
 	 * to the buffer. Otherwise, do nothing.
 	 */
-	if (http_check_header(&conn->read_buf, "Set-Cookie", (off_t)0, &offset))
+	if (http_check_header(&http_rbuf(http), "Set-Cookie", (off_t)0, &offset))
 	{
 		if (wr_cache_nr_used(cookies) > 0)
 			wr_cache_clear_all(cookies);
 
 		offset = 0;
 
-		while(http_check_header(&conn->read_buf, "Set-Cookie", offset, &offset))
+		while(http_check_header(&http_rbuf(http), "Set-Cookie", offset, &offset))
 		{
-			http_fetch_header(&conn->read_buf, "Set-Cookie", tmp, offset);
+			http_fetch_header(&http_rbuf(http), "Set-Cookie", tmp, offset);
 
 			if (!tmp->name[0] && !tmp->value[0])
 			{
 				break;
 			}
 
-			http_append_header(&conn->write_buf, tmp);
+			http_append_header(&http_wbuf(http), tmp);
 
 			*hc_loop = (struct http_cookie_t *)wr_cache_alloc(cookies, hc_loop);
 
@@ -73,7 +73,7 @@ check_cookies(connection_t *conn)
 			tmp->vlen = cookie->data_len;
 			strcpy(tmp->name, "Cookie");
 
-			http_append_header(&conn->write_buf, tmp);
+			http_append_header(&http_wbuf(http), tmp);
 
 			++cookie;
 		}
@@ -87,17 +87,18 @@ check_cookies(connection_t *conn)
 }
 
 int
-connection_closed(connection_t *conn)
+connection_closed(struct http_t *http)
 {
-	assert(conn);
+	assert(http);
 
 	http_header_t *connection;
-	buf_t *buf = &conn->read_buf;
+	buf_t *buf = &http_rbuf(http);
 	int rv = 0;
+	struct __http_t *__http = (struct __http_t *)http;
 
 	//fprintf(stderr, "allocating header obj in CONNECTION @ %p\n", &connection);
 
-	connection = wr_cache_alloc(http_hcache, &connection);
+	connection = wr_cache_alloc(__http->headers, &connection);
 	assert(connection);
 
 	http_fetch_header(buf, "Connection", connection, (off_t)0);
@@ -110,40 +111,40 @@ connection_closed(connection_t *conn)
 
 	//fprintf(stderr, "deallocting header obj CONNECTION @ %p\n", &connection);
 
-	wr_cache_dealloc(http_hcache, connection, &connection);
+	wr_cache_dealloc(__http->headers, connection, &connection);
 	return rv;
 }
 
 void
-check_host(connection_t *conn)
+check_host(struct http_t *http)
 {
-	assert(conn);
+	assert(http);
 
 	static char old_host[HTTP_HNAME_MAX];
 
-	if (!conn->full_url[0])
+	if (!http->full_url[0])
 		return;
 
-	assert(strlen(conn->host) < HTTP_HNAME_MAX);
-	strcpy(old_host, conn->host);
-	http_parse_host(conn->full_url, conn->host);
+	assert(strlen(http->host) < HTTP_HNAME_MAX);
+	strcpy(old_host, http->host);
+	http_parse_host(http->full_url, http->host);
 
-	if (strcmp(conn->host, old_host))
+	if (strcmp(http->host, old_host))
 	{
 		if (wr_cache_nr_used(cookies) > 0)
 			wr_cache_clear_all(cookies);
 
-		update_operation_status("Changing host: %s ==> %s", old_host, conn->host);
-		reconnect(conn);
+		update_operation_status("Changing host: %s ==> %s", old_host, http->host);
+		http_reconnect(http);
 	}
 
 	return;
 }
 
 int
-check_local_dirs(connection_t *conn, buf_t *filename)
+check_local_dirs(struct http_t *http, buf_t *filename)
 {
-	assert(conn);
+	assert(http);
 	assert(filename);
 
 	char *p;
@@ -213,9 +214,9 @@ check_local_dirs(connection_t *conn, buf_t *filename)
 }
 
 void
-replace_with_local_urls(connection_t *conn, buf_t *buf)
+replace_with_local_urls(struct http_t *http, buf_t *buf)
 {
-	assert(conn);
+	assert(http);
 	assert(buf);
 
 	char *tail = buf->buf_tail;
@@ -325,10 +326,10 @@ do {\
 		if (range)
 		{
 			//fprintf(stderr, "turning %s into full url\n", url.buf_head);
-			make_full_url(conn, &url, &full);
+			make_full_url(http, &url, &full);
 			//fprintf(stderr, "made %s\n", full.buf_head);
 
-			if (make_local_url(conn, &full, &path) == 0)
+			if (make_local_url(http, &full, &path) == 0)
 			{
 				//fprintf(stderr, "made local url %s\n", path.buf_head);
 				buf_collapse(buf, (off_t)(url_start - buf->buf_head), range);
@@ -364,34 +365,34 @@ do {\
 }
 
 int
-archive_page(connection_t *conn)
+archive_page(struct http_t *http)
 {
 	int fd = -1;
-	buf_t *buf = &conn->read_buf;
+	buf_t *buf = &http_rbuf(http);
 	buf_t tmp;
 	buf_t local_url;
 	char *p;
 	int rv;
 
-	update_operation_status("Archiving %s", conn->full_url);
+	update_operation_status("Archiving %s", http->full_url);
 	p = HTTP_EOH(buf);
 
 	if (p)
 		buf_collapse(buf, (off_t)0, (p - buf->buf_head));
 
-	if (__url_parseable(conn->full_url))
-		__replace_with_local_urls(conn, buf);
+	if (__url_parseable(http->full_url))
+		__replace_with_local_urls(http, buf);
 
 	buf_init(&tmp, HTTP_URL_MAX);
 	buf_init(&local_url, 1024);
 
-	buf_append(&tmp, conn->full_url);
-	make_local_url(conn, &tmp, &local_url);
+	buf_append(&tmp, http->full_url);
+	make_local_url(http, &tmp, &local_url);
 
 /* Now we have "file:///path/to/file.extension" */
 	buf_collapse(&local_url, (off_t)0, strlen("file://"));
 
-	rv = __check_local_dirs(conn, &local_url);
+	rv = __check_local_dirs(http, &local_url);
 
 	if (rv < 0)
 		goto fail_free_bufs;
