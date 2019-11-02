@@ -34,7 +34,7 @@ check_local_dirs(struct http_t *http, buf_t *filename)
 
 	if (!p)
 	{
-		put_error_msg("__check_local_dirs: failed to find webreaper directory in caller's filename\n");
+		put_error_msg("check_local_dirs: failed to find webreaper directory in caller's filename\n");
 		errno = EPROTO;
 		return -1;
 	}
@@ -45,7 +45,7 @@ check_local_dirs(struct http_t *http, buf_t *filename)
 
 	if (!e)
 	{
-		put_error_msg("__check_local_dirs: failed to find necessary '/' character in caller's filename\n");
+		put_error_msg("check_local_dirs: failed to find necessary '/' character in caller's filename\n");
 		errno = EPROTO;
 		return -1;
 	}
@@ -252,7 +252,7 @@ archive_page(struct http_t *http)
 		buf_collapse(buf, (off_t)0, (p - buf->buf_head));
 
 	if (__url_parseable(http->full_url))
-		__replace_with_local_urls(http, buf);
+		replace_with_local_urls(http, buf);
 
 	buf_init(&tmp, HTTP_URL_MAX);
 	buf_init(&local_url, 1024);
@@ -263,7 +263,7 @@ archive_page(struct http_t *http)
 /* Now we have "file:///path/to/file.extension" */
 	buf_collapse(&local_url, (off_t)0, strlen("file://"));
 
-	rv = __check_local_dirs(http, &local_url);
+	rv = check_local_dirs(http, &local_url);
 
 	if (rv < 0)
 		goto fail_free_bufs;
