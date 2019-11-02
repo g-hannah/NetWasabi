@@ -7,12 +7,11 @@ INCLUDE_DIR := ../../include
 HTTP_DEPENDENCIES = \
 	$(INCLUDE_DIR)/buffer.h \
 	$(INCLUDE_DIR)/cache.h \
-	$(INCLUDE_DIR)/connection.h \
-	$(INCLUDE_DIR)/http.h \
-	$(INCLUDE_DIR)/malloc.h
+	$(INCLUDE_DIR)/http.h
 
 HTTP_SOURCE = \
-	http.c
+	http.c \
+	http_conn.c
 
 HTTP_OBJS := $(HTTP_SOURCE:.c=.o)
 
