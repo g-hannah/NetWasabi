@@ -84,6 +84,10 @@ init_worker_environ(void)
 {
 	draining = cache1.cache;
 	filling = cache2.cache;
+
+	cache1.state = DRAINING;
+	cache2.state = FILLING;
+
 	return;
 }
 
