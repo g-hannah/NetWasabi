@@ -101,9 +101,9 @@ encode_url(buf_t *url)
  * @out: the full URL
  */
 int
-make_full_url(connection_t *conn, buf_t *in, buf_t *out)
+make_full_url(struct http_t *http, buf_t *in, buf_t *out)
 {
-	assert(conn);
+	assert(http);
 	assert(in);
 	assert(out);
 
@@ -167,28 +167,28 @@ make_full_url(connection_t *conn, buf_t *in, buf_t *out)
 	}
 	else
 	{
-		buf_append(out, conn->host);
+		buf_append(out, http->host);
 
 		if (*p == '.' || *p != '/')
 		{
 		/*
 		 * Append the current page first.
 		 */
-			if (conn->page[0] != '/' && *(out->buf_tail - 1) != '/')
+			if (http->page[0] != '/' && *(out->buf_tail - 1) != '/')
 				buf_append(out, "/");
 
-			if (has_extension(conn->page))
+			if (has_extension(http->page))
 			{
 				char *__e;
 
-				__e = (conn->page + strlen(conn->page) - 1);
+				__e = (http->page + strlen(http->page) - 1);
 				while (*__e != '/')
 					--__e;
 
 				*__e = 0;
 			}
 
-			buf_append(out, conn->page);
+			buf_append(out, http->page);
 
 			if (*(out->buf_tail - 1) != '/')
 				buf_append(out, "/");
@@ -215,7 +215,7 @@ make_full_url(connection_t *conn, buf_t *in, buf_t *out)
 }
 
 int
-make_local_url(connection_t *conn, buf_t *url, buf_t *path)
+make_local_url(struct http_t *http, buf_t *url, buf_t *path)
 {
 	assert(url);
 	assert(path);
@@ -267,16 +267,16 @@ make_local_url(connection_t *conn, buf_t *url, buf_t *path)
 }
 
 int
-is_xdomain(connection_t *conn, buf_t *url)
+is_xdomain(struct http_t *http, buf_t *url)
 {
-	assert(conn);
+	assert(http);
 	assert(url);
 
 	static char tmp_host[1024];
 
 	http_parse_host(url->buf_head, tmp_host);
 
-	return strcmp(tmp_host, conn->primary_host);
+	return strcmp(tmp_host, http->primary_host);
 }
 
 int
