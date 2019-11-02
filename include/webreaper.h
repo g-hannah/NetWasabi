@@ -154,7 +154,7 @@ struct cache_ctx
 #define STATS_INC_ERRORS(w) ++((w).nr_errors)
 #define STATS_INC_PAGES(w) ++((w).nr_pages)
 #define STATS_INC_REQS(w) ++((w).nr_requests)
-#define STATS_ADD_BYTES(w, b) ((w).nr_bytes_received += (b))
+#define STATS_ADD_BYTES(w, b) (wrstats_lock(w); ((w).nr_bytes_received += (b); wrstats_unlock(w))
 
 #define NR_URL_TYPES 11
 struct url_types url_types[NR_URL_TYPES];
