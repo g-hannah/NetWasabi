@@ -120,6 +120,7 @@ http_header_cache_dtor(void *hh)
 
 #define TIME_STRING_MAX 64
 
+#if 0
 int
 http_cookie_ctor(void *cookie)
 {
@@ -171,6 +172,7 @@ http_cookie_dtor(void *cookie)
 
 	return;
 }
+#endif
 
 int
 http_link_cache_ctor(void *http_link)
@@ -803,7 +805,7 @@ http_recv_response(struct http_t *http)
 	if (!transfer_enc)
 		goto fail_dealloc;
 
-	//__retry:
+	__retry:
 	rv = __http_read_until_eoh(http, &p);
 
 	if (rv < 0 || FL_OPERATION_TIMEOUT == rv)
@@ -812,7 +814,34 @@ http_recv_response(struct http_t *http)
 	__http_check_cookies(buf, http);
 
 	http_status_code = http_status_code_int(buf);
-	if (HTTP_FOUND == http_status_code || HTTP_MOVED_PERMANENTLY == http_status_code)
+
+	switch(http_status_code)
+	{
+		case HTTP_FOUND:
+		case HTTP_MOVED_PERMANENTLY:
+		case HTTP_SEE_OTHER:
+			if (__http_set_new_location(http) < 0)
+				goto fail_dealloc;
+
+			buf_clear(&http_rbuf(http));
+			buf_clear(&http_wbuf(http));
+
+			http_build_request_header(http, HTTP_GET);
+
+			if (http_send_request(http) < 0)
+			{
+				fprintf(stderr, "http_recv_response: failed to resend HTTP request after \"%s\" response\n", http_status_code_string(http_status_code));
+				goto fail_dealloc;
+			}
+
+			goto __retry:
+			break;
+		default:
+			break;
+	}
+
+#if 0
+	if (HTTP_FOUND == http_status_code || HTTP_MOVED_PERMANENTLY == http_status_code || HTTP_SEE_OTHER == http_status_code)
 	{
 		if (__http_set_new_location(http) < 0)
 			goto fail_dealloc;
@@ -824,12 +853,11 @@ http_recv_response(struct http_t *http)
 
 		if (http_send_request(http) < 0)
 		{
-			fprintf(stderr, "http_recv_response: failed to resend HTTP request after \"%s\" response\n", http_status_code_string(http_status_code));
-			goto fail_dealloc;
 		}
 
 		goto __retry;
 	}
+#endif
 
 	if (!p)
 	{
@@ -1344,8 +1372,8 @@ __http_init_obj(struct __http_t *__http)
 			__http_cache_name,
 			sizeof(http_header_t),
 			0,
-			http_cookie_cache_ctor,
-			http_cookie_cache_dtor)))
+			http_header_cache_ctor,
+			http_header_cache_dtor)))
 	{
 		fprintf(stderr, "__http_init_obj: failed to create cache for HTTP cookie objects\n");
 		goto fail_destroy_cache;
