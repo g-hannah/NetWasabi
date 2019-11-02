@@ -13,8 +13,6 @@
 #include "buffer.h"
 #include "cache.h"
 #include "http.h"
-#include "malloc.h"
-#include "webreaper.h"
 
 /**
  * __init_openssl - initialise the openssl library
@@ -30,20 +28,17 @@ __init_openssl(void)
 }
 
 /**
- * open_connection - set up a connection with the target site
- * @conn: &connection_t that is initialised in this function
+ * http_connect - set up a connection with the target site
+ * @http: HTTP object with remote host information
  */
 int
 http_connect(struct http_t *http)
 {
-	assert(conn);
+	assert(http);
 
 	struct sockaddr_in sock4;
 	struct addrinfo *ainf = NULL;
 	struct addrinfo *aip = NULL;
-
-	//buf_init(&http->conn.read_buf, HTTP_DEFAULT_READ_BUF_SIZE);
-	//buf_init(&http->conn.write_buf, HTTP_DEFAULT_WRITE_BUF_SIZE);
 
 	clear_struct(&sock4);
 
@@ -65,8 +60,8 @@ http_connect(struct http_t *http)
 	if (!aip)
 		goto fail;
 
+	assert(http->conn.host_ipv4);
 	sprintf(http->conn.host_ipv4, "%s", inet_ntoa(sock4.sin_addr));
-
 	update_connection_state(http, FL_CONNECTION_CONNECTING);
 
 	if (option_set(OPT_USE_TLS))
@@ -80,7 +75,7 @@ http_connect(struct http_t *http)
 		goto fail_release_ainf;
 	}
 
-	assert(conn->sock > 2);
+	assert(http_socket(http) > 2);
 
 	if (connect(http_socket(http), (struct sockaddr *)&sock4, (socklen_t)sizeof(sock4)) != 0)
 	{
@@ -113,7 +108,7 @@ http_connect(struct http_t *http)
 void
 http_disconnect(struct http_t *http)
 {
-	assert(conn);
+	assert(http);
 
 	shutdown(http_socket(http), SHUT_RDWR);
 	close(http_socket(http));
@@ -128,9 +123,6 @@ http_disconnect(struct http_t *http)
 		http->conn.ssl_ctx = NULL;
 		http_tls(http) = NULL;
 	}
-
-	//buf_destroy(&conn->read_buf);
-	//buf_destroy(&conn->write_buf);
 
 	return;
 }
@@ -223,6 +215,8 @@ http_reconnect(struct http_t *http)
 int
 http_switch_tls(struct http_t *http)
 {
+	assert(http);
+
 	http_disconnect(http);
 
 #ifdef DEBUG
