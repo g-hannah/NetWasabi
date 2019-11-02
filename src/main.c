@@ -997,10 +997,8 @@ deconstruct_btree(http_link_t *root, wr_cache_t *cache)
  * @conn: our struct with connection context
  */
 static int
-reap(wr_cache_t *cachep, wr_cache_t *cachep2, struct http_t *http)
+reap(struct http_t *http)
 {
-	assert(cachep);
-	assert(cachep2);
 	assert(http);
 
 	int nr_links = 0;
@@ -1420,18 +1418,43 @@ main(int argc, char *argv[])
 		goto fail;
 	}
 
+	srand(time(NULL));
+
+	/*
+	 * Must be done here and not in the constructor function
+	 * because the dimensions are not known before main()
+	 */
+	clear_struct(&winsize);
+	ioctl(STDOUT_FILENO, TIOCGWINSZ, &winsize);
+
+/*
+ * Initialise the mutex to protect writing to the screen
+ * and the thread that writes quotations beneath our
+ * operation display box.
+ */
 	pthread_mutex_init(&screen_mutex, NULL);
 	pthread_attr_setdetachstate(&thread_screen_attr, PTHREAD_CREATE_DETACHED);
+
+/*
+ * Print the operation display box.
+ */
+	__print_information_layout();
+
 	pthread_create(&thread_screen_tid, &thread_screen_attr, screen_updater_thread, NULL);
+
 
 	if (option_set(FAST_MODE))
 	{
+		http_delete(http);
 		do_fast_mode(argv[1]);
 		goto out;
 	}
 
-	srand(time(NULL));
-
+/*
+ * Set up signal handlers for SIGINT and SIGQUIT
+ * to avoid segmentation faults when the user
+ * does ctrl^C/ctrl^\ at a bad time.
+ */
 	clear_struct(&new_act);
 	clear_struct(&old_sigint);
 	clear_struct(&old_sigquit);
@@ -1452,6 +1475,10 @@ main(int argc, char *argv[])
 		goto fail;
 	}
 
+/*
+ * Check for existence of the WR_Reaped directory
+ * in the user's home directory.
+ */
 	__check_directory();
 
 	struct http_t *http;
@@ -1462,16 +1489,6 @@ main(int argc, char *argv[])
 	buf_t *rbuf = NULL;
 	buf_t *wbuf = NULL;
 
-	/*
-	 * Must be done here and not in the constructor function
-	 * because the dimensions are not known before main()
-	 */
-	clear_struct(&winsize);
-	ioctl(STDOUT_FILENO, TIOCGWINSZ, &winsize);
-
-	__print_information_layout();
-
-	//conn_init(&conn);
 	if (!(http = http_new()))
 	{
 		fprintf(stderr, "reap: failed to obtain new HTTP object\n");
@@ -1481,37 +1498,28 @@ main(int argc, char *argv[])
 	http_parse_host(argv[1], http->host);
 	strcpy(http->primary_host, http->host);
 
-	//if (open_connection(&conn) < 0)
 	if (http_connect(http) < 0)
 		goto fail;
 
 	rbuf = &http_rbuf(http);
 	wbuf = &http_wbuf(http);
 
-
 	/*
 	 * Create a new cache for http_link_t objects.
 	 */
-	http_lcache = wr_cache_create(
+	cache1.cache = wr_cache_create(
 			"http_link_cache",
 			sizeof(http_link_t),
 			0,
 			wr_cache_http_link_ctor,
 			wr_cache_http_link_dtor);
 
-	http_lcache2 = wr_cache_create(
+	cache2.cache = wr_cache_create(
 			"http_link_cache2",
 			sizeof(http_link_t),
 			0,
 			wr_cache_http_link_ctor,
 			wr_cache_http_link_dtor);
-
-	if (option_set(FAST_MODE))
-	{
-		http_delete(http);
-		do_fast_mode(argv[1]);
-		goto out;
-	}
 
 	/*
 	 * Catch SIGINT and SIGQUIT so we can release cache memory, etc.
@@ -1522,7 +1530,6 @@ main(int argc, char *argv[])
 		put_error_msg("Signal caught");
 		goto out_disconnect;
 	}
-
 
 	/*
 	 * Check if the webserver has a robots.txt file
@@ -1537,20 +1544,27 @@ main(int argc, char *argv[])
 
 	assert(url_len < HTTP_URL_MAX);
 
-	strncpy(http->full_url, argv[1], url_len);
-	http->full_url[url_len] = 0;
+	strcpy(http->full_url, argv[1]);
 
 	buf_clear(rbuf);
 	buf_clear(wbuf);
 
 	update_current_url(http->full_url);
 
-
+/*
+ * We no longer check here for any 3xx status codes
+ * that result in a Location header field being sent
+ * because it makes much more sense for that to be
+ * dealt with behind the scenes within the HTTP
+ * module.
+ *
+ * TODO: still learn, however, when we got a location
+ * header sent to us so that we can save an empty file
+ * for the name of the redirected URL in order that we
+ * stop requesting it in the future.
+ */
 	resend:
-	status_code = __do_request(http);
-
-	//__update_status_code(status_code);
-	//fprintf(stdout, "%s%s\n", ACTION_ING_STR, http_status_code_string(status_code));
+	status_code = do_request(http);
 
 	switch(status_code)
 	{
@@ -1558,11 +1572,11 @@ main(int argc, char *argv[])
 			break;
 		case HTTP_ALREADY_EXISTS:
 			do_not_archive = 1;
-			status_code = send_get_request(http); /* in this case we still need to get it to extract URLs */
+			status_code = http_send_request(http, HTTP_GET); /* in this case we still need to get it to extract URLs */
 			update_status_code(status_code);
 			break;
 		case HTTP_BAD_REQUEST:
-			__show_request_header(wbuf);
+			//__show_request_header(wbuf);
 			break;
 		case HTTP_FORBIDDEN:
 		case HTTP_METHOD_NOT_ALLOWED:
@@ -1572,27 +1586,24 @@ main(int argc, char *argv[])
 		case HTTP_INTERNAL_ERROR:
 			__show_response_header(rbuf);
 		default:
-			//fprintf(stderr, "%s%sDisconnecting...%s\n", COL_RED, ACTION_ING_STR, COL_END);
-			//update_operation_status("Disconnecting...");
 			goto out_disconnect;
 	}
 
-
-	parse_links(http_lcache, http_lcache2, &cache1_url_root, http);
-	update_cache1_count(wr_cache_nr_used(http_lcache));
+	parse_links(http, &cache1, &cache2);
+	update_cache1_count(wr_cache_nr_used(cache1.cache));
 
 	if (!do_not_archive)
 	{
-		__archive_page(http);
+		archive_page(http);
 	}
 
-	if (!wr_cache_nr_used(http_lcache))
+	if (!wr_cache_nr_used(cache1.cache))
 	{
 		update_operation_status("Parsed no URLs from page (already archived)");
 		goto out_disconnect;
 	}
 
-	rv = reap(http_lcache, http_lcache2, http);
+	rv = reap(http);
 
 	if (rv < 0)
 	{
@@ -1605,13 +1616,13 @@ main(int argc, char *argv[])
 	screen_updater_stop = 1;
 	http_disconnect(http);
 
-	if (wr_cache_nr_used(http_lcache) > 0)
-		wr_cache_clear_all(http_lcache);
-	if (wr_cache_nr_used(http_lcache2) > 0)
-		wr_cache_clear_all(http_lcache2);
+	if (wr_cache_nr_used(cache1.cache) > 0)
+		wr_cache_clear_all(cache1.cache);
+	if (wr_cache_nr_used(cache2.cache) > 0)
+		wr_cache_clear_all(cache2.cache);
 
-	wr_cache_destroy(http_lcache);
-	wr_cache_destroy(http_lcache2);
+	wr_cache_destroy(cache1.cache);
+	wr_cache_destroy(cache2.cache);
 
 	if (allowed)
 		destroy_graph(allowed);
@@ -1626,15 +1637,16 @@ main(int argc, char *argv[])
 	exit(EXIT_SUCCESS);
 
 	fail_disconnect:
+	screen_updater_stop = 1;
 	http_disconnect(http);
 
-	if (wr_cache_nr_used(http_lcache) > 0)
-		wr_cache_clear_all(http_lcache);
-	if (wr_cache_nr_used(http_lcache2) > 0)
-		wr_cache_clear_all(http_lcache2);
+	if (wr_cache_nr_used(cache1.cache) > 0)
+		wr_cache_clear_all(cache1.cache);
+	if (wr_cache_nr_used(cache2.cache) > 0)
+		wr_cache_clear_all(cache2.cache);
 
-	wr_cache_destroy(http_lcache);
-	wr_cache_destroy(http_lcache2);
+	wr_cache_destroy(cache1.cache);
+	wr_cache_destroy(cache2.cache);
 
 	if (allowed)
 		destroy_graph(allowed);
