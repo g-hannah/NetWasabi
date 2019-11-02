@@ -14,16 +14,12 @@
 #include "webreaper.h"
 
 static pthread_t workers[FAST_MODE_NR_WORKERS];
-static struct worker_ctx worker_ctx[FAST_MODE_NR_WORKERS];
-static pthread_barrier_t barrier;
 static pthread_barrier_t start_barrier;
 static pthread_once_t once = PTHREAD_ONCE_INIT;
 static pthread_cond_t cache_switch_cond;
 static volatile sig_atomic_t do_switch = 0;
 static volatile sig_atomic_t nr_workers_eoc = 0;
 
-//static wr_cache_t *cache1;
-//static wr_cache_t *cache2;
 static wr_cache_t *filling;
 static wr_cache_t *draining;
 
@@ -33,7 +29,7 @@ struct cache_ctx cache2;
 static void
 __ctor __fast_mode_init(void)
 {
-	if (!(cache1 = wr_cache_create(
+	if (!(cache1.cache = wr_cache_create(
 			"fast_mode_url_cache1",
 			sizeof(http_link_t),
 			0,
@@ -44,7 +40,7 @@ __ctor __fast_mode_init(void)
 		goto fail;
 	}
 
-	if (!(cache2 = wr_cache_create(
+	if (!(cache2.cache = wr_cache_create(
 			"fast_mode_url_cache2",
 			sizeof(http_link_t),
 			0,
@@ -55,22 +51,14 @@ __ctor __fast_mode_init(void)
 		goto fail;
 	}
 
-	if (pthread_barrier_init(&barrier, NULL, FAST_MODE_NR_WORKERS) != 0)
-	{
-		fprintf(stderr, "__fast_mode_init: failed to initialise worker barrier\n");
-		goto fail;
-	}
-
 	if (pthread_barrier_init(&start_barrier, NULL, (FAST_MODE_NR_WORKERS + 1)) != 0)
 	{
 		fprintf(stderr, "__fast_mode_init: failed to initialise start barrier\n");
 		goto fail;
 	}
 
-	fctx.cache = cache1;
-	fctx.root = NULL;
-	dctx.cache = cache2;
-	dctx.root = NULL;
+	cache1.root = NULL;
+	cache2.root = NULL;
 
 	return;
 
@@ -83,7 +71,6 @@ __dtor __fast_mode_fini(void)
 {
 	wr_cache_clear_all(cache1);
 	wr_cache_clear_all(cache2);
-	pthread_barrier_destroy(&barrier);
 	pthread_barrier_destroy(&start_barrier);
 
 	wr_cache_destroy(cache1);
@@ -251,16 +238,28 @@ do_fast_mode(const char *remote_host)
 	int err;
 	int status_code;
 	http_link_t *swap_root;
+	struct http_t *http = NULL;
 
-	status_code = do_request(conn);
-
-	if (!http_status_ok(status_code))
+	if (!(http = http_new()))
 	{
-		fprintf(stderr, "do_fast_mode: failed to get page from web server (HTTP status code: %u)\n", (unsigned int)status_code);
+		fprintf(stderr, "do_fast_mode: failed to get HTTP object\n");
 		goto fail;
 	}
 
-	if (parse_links(http, &cache_ctx1, &cache_ctx2) < 0)
+	if (!http_parse_host(remote_host, http->host))
+		goto fail;
+	if (!http_parse_page(remote_host, http->page))
+		goto fail;
+
+	if (http_connect(http) < 0)
+	{
+		fprintf(stderr, "do_fast_mode: failed to connect to remote host\n");
+		goto fail;
+	}
+
+	status_code = do_request(http);
+
+	if (parse_links(http, &cache1, &cache2) < 0)
 	{
 		fprintf(stderr, "do_fast_mode: failed to parse links from starting page\n");
 		goto fail;
@@ -268,10 +267,7 @@ do_fast_mode(const char *remote_host)
 
 	for (i = 0; i < FAST_MODE_NR_WORKERS; ++i)
 	{
-		worker_ctx[i].cache1 = cache1;
-		worker_ctx[i].cache2 = cache2;
-
-		if ((err = pthread_create(&workers[i], NULL, worker_reap, (void *)&worker_ctx[i])) != 0)
+		if ((err = pthread_create(&workers[i], NULL, worker_reap, (void *)remote_host)) != 0)
 		{
 			fprintf(stderr, "do_fast_mode: failed to create worker thread (%s)\n", strerror(err));
 			goto fail;
