@@ -84,8 +84,10 @@ volatile int cache_switch = 0;
 static int nr_reaped = 0;
 static int current_depth = 0;
 
-http_link_t *cache1_url_root;
-http_link_t *cache2_url_root;
+struct cache_ctx cache1;
+struct cache_ctx cache2;
+//http_link_t *cache1_url_root;
+//http_link_t *cache2_url_root;
 
 struct winsize winsize;
 int url_cnt = 0;
@@ -770,7 +772,7 @@ __handle301(connection_t *conn)
 	char *new_page_end;
 	char *old_page_end;
 	char *new_page_start;
-	size_t old_page_len = strlen(conn->page);
+	size_t old_page_len = strlen(http->page);
 	int archive_redirected = 0;
 	int rv = 0;
 	static char tmp[HTTP_URL_MAX];
@@ -778,7 +780,7 @@ __handle301(connection_t *conn)
 	//fprintf(stderr, "allocating header obj LOCATION @ %p\n", &location);
 
 	location = (http_header_t *)wr_cache_alloc(http_hcache, &location);
-	if (!http_fetch_header(&conn->read_buf, "Location", location, (off_t)0))
+	if (!http_fetch_header(&http_rbuf(http), "Location", location, (off_t)0))
 	{
 		wr_cache_dealloc(http_hcache, (void *)location, &location);
 		put_error_msg("__handle301: Failed to allocate header cache object");
@@ -802,7 +804,7 @@ __handle301(connection_t *conn)
 		new_page_start = tmp;
 		HTTP_SKIP_HOST_PART(new_page_start, tmp);
 
-		old_page_end = conn->page + old_page_len;
+		old_page_end = http->page + old_page_len;
 
 		if (*(new_page_end - 1) == '/' && *(old_page_end - 1) != '/')
 		{
@@ -811,9 +813,9 @@ __handle301(connection_t *conn)
 		}
 
 		assert(new_page_start);
-		assert(conn->page);
+		assert(http->page);
 
-		if (strcmp(new_page_start, conn->page))
+		if (strcmp(new_page_start, http->page))
 			archive_redirected = 1;
 	}
 
@@ -827,7 +829,7 @@ __handle301(connection_t *conn)
 		buf_init(&tmp_full, HTTP_URL_MAX);
 		buf_init(&tmp_local, path_max);
 
-		buf_append(&tmp_full, conn->full_url);
+		buf_append(&tmp_full, http->full_url);
 		make_local_url(conn, &tmp_full, &tmp_local);
 		buf_collapse(&tmp_local, (off_t)0, strlen("file://"));
 		fd = open(tmp_local.buf_head, O_RDWR|O_CREAT|O_TRUNC, S_IRUSR|S_IWUSR);
@@ -853,11 +855,11 @@ __handle301(connection_t *conn)
 		buf_append(&tmp_url, location->value);
 		make_full_url(conn, &tmp_url, &tmp_full);
 
-		http_parse_host(tmp_full.buf_head, conn->host);
-		http_parse_page(tmp_full.buf_head, conn->page);
+		http_parse_host(tmp_full.buf_head, http->host);
+		http_parse_page(tmp_full.buf_head, http->page);
 
-		strncpy(conn->full_url, tmp_full.buf_head, tmp_full.data_len);
-		conn->full_url[tmp_full.data_len] = 0;
+		strncpy(http->full_url, tmp_full.buf_head, tmp_full.data_len);
+		http->full_url[tmp_full.data_len] = 0;
 
 		buf_destroy(&tmp_url);
 		buf_destroy(&tmp_full);
@@ -865,7 +867,7 @@ __handle301(connection_t *conn)
 #if 0
 		if (got_token_graph(wrctx))
 		{
-			if (!robots_eval_url(allowed, forbidden, conn->page))
+			if (!robots_eval_url(allowed, forbidden, http->page))
 			{
 				rv = HTTP_FORBIDDEN;
 				goto out_dealloc;
@@ -904,15 +906,15 @@ __handle301(connection_t *conn)
 				return HTTP_IS_XDOMAIN;
 			}
 
-			http_parse_host(location->value, conn->host);
-			http_parse_page(conn->full_url, conn->page);
-			strncpy(conn->full_url, location->value, location->vlen);
-			conn->full_url[location->vlen] = 0;
+			http_parse_host(location->value, http->host);
+			http_parse_page(http->full_url, http->page);
+			strncpy(http->full_url, location->value, location->vlen);
+			http->full_url[location->vlen] = 0;
 
 #if 0
 			if (got_token_graph(wrctx))
 			{
-				if (!robots_eval_url(allowed, forbidden, conn->page))
+				if (!robots_eval_url(allowed, forbidden, http->page))
 				{
 					rv = HTTP_FORBIDDEN;
 					goto out_dealloc;
@@ -922,10 +924,10 @@ __handle301(connection_t *conn)
 		}
 	}
 
-	assert(!memchr(conn->host, '/', strlen(conn->host)));
-	update_current_url(conn->full_url);
+	assert(!memchr(http->host, '/', strlen(http->host)));
+	update_current_url(http->full_url);
 
-	if (!strncmp("https", conn->full_url, 5))
+	if (!strncmp("https", http->full_url, 5))
 	{
 		if (!option_set(OPT_USE_TLS))
 			conn_switch_to_tls(conn);
@@ -1034,22 +1036,22 @@ reap(wr_cache_t *cachep, wr_cache_t *cachep2, struct http_t *http)
 	{
 		fill = 1;
 
-		if (!cache_switch)
+		if (cache1.state == DRAINING)
 		{
-			link = (http_link_t *)cachep->cache;
-			nr_links = wr_cache_nr_used(cachep);
+			link = (http_link_t *)cache1.cache;
+			nr_links = wr_cache_nr_used(cache1.cache);
 
 #ifdef DEBUG
 			fprintf(stderr, "Deconstructing binary tree in cache 2\n");
 #endif
-			deconstruct_btree(cache2_url_root, http_lcache2);
+			deconstruct_btree(cache2.root, cache2.cache);
 
-			wr_cache_clear_all(cachep2);
-			if (cachep2->nr_assigned > 0)
-				cachep2->nr_assigned = 0;
+			wr_cache_clear_all(cache2.cache);
+			if (cache2.cache->nr_assigned > 0)
+				cache2.cache->nr_assigned = 0;
 
-			assert(wr_cache_nr_used(cachep2) == 0);
-			cache2_url_root = NULL;
+			assert(wr_cache_nr_used(cache2.cache) == 0);
+			cache2.root = NULL;
 
 			update_cache_status(1, FL_CACHE_STATUS_DRAINING);
 
@@ -1060,20 +1062,20 @@ reap(wr_cache_t *cachep, wr_cache_t *cachep2, struct http_t *http)
 		}
 		else
 		{
-			link = (http_link_t *)cachep2->cache;
-			nr_links = wr_cache_nr_used(cachep2);
+			link = (http_link_t *)cache2.cache;
+			nr_links = wr_cache_nr_used(cache2.cache);
 
 #ifdef DEBUG
 			fprintf(stderr, "Deconstructing binary tree in cache 1\n");
 #endif
-			deconstruct_btree(cache1_url_root, http_lcache);
+			deconstruct_btree(cache1.root, cache1.cache);
 
-			wr_cache_clear_all(cachep);
-			if (cachep->nr_assigned > 0)
-				cachep->nr_assigned = 0;
+			wr_cache_clear_all(cache1.cache);
+			if (cache1.cache->nr_assigned > 0)
+				cache1.cache->nr_assigned = 0;
 
-			assert(wr_cache_nr_used(cachep) == 0);
-			cache1_url_root = NULL;
+			assert(wr_cache_nr_used(cache1.cache) == 0);
+			cache1.root = NULL;
 
 			update_cache_status(2, FL_CACHE_STATUS_DRAINING);
 
@@ -1111,7 +1113,7 @@ reap(wr_cache_t *cachep, wr_cache_t *cachep2, struct http_t *http)
 			sleep(crawl_delay(wrctx));
 			UNBLOCK_SIGNAL(SIGINT);
 
-			__check_host(conn);
+			check_host(conn);
 
 			resend:
 			if (link->nr_requests > 2) /* loop */
@@ -1122,7 +1124,7 @@ reap(wr_cache_t *cachep, wr_cache_t *cachep2, struct http_t *http)
 
 			update_current_url(http->full_url);
 
-			status_code = __do_request(conn);
+			status_code = do_request(conn);
 
 			if (status_code < 0)
 				goto fail;
@@ -1206,7 +1208,7 @@ reap(wr_cache_t *cachep, wr_cache_t *cachep2, struct http_t *http)
 				{
 					if (!cache_switch)
 					{
-						parse_links(cachep2, cachep, &cache2_url_root, http);
+						parse_links(http, cachep2, cachep, &cache2_url_root);
 						nr_links_sibling = wr_cache_nr_used(cachep2);
 						update_cache2_count(nr_links_sibling);
 					}
@@ -1234,7 +1236,8 @@ reap(wr_cache_t *cachep, wr_cache_t *cachep2, struct http_t *http)
 			next:
 			++link;
 			--url_cnt;
-			if (!cache_switch)
+
+			if (cache1.state == FILLING)
 				update_cache1_count(url_cnt);
 			else
 				update_cache2_count(url_cnt);
@@ -1246,10 +1249,8 @@ reap(wr_cache_t *cachep, wr_cache_t *cachep2, struct http_t *http)
 
 		++current_depth;
 
-		if (cache_switch)
-			cache_switch = 0;
-		else
-			cache_switch = 1;
+		flip_cache_state(cache1);
+		flip_cache_state(cache2);
 
 		if (current_depth >= crawl_depth(wrctx))
 		{
@@ -1317,13 +1318,13 @@ __check_directory(void)
 static int
 __get_robots(connection_t *conn)
 {
-	assert(conn);
+	assert(http);
 
 	int status_code = 0;
 
 	update_operation_status("Requesting robots.txt file from server");
 
-	strcpy(conn->page, "robots.txt");
+	strcpy(http->page, "robots.txt");
 
 	buf_t full_url;
 
@@ -1334,12 +1335,12 @@ __get_robots(connection_t *conn)
 	else
 		buf_append(&full_url, "http://");
 
-	assert(conn->host[0]);
-	buf_append(&full_url, conn->host);
+	assert(http->host[0]);
+	buf_append(&full_url, http->host);
 	buf_append(&full_url, "/robots.txt");
 
 	assert(full_url.data_len < HTTP_URL_MAX);
-	strcpy(conn->full_url, full_url.buf_head);
+	strcpy(http->full_url, full_url.buf_head);
 
 	buf_destroy(&full_url);
 	wrctx.got_token_graph = 0;
@@ -1361,7 +1362,7 @@ __get_robots(connection_t *conn)
 	allowed = NULL;
 	forbidden = NULL;
 
-	if (create_token_graphs(&allowed, &forbidden, &conn->read_buf) < 0)
+	if (create_token_graphs(&allowed, &forbidden, &http_rbuf(http)) < 0)
 	{
 		put_error_msg("Failed to create graph for URL tokens");
 		goto out_destroy_graphs;
@@ -1394,11 +1395,6 @@ __valid_url(char *url)
 		return 0;
 
 	return 1;
-}
-
-static int
-do_fast_mode(const char *main_url)
-{
 }
 
 /*
