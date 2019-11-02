@@ -23,7 +23,7 @@ send_head_request(struct http_t *http)
 
 	update_operation_status("Sending HEAD request to server");
 
-	check_host(conn);
+	check_host(http);
 
 	if (!(tmp_cbuf = wr_calloc(8192, 1)))
 		goto fail_free_bufs;
@@ -51,10 +51,10 @@ send_head_request(struct http_t *http)
 	//free(tmp_cbuf);
 	//tmp_cbuf = NULL;
 
-	if (http_send_request(conn) < 0)
+	if (http_send_request(http) < 0)
 		goto fail;
 
-	rv = http_recv_response(conn);
+	rv = http_recv_response(http);
 
 	if (rv < 0 || FL_OPERATION_TIMEOUT == rv)
 		goto fail;
@@ -148,7 +148,7 @@ do_request(struct http_t *http)
  * Check here too because 301 may send different
  * spelling (upper-case vs lower-case... etc)
  */
-			if (local_archive_exists(conn->full_url))
+			if (local_archive_exists(http->full_url))
 				return HTTP_ALREADY_EXISTS;
 			goto resend_head;
 			break;
@@ -158,16 +158,16 @@ do_request(struct http_t *http)
 			return status_code;
 	}
 
-	if (connection_closed(conn))
+	if (connection_closed(http))
 	{
 		//fprintf(stdout, "%s%sRemote peer closed connection%s\n", COL_RED, ACTION_DONE_STR, COL_END);
-		//__show_response_header(&conn->read_buf);
+		//__show_response_header(&http_rbuf(http));
 		update_operation_status("Remove peer closed connection");
-		reconnect(conn);
+		http_reconnect(http);
 	}
 
 	status_code &= ~status_code;
-	status_code = send_get_request(conn);
+	status_code = send_get_request(http);
 
 	update_status_code(status_code);
 
