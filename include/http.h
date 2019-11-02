@@ -141,7 +141,8 @@ char *http_fetch_header(buf_t *, const char *, http_header_t *, off_t) __nonnull
 char *http_parse_host(char *, char *) __nonnull((1,2)) __wur;
 char *http_parse_page(char *, char *) __nonnull((1,2)) __wur;
 
-//int parse_links(wr_cache_t *, wr_cache_t *, http_link_t **, connection_t *) __nonnull((1,2,3,4)) __wur;
+void http_check_host(struct http_t *) __nonnull((1));
+int http_connection_closed(struct http_t *) __nonnull((1)) __wur;
 
 /*
  * ctors and dtors for HTTP caches
