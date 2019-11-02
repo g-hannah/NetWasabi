@@ -40,7 +40,7 @@ static const char *const __disallowed_tokens[] =
 static int
 __url_acceptable(struct http_t *http, struct cache_ctx *fctx, struct cache_ctx *dctx, buf_t *url)
 {
-	assert(conn);
+	assert(http);
 	assert(fctx);
 	assert(dctx);
 	assert(url);
@@ -253,7 +253,7 @@ parse_links(struct http_t *http, wr_cache_t *e_cache, wr_cache_t *f_cache)
 {
 	assert(e_cache);
 	assert(f_cache);
-	assert(conn);
+	assert(http);
 
 	char					*p = NULL;
 	char					*savep = NULL;
@@ -261,7 +261,7 @@ parse_links(struct http_t *http, wr_cache_t *e_cache, wr_cache_t *f_cache)
 	char delim;
 	int url_type_idx = 0;
 	size_t url_len = 0;
-	buf_t *buf = &conn->read_buf;
+	buf_t *buf = &http_rbuf(http);
 	buf_t url;
 	buf_t full_url;
 	buf_t path;
@@ -380,7 +380,7 @@ parse_links(struct http_t *http, struct cache_ctx *fctx, struct cache_ctx *dctx)
 {
 	assert(fctx);
 	assert(dctx);
-	assert(conn);
+	assert(http);
 
 	char					*p = NULL;
 	char					*savep = NULL;
