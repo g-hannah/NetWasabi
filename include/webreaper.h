@@ -128,6 +128,8 @@ struct webreaper_ctx
 	unsigned int nr_errors;
 };
 
+#define flip_cache_state(c) ((c).state == DRAINING ? (c).state = FILLING : (c).state = DRAINING)
+
 struct cache_ctx
 {
 	wr_cache_t *cache;
@@ -135,7 +137,7 @@ struct cache_ctx
 	enum {
 		DRAINING = 0,
 		FILLING = 1
-	} cache_state;
+	} state;
 };
 
 #define keep_trailing_slash(w) ((w).trailing_slash)
