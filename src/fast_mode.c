@@ -69,12 +69,12 @@ __ctor __fast_mode_init(void)
 static void
 __dtor __fast_mode_fini(void)
 {
-	wr_cache_clear_all(cache1);
-	wr_cache_clear_all(cache2);
+	wr_cache_clear_all(cache1.cache);
+	wr_cache_clear_all(cache2.cache);
 	pthread_barrier_destroy(&start_barrier);
 
-	wr_cache_destroy(cache1);
-	wr_cache_destroy(cache2);
+	wr_cache_destroy(cache1.cache);
+	wr_cache_destroy(cache2.cache);
 
 	return;
 }
