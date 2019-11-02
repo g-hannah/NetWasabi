@@ -1320,6 +1320,62 @@ http_append_header(buf_t *buf, http_header_t *hh)
 	return 0;
 }
 
+void
+http_check_host(struct http_t *http)
+{
+	assert(http);
+
+	static char old_host[HTTP_HNAME_MAX];
+	struct __http_t *__http = (struct __http_t *)http;
+
+	if (!http->full_url[0])
+		return;
+
+	assert(strlen(http->host) < HTTP_HNAME_MAX);
+	strcpy(old_host, http->host);
+	http_parse_host(http->full_url, http->host);
+
+	if (strcmp(http->host, old_host))
+	{
+		if (wr_cache_nr_used(__http->cookies) > 0)
+			wr_cache_clear_all(__http->cookies);
+
+		update_operation_status("Changing host: %s ==> %s", old_host, http->host);
+		http_reconnect(http);
+	}
+
+	return;
+}
+
+int
+http_connection_closed(struct http_t *http)
+{
+	assert(http);
+
+	http_header_t *connection;
+	buf_t *buf = &http_rbuf(http);
+	int rv = 0;
+	struct __http_t *__http = (struct __http_t *)http;
+
+	//fprintf(stderr, "allocating header obj in CONNECTION @ %p\n", &connection);
+
+	connection = wr_cache_alloc(__http->headers, &connection);
+	assert(connection);
+
+	http_fetch_header(buf, "Connection", connection, (off_t)0);
+
+	if (connection->value[0])
+	{
+		if (!strcasecmp("close", connection->value))
+			rv = 1;
+	}
+
+	//fprintf(stderr, "deallocting header obj CONNECTION @ %p\n", &connection);
+
+	wr_cache_dealloc(__http->headers, connection, &connection);
+	return rv;
+}
+
 static int __http_obj_cnt = 0;
 static char __http_cache_name[64];
 
