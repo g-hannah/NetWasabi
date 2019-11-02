@@ -39,6 +39,7 @@ struct __http_t
 
 	wr_cache_t *headers;
 	wr_cache_t *cookies;
+	http_header_t *__ptr;
 };
 
 static struct sigaction oact;
@@ -218,25 +219,28 @@ http_link_cache_dtor(void *http_link)
  * @http: the HTTP object containing the cookie object cache
  */
 static int
-__http_check_cookies(buf_t *buf, struct http_t *http)
+__http_check_cookies(struct http_t *http)
 {
-	assert(buf);
+	assert(http);
+
+	buf_t *buf = &http_rbuf(http);
+	struct __http_t *__http = (struct __http_t *)http;
 
 	if (strstr(buf->buf_head, "Set-Cookie"))
 	{
 		off_t off = 0;
 
-		wr_cache_clear_all(http->cookies);
+		wr_cache_clear_all(__http->cookies);
 
 		while (http_check_header(buf, "Set-Cookie", off, &off))
 		{
-			if (!(header = (http_header_t *)wr_cache_alloc(http->cookies, &header)))
+			if (!(__http->__ptr = (http_header_t *)wr_cache_alloc(__http->cookies, &__http->__ptr)))
 			{
 				fprintf(stderr, "__http_check_cookies: failed to allocate HTTP header cache object\n");
 				goto fail;
 			}
 
-			if (!(http_fetch_header(buf, "Set-Cookie", header, off)))
+			if (!(http_fetch_header(buf, "Set-Cookie", __http->__ptr, off)))
 			{
 				fprintf(stderr, "__http_check_cookies: failed to extract Set-Cookie header field\n");
 				goto fail_dealloc;
@@ -249,7 +253,7 @@ __http_check_cookies(buf_t *buf, struct http_t *http)
 	return 0;
 
 	fail_dealloc:
-	wr_cache_clear_all(http->cookies);
+	wr_cache_clear_all(__http->cookies);
 
 	fail:
 	return -1;
@@ -330,7 +334,7 @@ http_build_request_header(struct http_t *http, const char *http_verb)
 
 	if (__nr_cookies)
 	{
-		struct http_cookie_t *__c = (struct http_cookie_t *)((struct __http_t *)http)->cookies->cache;
+		struct http_header_t *__c = (struct http_header_t *)((struct __http_t *)http)->cookies->cache;
 		int i;
 
 		for (i = 0; i < __nr_cookies; ++i)
@@ -346,11 +350,13 @@ http_build_request_header(struct http_t *http, const char *http_verb)
 }
 
 int
-http_send_request(struct http_t *http)
+http_send_request(struct http_t *http, const char *http_verb)
 {
 	assert(http);
 
 	buf_t *buf = &http_wbuf(http);
+
+	http_build_request_header(http, http_verb);
 
 	if (option_set(OPT_USE_TLS))
 	{
@@ -784,23 +790,18 @@ http_recv_response(struct http_t *http)
 	ssize_t bytes;
 	int rv;
 	struct __http_t *__http = (struct __http_t *)http;
-	//int http_status_code;
 	http_header_t *content_len = NULL;
 	http_header_t *transfer_enc = NULL;
-	buf_t *buf = &conn->read_buf;
+	buf_t *buf = &http_rbuf(http);
 
 	update_operation_status("Receiving data from server");
 
-	wr_cache_lock(__http->headers);
 	content_len = (http_header_t *)wr_cache_alloc(__http->headers, &content_len);
-	wr_cache_unlock(__http->headers);
 
 	if (!content_len)
 		goto fail;
 
-	wr_cache_lock(__http->headers);
 	transfer_enc = (http_header_t *)wr_cache_alloc(__http->headers, &transfer_enc);
-	wr_cache_unlock(__http->headers);
 
 	if (!transfer_enc)
 		goto fail_dealloc;
@@ -811,7 +812,7 @@ http_recv_response(struct http_t *http)
 	if (rv < 0 || FL_OPERATION_TIMEOUT == rv)
 		goto fail_dealloc;
 
-	__http_check_cookies(buf, http);
+	__http_check_cookies(http);
 
 	http_status_code = http_status_code_int(buf);
 
@@ -826,9 +827,7 @@ http_recv_response(struct http_t *http)
 			buf_clear(&http_rbuf(http));
 			buf_clear(&http_wbuf(http));
 
-			http_build_request_header(http, HTTP_GET);
-
-			if (http_send_request(http) < 0)
+			if (http_send_request(http, HTTP_GET) < 0)
 			{
 				fprintf(stderr, "http_recv_response: failed to resend HTTP request after \"%s\" response\n", http_status_code_string(http_status_code));
 				goto fail_dealloc;
@@ -839,25 +838,6 @@ http_recv_response(struct http_t *http)
 		default:
 			break;
 	}
-
-#if 0
-	if (HTTP_FOUND == http_status_code || HTTP_MOVED_PERMANENTLY == http_status_code || HTTP_SEE_OTHER == http_status_code)
-	{
-		if (__http_set_new_location(http) < 0)
-			goto fail_dealloc;
-
-		buf_clear(&http_rbuf(http));
-		buf_clear(&http_wbuf(http));
-
-		http_build_request_header(http, HTTP_GET);
-
-		if (http_send_request(http) < 0)
-		{
-		}
-
-		goto __retry;
-	}
-#endif
 
 	if (!p)
 	{
@@ -946,18 +926,12 @@ http_recv_response(struct http_t *http)
 	}
 
 	out_dealloc:
-	wr_cache_lock(__http->headers);
-
 	wr_cache_dealloc(__http->headers, (void *)content_len, &content_len);
 	wr_cache_dealloc(__http->headers, (void *)transfer_enc, &transfer_enc);
-
-	wr_cache_unlock(__http->headers);
 
 	return 0;
 
 	fail_dealloc:
-	wr_cache_lock(http_cache);
-
 	if (content_len)
 	{
 		wr_cache_dealloc(__http->headers, (void *)content_len, &content_len);
@@ -967,8 +941,6 @@ http_recv_response(struct http_t *http)
 	{
 		wr_cache_dealloc(__http->headers, (void *)transfer_enc, &transfer_enc);
 	}
-
-	wr_cache_unlock(__http->headers);
 
 	fail:
 	return rv;
@@ -1104,7 +1076,7 @@ http_response_header_len(buf_t *buf)
 	return (p - buf->buf_head);
 }
 
-char *
+static char *
 http_parse_host(char *url, char *host)
 {
 	char *p;
@@ -1153,7 +1125,7 @@ http_parse_host(char *url, char *host)
 	return host;
 }
 
-char *
+static char *
 http_parse_page(char *url, char *page)
 {
 	char *p;
