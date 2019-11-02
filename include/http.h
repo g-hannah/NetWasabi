@@ -138,16 +138,6 @@ struct http_t
 	};
 };
 
-http_header_t **hh_loop;
-http_link_t **hl_loop;
-struct http_cookie_t **hc_loop;
-
-http_link_t *cache1_url_root;
-http_link_t *cache2_url_root;
-
-wr_cache_t *http_hcache;
-wr_cache_t *http_lcache;
-wr_cache_t *http_lcache2;
 size_t httplen;
 size_t httpslen;
 
