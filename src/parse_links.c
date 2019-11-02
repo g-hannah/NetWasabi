@@ -45,7 +45,6 @@ __url_acceptable(struct http_t *http, struct cache_ctx *fctx, struct cache_ctx *
 	assert(dctx);
 	assert(url);
 
-	char *tail = url->buf_tail;
 	static char tmp_page[HTTP_URL_MAX];
 	int i;
 
@@ -76,7 +75,7 @@ __url_acceptable(struct http_t *http, struct cache_ctx *fctx, struct cache_ctx *
 		return 0;
 	}
 
-	if (memchr(url->buf_head, '#', tail - url->buf_head))
+	if (memchr(url->buf_head, '#', buf->buf_tail - url->buf_head))
 		return 0;
 
 	for (i = 0; __disallowed_tokens[i] != NULL; ++i)
@@ -247,127 +246,6 @@ __insert_link(struct cache_ctx *fctx, buf_t *url)
 	return 0;
 }
 
-#if 0
-int
-parse_links(struct http_t *http, wr_cache_t *e_cache, wr_cache_t *f_cache)
-{
-	assert(e_cache);
-	assert(f_cache);
-	assert(http);
-
-	char					*p = NULL;
-	char					*savep = NULL;
-	char					*tail;
-	char delim;
-	int url_type_idx = 0;
-	size_t url_len = 0;
-	buf_t *buf = &http_rbuf(http);
-	buf_t url;
-	buf_t full_url;
-	buf_t path;
-
-	buf_init(&url, HTTP_URL_MAX);
-	buf_init(&full_url, HTTP_URL_MAX);
-	buf_init(&path, path_max);
-
-	tail = buf->buf_tail;
-	savep = buf->buf_head;
-
-	nr_already = 0;
-	nr_twins = 0;
-	nr_dups = 0;
-	nr_urls_call = 0;
-	nr_urls_total = wr_cache_nr_used(e_cache);
-
-	//update_operation_status("Parsing URLs...");
-
-	while (1)
-	{
-		buf_clear(&url);
-		buf_clear(&full_url);
-		buf_clear(&path);
-
-		p = strstr(savep, url_types[url_type_idx].string);
-		delim = url_types[url_type_idx].delim;
-
-		if (!p || p >= tail)
-		{
-			++url_type_idx;
-
-			if (url_types[url_type_idx].delim == 0)
-				break;
-
-			savep = buf->buf_head;
-			continue;
-		}
-
-		savep = (p += url_types[url_type_idx].len);
-		p = memchr(savep, delim, (tail - savep));
-
-		if (!p)
-		{
-			++url_type_idx;
-
-			if (url_types[url_type_idx].delim == 0)
-				break;
-
-			savep = buf->buf_head;
-			continue;
-		}
-
-		url_len = (p - savep);
-
-		if (!url_len || url_len >= HTTP_URL_MAX)
-		{
-			savep = ++p;
-			continue;
-		}
-
-		assert(url_len > 0);
-		assert(url_len < HTTP_URL_MAX);
-
-		buf_append_ex(&url, savep, url_len);
-		make_full_url(conn, &url, &full_url);
-
-		if (!__url_acceptable(conn, e_cache, f_cache, &full_url))
-		{
-			savep = ++p;
-			continue;
-		}
-
-		//fprintf(stderr, "inserting URL %s to tree\n", full_url.buf_head);
-
-		if (__insert_link(e_cache, tree_root, &full_url) < 0)
-			goto fail_destroy_bufs;
-
-		savep = ++p;
-		++nr_urls_call;
-	}
-
-	buf_destroy(&url);
-	buf_destroy(&full_url);
-	buf_destroy(&path);
-
-#if 0
-	update_operation_status("Added %d URL%s (ignored %d dup%s, %d archived, %d twin%s)",
-		nr_urls_call,
-		nr_urls_call == 1 ? "" : "s",
-		nr_dups,
-		nr_dups == 1 ? "" : "s",
-		nr_dups,
-		nr_dups == 1 ? "" : "s");
-#endif
-
-	return 0;
-
-	fail_destroy_bufs:
-	buf_destroy(&url);
-	buf_destroy(&full_url);
-	buf_destroy(&path);
-	return -1;
-}
-#endif
-
 /**
  * parse_links - parse links from page and store in URL cache within fctx
  *			checking for duplicate URLs in URL cache within dctx.
@@ -378,13 +256,12 @@ parse_links(struct http_t *http, wr_cache_t *e_cache, wr_cache_t *f_cache)
 int
 parse_links(struct http_t *http, struct cache_ctx *fctx, struct cache_ctx *dctx)
 {
+	assert(http);
 	assert(fctx);
 	assert(dctx);
-	assert(http);
 
-	char					*p = NULL;
-	char					*savep = NULL;
-	char					*tail;
+	char *p = NULL;
+	char *savep = NULL;
 	char delim;
 	int url_type_idx = 0;
 	size_t url_len = 0;
@@ -402,7 +279,6 @@ parse_links(struct http_t *http, struct cache_ctx *fctx, struct cache_ctx *dctx)
 	if (buf_init(&path, path_max) < 0)
 		goto fail_destroy_bufs;
 
-	tail = buf->buf_tail;
 	savep = buf->buf_head;
 
 	nr_already = 0;
@@ -419,7 +295,7 @@ parse_links(struct http_t *http, struct cache_ctx *fctx, struct cache_ctx *dctx)
 		p = strstr(savep, url_types[url_type_idx].string);
 		delim = url_types[url_type_idx].delim;
 
-		if (!p || p >= tail)
+		if (!p || p >= buf->buf_tail)
 		{
 			++url_type_idx;
 
@@ -431,7 +307,7 @@ parse_links(struct http_t *http, struct cache_ctx *fctx, struct cache_ctx *dctx)
 		}
 
 		savep = (p += url_types[url_type_idx].len);
-		p = memchr(savep, delim, (tail - savep));
+		p = memchr(savep, delim, (buf->buf_tail - savep));
 
 		if (!p)
 		{
