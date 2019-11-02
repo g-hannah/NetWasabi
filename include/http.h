@@ -102,19 +102,6 @@ typedef struct http_header_t
 	size_t vsize; /* Amount of memory allocated for value */
 } http_header_t;
 
-struct http_cookie_t
-{
-	char *data;
-	char *domain;
-	char *path;
-	char *expires;
-	size_t data_len;
-	size_t domain_len;
-	size_t path_len;
-	size_t expires_len;
-	time_t expires_ts;
-};
-
 #define http_socket(h) ((h)->conn.sock)
 #define http_tls(h) ((h)->conn.ssl)
 #define http_rbuf(h) ((h)->conn.read_buf)
@@ -142,8 +129,9 @@ size_t httplen;
 size_t httpslen;
 
 int http_build_request_header(struct http_t *, const char *http_verb) __nonnull((1,2)) __wur;
-int http_send_request(struct http_t *) __nonnull((1)) __wur;
+int http_send_request(struct http_t *, const char *) __nonnull((1,2)) __wur;
 int http_recv_response(struct http_t *) __nonnull((1)) __wur;
+
 int http_append_header(buf_t *, http_header_t *) __nonnull((1,2)) __wur;
 int http_status_code_int(buf_t *) __nonnull((1)) __wur;
 ssize_t http_response_header_len(buf_t *) __nonnull((1)) __wur;
@@ -152,7 +140,12 @@ int http_check_header(buf_t *, const char *, off_t, off_t *) __nonnull((1,2,4)) 
 char *http_fetch_header(buf_t *, const char *, http_header_t *, off_t) __nonnull((1,2,3)) __wur;
 char *http_parse_host(char *, char *) __nonnull((1,2)) __wur;
 char *http_parse_page(char *, char *) __nonnull((1,2)) __wur;
-int parse_links(wr_cache_t *, wr_cache_t *, http_link_t **, connection_t *) __nonnull((1,2,3,4)) __wur;
+
+//int parse_links(wr_cache_t *, wr_cache_t *, http_link_t **, connection_t *) __nonnull((1,2,3,4)) __wur;
+
+/*
+ * ctors and dtors for HTTP caches
+ */
 int http_link_cache_ctor(void *) __nonnull((1)) __wur;
 void http_link_cache_dtor(void *) __nonnull((1));
 int http_header_cache_ctor(void *) __nonnull((1)) __wur;
