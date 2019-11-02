@@ -73,9 +73,6 @@ static int get_opts(int, char *[]) __nonnull((2)) __wur;
 struct webreaper_ctx wrctx = {0};
 uint32_t runtime_options = 0;
 
-wr_cache_t *http_lcache;
-wr_cache_t *http_lcache2;
-
 size_t httplen;
 size_t httpslen;
 char **user_blacklist;
@@ -86,8 +83,6 @@ static int current_depth = 0;
 
 struct cache_ctx cache1;
 struct cache_ctx cache2;
-//http_link_t *cache1_url_root;
-//http_link_t *cache2_url_root;
 
 struct winsize winsize;
 int url_cnt = 0;
@@ -1024,12 +1019,6 @@ reap(struct http_t *http)
  * to CRAWL_DEPTH (#iterations of while loop).
  */
 
-	if (!wr_cache_nr_used(cachep))
-		cache_switch = 1;
-	else
-		cache_switch = 0;
-
-
 	while (1)
 	{
 		fill = 1;
@@ -1101,8 +1090,7 @@ reap(struct http_t *http)
 
 			assert(len < HTTP_URL_MAX);
 
-			strncpy(http->full_url, link->url, len);
-			http->full_url[len] = 0;
+			strcpy(http->full_url, link->url);
 
 			if (!http_parse_page(http->full_url, http->page))
 				continue;
@@ -1135,15 +1123,6 @@ reap(struct http_t *http)
 				case HTTP_GONE:
 				case HTTP_NOT_FOUND: /* don't want to keep requesting the link and getting 404, so just archive it */
 					break;
-				case HTTP_MOVED_PERMANENTLY:
-				/*
-				 * Shouldn't get here, because __do_request() first
-				 * sends a HEAD request, and handles 301/302 for us.
-				 */
-					__handle301(conn);
-					buf_clear(wbuf);
-					goto resend;
-					break;
 				case HTTP_BAD_REQUEST:
 					//__show_request_header(wbuf);
 
@@ -1153,7 +1132,7 @@ reap(struct http_t *http)
 					buf_clear(wbuf);
 					buf_clear(rbuf);
 
-					reconnect(conn);
+					http_reconnect(http);
 
 					goto next;
 					break;
@@ -1171,17 +1150,12 @@ reap(struct http_t *http)
 					buf_clear(wbuf);
 					buf_clear(rbuf);
 
-					reconnect(conn);
+					http_reconnect(http);
 
 					goto next;
 					break;
 				case HTTP_IS_XDOMAIN:
 				case HTTP_ALREADY_EXISTS:
-				/*
-				 * Ignore 302 Found because it is used a lot for obtaining a random
-				 * link, for example a random wiki article (Special:Random).
-				 */
-				case HTTP_FOUND:
 				case FL_HTTP_SKIP_LINK:
 					goto next;
 				case FL_OPERATION_TIMEOUT:
@@ -1204,32 +1178,34 @@ reap(struct http_t *http)
 			{
 				if (__url_parseable(http->full_url))
 				{
-					if (!cache_switch)
+					if (cache1.state == DRAINING)
 					{
-						parse_links(http, cachep2, cachep, &cache2_url_root);
-						nr_links_sibling = wr_cache_nr_used(cachep2);
+/*
+ * parse_links(struct http_t *, struct cache_ctx *FCTX, struct cache_ctx *DCTX)
+ */
+						parse_links(http, &cache2, &cache1);
+						nr_links_sibling = wr_cache_nr_used(cache2.cache);
 						update_cache2_count(nr_links_sibling);
 					}
 					else
 					{
-						parse_links(cachep, cachep2, &cache1_url_root, http);
-						nr_links_sibling = wr_cache_nr_used(cachep);
+						parse_links(http, &cache1, &cache2);
+						nr_links_sibling = wr_cache_nr_used(cache1.cache);
 						update_cache1_count(nr_links_sibling);
 					}
 
 					if (nr_links_sibling >= NR_LINKS_THRESHOLD)
 					{
 						fill = 0;
-						update_cache_status(!cache_switch ? 2 : 1, FL_CACHE_STATUS_FULL);
-					/*fprintf(stdout, "%s%sURL threshold reached%s\n",
-						COL_DARKORANGE,
-						ACTION_DONE_STR,
-						COL_END);*/
+/*
+ * if cache1 is draining, then it's cache2 that's full, and vice versa.
+ */
+						update_cache_status(cache1.state == DRAINING ? 2 : 1, FL_CACHE_STATUS_FULL);
 					}
 				}
 			}
 
-			__archive_page(http);
+			archive_page(http);
 
 			next:
 			++link;
