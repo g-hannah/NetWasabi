@@ -114,7 +114,7 @@ worker_reap(void *args)
 
 	if (!(http = http_new()))
 	{
-		wprintf("failed to get new HTTP object");
+		put_error_msg("failed to get new HTTP object");
 		goto thread_fail;
 	}
 
@@ -127,7 +127,7 @@ worker_reap(void *args)
 
 	if (http_connect(http) < 0)
 	{
-		wprintf("failed to connect to remove server");
+		put_error_msg("failed to connect to remove server");
 		goto thread_fail;
 	}
 
@@ -154,7 +154,6 @@ worker_reap(void *args)
 		}
 
 		status_code = do_request(http);
-		//status_code = __worker_do_request(ctx);
 
 		switch((unsigned int)status_code)
 		{
