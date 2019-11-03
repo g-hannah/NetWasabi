@@ -11,12 +11,11 @@ TOP_DIR := src
 
 PRIMARY_OBJS := \
 	$(TOP_DIR)/main.o \
-	$(TOP_DIR)/connection.o \
 	$(TOP_DIR)/graph.o \
-	$(TOP_DIR)/parse_links.o \
 	$(TOP_DIR)/robots.o \
 	$(TOP_DIR)/utils_url.o \
-	$(TOP_DIR)/screen_utils.o
+	$(TOP_DIR)/screen_utils.o \
+	$(TOP_DIR)/webreaper.o
 
 MM_OBJS := \
 	$(MM_DIR)/buffer.o \
@@ -24,7 +23,8 @@ MM_OBJS := \
 	$(MM_DIR)/malloc.o
 
 HTTP_OBJS := \
-	$(HTTP_DIR)/http.o
+	$(HTTP_DIR)/http.o \
+	$(HTTP_DIR)/http_conn.o
 
 ALL_OBJS := $(MM_OBJS) $(HTTP_OBJS) $(PRIMARY_OBJS)
 
