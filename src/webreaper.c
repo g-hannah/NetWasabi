@@ -1,6 +1,8 @@
 #include <assert.h>
 #include <errno.h>
 #include <fcntl.h>
+#include <pthread.h>
+#include <signal.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <unistd.h>
@@ -8,6 +10,7 @@
 #include "cache.h"
 #include "http.h"
 #include "robots.h"
+#include "screen_utils.h"
 #include "utils_url.h"
 #include "webreaper.h"
 
@@ -34,9 +37,20 @@
 #define CACHE_STATUS_LEN 10
 #define OUTPUT_TABLE_COLUMNS 90
 
-pthread_t thread_screen_tid;
-pthread_attr_t thread_screen_attr;
-pthread_mutex_t screen_mutex;
+static sigset_t oldset;
+static sigset_t newset;
+
+#define BLOCK_SIGNAL(signal)\
+do {\
+	sigemptyset(&newset);\
+	sigaddset(&newset, (signal));\
+	sigprocmask(SIG_BLOCK, &newset, &oldset);\
+} while (0)
+
+#define UNBLOCK_SIGNAL(signal) sigprocmask(SIG_SETMASK, &oldset, NULL)
+
+struct cache_ctx cache1;
+struct cache_ctx cache2;
 
 void
 update_bytes(size_t bytes)
@@ -363,7 +377,7 @@ deconstruct_btree(http_link_t *root, wr_cache_t *cache)
 #ifdef DEBUG
 		fprintf(stderr, "Going left from %p to %p\n", root, root->left);
 #endif
-		deconstruct_btree(root->left, ctx->cache);
+		deconstruct_btree(root->left, cache);
 	}
 
 	if (root->right)
@@ -607,6 +621,20 @@ do {\
 	}
 }
 
+static int
+__url_parseable(char *url)
+{
+	int i;
+
+	for (i = 0; no_url_files[i] != NULL; ++i)
+	{
+		if (strstr(url, no_url_files[i]))
+			return 0;
+	}
+
+	return 1;
+}
+
 int
 archive_page(struct http_t *http)
 {
@@ -746,7 +774,7 @@ __url_acceptable(struct http_t *http, struct cache_ctx *fctx, struct cache_ctx *
 			return 0;
 	}
 
-	if (is_xdomain(conn, url))
+	if (is_xdomain(http, url))
 	{
 		if (!option_set(OPT_ALLOW_XDOMAIN))
 			return 0;
@@ -996,7 +1024,7 @@ parse_links(struct http_t *http, struct cache_ctx *fctx, struct cache_ctx *dctx)
 		buf_append_ex(&url, savep, url_len);
 		make_full_url(http, &url, &full_url);
 
-		if (!__url_acceptable(http, fctx->cache, dctx->cache, &full_url))
+		if (!__url_acceptable(http, &fctx, &dctx, &full_url))
 		{
 			savep = ++p;
 			continue;
@@ -1042,7 +1070,7 @@ do_request(struct http_t *http)
 	if (HTTP_OK != status_code)
 		return status_code;
 
-	if (local_archive_already_exists(http->full_url))
+	if (local_archive_exists(http->full_url))
 		return HTTP_ALREADY_EXISTS;
 
 	if (http_connection_closed(http))
@@ -1176,18 +1204,9 @@ reap(struct http_t *http)
 			sleep(crawl_delay(wrctx));
 			UNBLOCK_SIGNAL(SIGINT);
 
-			http_check_host(conn);
-
-			resend:
-			if (link->nr_requests > 2) /* loop */
-			{
-				++link;
-				continue;
-			}
-
+			http_check_host(http);
 			update_current_url(http->full_url);
-
-			status_code = do_request(conn);
+			status_code = do_request(http);
 
 			if (status_code < 0)
 				goto fail;
@@ -1201,10 +1220,6 @@ reap(struct http_t *http)
 				case HTTP_NOT_FOUND: /* don't want to keep requesting the link and getting 404, so just archive it */
 					break;
 				case HTTP_BAD_REQUEST:
-					//__show_request_header(wbuf);
-
-					if (wr_cache_nr_used(cookies) > 0)
-						wr_cache_clear_all(cookies);
 
 					buf_clear(wbuf);
 					buf_clear(rbuf);
@@ -1219,10 +1234,6 @@ reap(struct http_t *http)
 				case HTTP_BAD_GATEWAY:
 				case HTTP_SERVICE_UNAV:
 				case HTTP_GATEWAY_TIMEOUT:
-					//__show_response_header(rbuf);
-
-					if (wr_cache_nr_used(cookies) > 0)
-						wr_cache_clear_all(cookies);
 
 					buf_clear(wbuf);
 					buf_clear(rbuf);

@@ -109,6 +109,14 @@ do {\
 #define OPT_SHOW_RES_HEADER 0x4
 #define OPT_ALLOW_XDOMAIN 0x8 /* if not set, ignore URLs that are a different host */
 
+#define CRAWL_DELAY_DEFAULT 3
+#define MAX_CRAWL_DELAY 30
+#define CRAWL_DEPTH_DEFAULT 50
+#define MAX_TIME_WAIT 8
+#define MAX_FAILS 10
+#define RESET_DELAY 3
+#define NR_LINKS_THRESHOLD 500
+
 struct url_types
 {
 	char *string;
@@ -129,16 +137,19 @@ struct webreaper_ctx
 	unsigned int nr_errors;
 };
 
-#define flip_cache_state(c) ((c).state == DRAINING ? (c).state = FILLING : (c).state = DRAINING)
+#define flip_cache_state(c) ((c).state == (enum state) DRAINING ? (c).state = (enum state) FILLING : (c).state = (enum state) DRAINING)
+
+enum state
+{
+	DRAINING = 0,
+	FILLING = 1
+};
 
 struct cache_ctx
 {
 	wr_cache_t *cache;
 	http_link_t *root;
-	enum {
-		DRAINING = 0,
-		FILLING = 1
-	} state;
+	enum state state;
 };
 
 #define keep_trailing_slash(w) ((w).trailing_slash)
@@ -169,6 +180,9 @@ struct webreaper_ctx wrctx;
 struct winsize winsize;
 struct graph_ctx *allowed;
 struct graph_ctx *forbidden;
+
+struct cache_ctx cache1;
+struct cache_ctx cache2;
 
 #define FL_HTTP_SKIP_LINK 0x1
 

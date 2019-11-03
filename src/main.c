@@ -20,26 +20,6 @@
 #include "utils_url.h"
 #include "webreaper.h"
 
-#define CRAWL_DELAY_DEFAULT 3
-#define MAX_CRAWL_DELAY 30
-#define CRAWL_DEPTH_DEFAULT 50
-#define NR_LINKS_THRESHOLD 500
-#define MAX_TIME_WAIT 8
-#define MAX_FAILS 10
-#define RESET_DELAY 3
-
-static sigset_t oldset;
-static sigset_t newset;
-
-#define BLOCK_SIGNAL(signal)\
-do {\
-	sigemptyset(&newset);\
-	sigaddset(&newset, (signal));\
-	sigprocmask(SIG_BLOCK, &newset, &oldset);\
-} while (0)
-
-#define UNBLOCK_SIGNAL(signal) sigprocmask(SIG_SETMASK, &oldset, NULL)
-
 static int get_opts(int, char *[]) __nonnull((2)) __wur;
 
 /*
@@ -56,9 +36,6 @@ int USER_BLACKLIST_NR_TOKENS;
 
 static int nr_reaped = 0;
 static int current_depth = 0;
-
-static struct cache_ctx cache1;
-static struct cache_ctx cache2;
 
 struct winsize winsize;
 int url_cnt = 0;
@@ -269,20 +246,6 @@ char *no_url_files[] =
 	".ico",
 	NULL
 };
-
-static int
-__url_parseable(char *url)
-{
-	int i;
-
-	for (i = 0; no_url_files[i] != NULL; ++i)
-	{
-		if (strstr(url, no_url_files[i]))
-			return 0;
-	}
-
-	return 1;
-}
 
 static void
 catch_signal(int signo)
