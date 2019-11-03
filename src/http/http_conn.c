@@ -13,6 +13,7 @@
 #include "buffer.h"
 #include "cache.h"
 #include "http.h"
+#include "webreaper.h"
 
 /**
  * __init_openssl - initialise the openssl library
