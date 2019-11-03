@@ -198,12 +198,12 @@ worker_reap(void *args)
 			case HTTP_FOUND:
 			case FL_HTTP_SKIP_LINK:
 				goto next;
-			case FL_OPERATION_TIMEOUT:
+			case HTTP_OPERATION_TIMEOUT:
 
 				buf_clear(rbuf);
 
-				if (!conn->host[0])
-					strcpy(conn->host, conn->primary_host);
+				if (!http->host[0])
+					strcpy(http->host, http->primary_host);
 
 				http_reconnect(ctx->http);
 
