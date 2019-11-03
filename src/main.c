@@ -593,119 +593,6 @@ __print_information_layout(void)
 	return;
 }
 
-static void
-__extract_cookie_info(struct http_cookie_t *dest, http_header_t *src)
-{
-	assert(dest);
-	assert(src);
-
-	strncpy(dest->data, src->value, src->vlen);
-	dest->data[src->vlen] = 0;
-	dest->data_len = src->vlen;
-
-	char *p;
-	char *e;
-	char *start = dest->data;
-	size_t data_len = dest->data_len;
-
-/*
- * Some cookie values do not end with ';' but instead end with '\r\n'.
- * \r\n is not included in the http_header_t->value, so if no ';', just
- * go to the null byte.
- */
-
-	p = strstr(start, "path");
-
-	if (p)
-	{
-		p += strlen("path=");
-		e = memchr(p, ';', data_len - (p - start));
-
-		if (!e)
-			e = start + data_len;
-
-		strncpy(dest->path, p, (e - p));
-		dest->path_len = (e - p);
-		dest->path[dest->path_len] = 0;
-	}
-	else
-	{
-		dest->path[0] = 0;
-	}
-
-	p = strstr(start, "domain");
-
-	if (p)	
-	{
-		p += strlen("domain=");
-		e = memchr(p, ';', data_len - (p - start));
-
-		if (!e)
-			e = start + data_len;
-
-		strncpy(dest->domain, p, (e - p));
-		dest->domain_len = (e - p);
-		dest->domain[dest->domain_len] = 0;
-	}
-	else
-	{
-		dest->domain[0] = 0;
-	}
-
-	p = strstr(start, "expires");
-
-	if (p)
-	{
-		p += strlen("expires=");
-		e = memchr(p, ';', data_len - (p - start));
-
-		if (!e)
-			e = start + data_len;
-
-		strncpy(dest->expires, p, (e - p));
-		dest->expires_len = (e - p);
-		dest->expires[dest->expires_len] = 0;
-	}
-	else
-	{
-		dest->expires[0] = 0;
-	}
-
-	dest->expires_ts = (time(NULL) + ((time_t)86400 * 7));
-
-	return;
-}
-
-static void
-__show_request_header(buf_t *buf)
-{
-	assert(buf);
-
-	fprintf(stderr, "%s%s%s", COL_RED, buf->buf_head, COL_END);
-	return;
-}
-
-static void
-__show_response_header(buf_t *buf)
-{
-	assert(buf);
-
-	char *p = HTTP_EOH(buf);
-
-	if (!p)
-	{
-		put_error_msg("__show_response_header: failed to find end of HTTP header");
-		//fprintf(stderr, "%s", buf->buf_head);
-		
-		errno = EPROTO;
-		return;
-	}
-
-	fprintf(stderr, "%s%.*s%s", COL_RED, (int)(p - buf->buf_head), buf->buf_head, COL_END);
-
-	return;
-}
-
 char *no_url_files[] =
 {
 	".jpg",
@@ -1144,7 +1031,7 @@ reap(struct http_t *http)
 				case HTTP_ALREADY_EXISTS:
 				case FL_HTTP_SKIP_LINK:
 					goto next;
-				case FL_OPERATION_TIMEOUT:
+				case HTTP_OPERATION_TIMEOUT:
 
 					buf_clear(rbuf);
 
