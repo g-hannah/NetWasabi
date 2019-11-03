@@ -21,8 +21,8 @@ static volatile sig_atomic_t nr_workers_eoc = 0;
 static wr_cache_t *filling;
 static wr_cache_t *draining;
 
-struct cache_ctx cache1;
-struct cache_ctx cache2;
+static struct cache_ctx cache1;
+static struct cache_ctx cache2;
 
 static void
 __ctor __fast_mode_init(void)
