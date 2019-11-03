@@ -77,12 +77,11 @@ size_t httplen;
 size_t httpslen;
 char **user_blacklist;
 int USER_BLACKLIST_NR_TOKENS;
-volatile int cache_switch = 0;
 static int nr_reaped = 0;
 static int current_depth = 0;
 
-struct cache_ctx cache1;
-struct cache_ctx cache2;
+static struct cache_ctx cache1;
+static struct cache_ctx cache2;
 
 struct winsize winsize;
 int url_cnt = 0;
@@ -137,14 +136,6 @@ __ctor __wr_init(void)
 	if (!path_max)
 		path_max = 1024;
 
-	hh_loop = malloc(sizeof(http_header_t *));
-	hl_loop = malloc(sizeof(http_link_t *));
-	hc_loop = malloc(sizeof(struct http_cookie_t *));
-
-	assert(hh_loop);
-	assert(hl_loop);
-	assert(hc_loop);
-
 	httplen = strlen("http://");
 	httpslen = strlen("https://");
 
@@ -155,20 +146,15 @@ __ctor __wr_init(void)
 	SET_SOCK_FLAG_ONCE = 0;
 	SET_SSL_SOCK_FLAG_ONCE = 0;
 
+	pthread_mutex_init(&screen_mutex, NULL);
+
 	return;
 }
 
 static void
 __dtor __wr_fini(void)
 {
-	if (hh_loop)
-		free(hh_loop);
-
-	if (hl_loop)
-		free(hl_loop);
-
-	if (hc_loop)
-		free(hc_loop);
+	pthread_mutex_destroy(&screen_mutex);
 }
 
 #define THREAD_SLEEP_TIME_USEC 500000
@@ -1403,12 +1389,6 @@ main(int argc, char *argv[])
 	clear_struct(&winsize);
 	ioctl(STDOUT_FILENO, TIOCGWINSZ, &winsize);
 
-/*
- * Initialise the mutex to protect writing to the screen
- * and the thread that writes quotations beneath our
- * operation display box.
- */
-	pthread_mutex_init(&screen_mutex, NULL);
 	pthread_attr_setdetachstate(&thread_screen_attr, PTHREAD_CREATE_DETACHED);
 
 /*
