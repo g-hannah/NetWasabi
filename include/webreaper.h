@@ -166,8 +166,6 @@ char **user_blacklist;
 int USER_BLACKLIST_NR_TOKENS;
 struct webreaper_ctx wrctx;
 
-int SET_SOCK_FLAG_ONCE;
-int SET_SSL_SOCK_FLAG_ONCE;
 struct winsize winsize;
 struct graph_ctx *allowed;
 struct graph_ctx *forbidden;
@@ -196,10 +194,16 @@ int check_local_dirs(struct http_t *, buf_t *) __nonnull((1,2)) __wur;
 void replace_with_local_urls(struct http_t *, buf_t *) __nonnull((1,2));
 int archive_page(struct http_t *) __nonnull((1)) __wur;
 int parse_links(struct http_t *, struct cache_ctx *, struct cache_ctx *) __nonnull((1,2,3)) __wur;
+void deconstruct_btree(http_link_t *, wr_cache_t *) __nonnull((1,2));
+
+int reap(struct http_t *) __nonnull((1)) __wur;
 
 #define TOKEN_MAX 64
 
 uint32_t runtime_options;
+pthread_t thread_screen_tid;
+pthread_attr_t thread_screen_attr;
+pthread_mutex_t screen_mutex;
 
 #define FAST_MODE 0x100
 
@@ -213,7 +217,6 @@ uint32_t runtime_options;
 #define STATISTICS_STR "+++ "
 
 #define FL_RESET 0x1
-#define FL_OPERATION_TIMEOUT 0x2
 
 /*
  * For paths that are forbidden as

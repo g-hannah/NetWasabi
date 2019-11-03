@@ -11,6 +11,379 @@
 #include "utils_url.h"
 #include "webreaper.h"
 
+#define UPDATE_BYTES_UP 8
+#define UPDATE_CACHE1_COUNT_UP 8
+#define UPDATE_CACHE2_COUNT_UP 8
+#define UPDATE_CACHE_STATUS_UP 7
+#define UPDATE_CURRENT_URL_UP 4
+#define UPDATE_CURRENT_LOCAL_UP 4
+#define UPDATE_STATUS_CODE_UP 8
+#define UPDATE_CONN_STATE_UP 10
+#define UPDATE_OP_STATUS_UP 3
+#define UPDATE_ERROR_MSG_UP 5
+#define UPDATE_BYTES_RIGHT 40
+#define UPDATE_CACHE1_COUNT_RIGHT 11
+#define UPDATE_CACHE2_COUNT_RIGHT 27
+#define UPDATE_CACHE1_STATUS_RIGHT 3
+#define UPDATE_CACHE2_STATUS_RIGHT 18
+#define UPDATE_CURRENT_URL_RIGHT 1
+#define UPDATE_CURRENT_LOCAL_RIGHT 1
+#define UPDATE_STATUS_CODE_RIGHT 83
+#define UPDATE_CONN_STATE_RIGHT 2
+#define UPDATE_OP_STATUS_RIGHT 2
+#define CACHE_STATUS_LEN 10
+#define OUTPUT_TABLE_COLUMNS 90
+
+pthread_t thread_screen_tid;
+pthread_attr_t thread_screen_attr;
+pthread_mutex_t screen_mutex;
+
+void
+update_bytes(size_t bytes)
+{
+	pthread_mutex_lock(&screen_mutex);
+
+	reset_left();
+	up(UPDATE_BYTES_UP);
+	right(UPDATE_BYTES_RIGHT);
+	fprintf(stderr, "%12lu", bytes);
+	reset_left();
+	down(UPDATE_BYTES_UP);
+
+	pthread_mutex_unlock(&screen_mutex);
+}
+
+void
+update_cache1_count(int count)
+{
+	pthread_mutex_lock(&screen_mutex);
+
+	reset_left();
+	up(UPDATE_CACHE1_COUNT_UP);
+	right(UPDATE_CACHE1_COUNT_RIGHT);
+	fprintf(stderr, "%4d", count);
+	reset_left();
+	down(UPDATE_CACHE1_COUNT_UP);
+
+	pthread_mutex_unlock(&screen_mutex);
+	return;
+}
+
+void
+update_cache2_count(int count)
+{
+	pthread_mutex_lock(&screen_mutex);
+
+	reset_left();
+	up(UPDATE_CACHE2_COUNT_UP);
+	right(UPDATE_CACHE2_COUNT_RIGHT);
+	fprintf(stderr, "%4d", count);
+	reset_left();
+	down(UPDATE_CACHE2_COUNT_UP);
+
+	pthread_mutex_unlock(&screen_mutex);
+	return;
+}
+
+void
+update_cache_status(int cache, int status_flag)
+{
+	pthread_mutex_lock(&screen_mutex);
+
+	reset_left();
+	up(UPDATE_CACHE_STATUS_UP);
+	right(cache == 1 ? UPDATE_CACHE1_STATUS_RIGHT : UPDATE_CACHE2_STATUS_RIGHT);
+	
+	switch(status_flag)
+	{
+		default:
+		case FL_CACHE_STATUS_FILLING:
+			fprintf(stderr, "%s (filling) %s", COL_DARKGREEN, COL_END);
+			break;
+		case FL_CACHE_STATUS_DRAINING:
+			fprintf(stderr, " %s(draining)%s", COL_LIGHTGREY, COL_END);
+			break;
+		case FL_CACHE_STATUS_FULL:
+			fprintf(stderr, "   %s(full)  %s ", COL_DARKRED, COL_END);
+			break;
+	}
+
+	reset_left();
+	down(UPDATE_CACHE_STATUS_UP);
+
+	pthread_mutex_unlock(&screen_mutex);
+	return;
+}
+
+void
+update_current_url(const char *url)
+{
+	size_t url_len = strlen(url);
+	int too_long = 0;
+	int max_len = OUTPUT_TABLE_COLUMNS - 10;
+
+	if (url_len >= (size_t)max_len)
+		too_long = 1;
+
+	pthread_mutex_lock(&screen_mutex);
+
+	reset_left();
+	up(UPDATE_CURRENT_URL_UP);
+	clear_line();
+	right(UPDATE_CURRENT_URL_RIGHT);
+
+	fprintf(stderr, " %s%.*s%s",
+		ACTION_ING_STR,
+		too_long ? max_len : (int)url_len,
+		url,
+		too_long ? "..." : "");
+
+	reset_left();
+	down(UPDATE_CURRENT_URL_UP);
+
+	pthread_mutex_unlock(&screen_mutex);
+	return;
+}
+
+void
+update_current_local(const char *url)
+{
+	size_t url_len = strlen(url);
+	int too_long = 0;
+	int max_len = OUTPUT_TABLE_COLUMNS - 18;
+
+	if (url_len >= (size_t)max_len)
+		too_long = 1;
+
+	pthread_mutex_lock(&screen_mutex);
+
+	reset_left();
+	up(UPDATE_CURRENT_LOCAL_UP);
+	clear_line();
+
+	if (!url_len)
+		goto out_release_lock;
+
+	right(UPDATE_CURRENT_LOCAL_RIGHT);
+
+	fprintf(stderr, " %sCreated %s%.*s%s%s",
+		ACTION_DONE_STR,
+		COL_DARKGREY,
+		too_long ? max_len : (int)url_len,
+		url,
+		too_long ? "..." : "",
+		COL_END);
+
+	out_release_lock:
+	reset_left();
+	down(UPDATE_CURRENT_LOCAL_UP);
+
+	pthread_mutex_unlock(&screen_mutex);
+	return;
+}
+
+void
+update_operation_status(const char *status_string, ...)
+{
+	size_t len;
+	int too_long = 0;
+	int max_len = OUTPUT_TABLE_COLUMNS - 6;
+	va_list args;
+	static char tmp[256];
+
+	va_start(args, status_string);
+	vsprintf(tmp, status_string, args);
+	va_end(args);
+
+	len = strlen(tmp);
+
+	if (len >= (size_t)max_len)
+		too_long = 1;
+
+	pthread_mutex_lock(&screen_mutex);
+
+	reset_left();
+	up(UPDATE_OP_STATUS_UP);
+	clear_line();
+
+	if (!len)
+		goto out_release_lock;
+
+	right(UPDATE_OP_STATUS_RIGHT);
+
+	fprintf(stderr, "%s(%.*s%s)%s",
+			COL_LIGHTRED,
+			too_long ? max_len : (int)len,
+			tmp,
+			too_long ? "..." : "",
+			COL_END);
+
+	out_release_lock:
+	reset_left();
+	down(UPDATE_OP_STATUS_UP);
+
+	pthread_mutex_unlock(&screen_mutex);
+	return;
+}
+
+void
+update_connection_state(struct http_t *http, int state)
+{
+	pthread_mutex_lock(&screen_mutex);
+
+	reset_left();
+	up(UPDATE_CONN_STATE_UP);
+	clear_line();
+	right(UPDATE_CONN_STATE_RIGHT);
+
+	switch(state)
+	{
+		default:
+		case FL_CONNECTION_CONNECTED:
+			fprintf(stderr, "%sConnected%s to %s%s%s (%s)", COL_DARKGREEN, COL_END, COL_RED, http->host, COL_END, http->conn.host_ipv4);
+			break;
+		case FL_CONNECTION_DISCONNECTED:
+			fprintf(stderr, "%sDisconnected%s", COL_LIGHTGREY, COL_END);
+			break;
+		case FL_CONNECTION_CONNECTING:
+			fprintf(stderr, "Connecting to server %s at %s", http->host, http->conn.host_ipv4);
+			break;
+	}
+
+	reset_left();
+	down(UPDATE_CONN_STATE_UP);
+
+	pthread_mutex_unlock(&screen_mutex);
+	return;
+}
+
+void
+update_status_code(int status_code)
+{
+	pthread_mutex_lock(&screen_mutex);
+
+	reset_left();
+	up(UPDATE_STATUS_CODE_UP);
+
+	right(UPDATE_STATUS_CODE_RIGHT);
+
+	switch(status_code)
+	{
+		case HTTP_OK:
+		case HTTP_ALREADY_EXISTS:
+			fprintf(stderr, "%s%3d%s", COL_DARKGREEN, status_code, COL_END);
+			break;
+		case HTTP_MOVED_PERMANENTLY:
+		case HTTP_FOUND:
+		case HTTP_SEE_OTHER:
+			fprintf(stderr, "%s%3d%s", COL_ORANGE, status_code, COL_END);
+			break;
+		default:
+			fprintf(stderr, "%s%3d%s", COL_RED, status_code, COL_END);
+	}
+
+	reset_left();
+	down(UPDATE_STATUS_CODE_UP);
+
+	pthread_mutex_unlock(&screen_mutex);
+	return;
+}
+
+void
+put_error_msg(const char *fmt, ...)
+{
+	va_list args;
+	static char tmp[256];
+	size_t len;
+	int go_right = 1;
+
+	va_start(args, fmt);
+	vsprintf(tmp, fmt, args);
+	va_end(args);
+
+	len = strlen(tmp);
+
+	if (len < OUTPUT_TABLE_COLUMNS)
+		go_right = (OUTPUT_TABLE_COLUMNS - len);
+
+	pthread_mutex_lock(&screen_mutex);
+
+	reset_left();
+	up(UPDATE_ERROR_MSG_UP);
+	clear_line();
+	right(go_right);
+
+	fprintf(stderr, "%s%.*s%s", COL_RED, !go_right ? OUTPUT_TABLE_COLUMNS : (int)len, tmp, COL_END);
+	reset_left();
+	down(UPDATE_ERROR_MSG_UP);
+
+	pthread_mutex_unlock(&screen_mutex);
+	return;
+}
+
+void
+clear_error_msg(void)
+{
+	pthread_mutex_lock(&screen_mutex);
+
+	reset_left();
+	up(UPDATE_ERROR_MSG_UP);
+	clear_line();
+	down(UPDATE_ERROR_MSG_UP);
+
+	pthread_mutex_unlock(&screen_mutex);
+	return;
+}
+
+void
+deconstruct_btree(http_link_t *root, wr_cache_t *cache)
+{
+	if (!root)
+	{
+#ifdef DEBUG
+		fprintf(stderr, "deconstruct_btree: root is NULL\n");
+#endif
+		return;
+	}
+
+	if (((char *)root - (char *)cache->cache) >= cache->cache_size)
+	{
+#ifdef DEBUG
+		fprintf(stderr, "node @ %p is beyond our cache... (cache %p to %p)\n",
+		root,
+		ctx->cache->cache,
+		(void *)((char *)cache->cache + cache->cache_size));
+#endif
+
+		assert(0);
+	}
+
+	if (root->left)
+	{
+#ifdef DEBUG
+		fprintf(stderr, "Going left from %p to %p\n", root, root->left);
+#endif
+		deconstruct_btree(root->left, ctx->cache);
+	}
+
+	if (root->right)
+	{
+#ifdef DEBUG
+		fprintf(stderr, "Going right from %p to %p\n", root, root->right);
+#endif
+		deconstruct_btree(root->right, cache);
+	}
+
+#ifdef DEBUG
+	fprintf(stderr, "Setting left/right/parent to NULL in node %p\n", root);
+#endif
+	root->left = NULL;
+	root->right = NULL;
+	root->parent = NULL;
+
+	return;
+}
+
 int
 check_local_dirs(struct http_t *http, buf_t *filename)
 {
@@ -629,7 +1002,7 @@ parse_links(struct http_t *http, struct cache_ctx *fctx, struct cache_ctx *dctx)
 			continue;
 		}
 
-		if (__insert_link(fctx->cache, &fctx->root, &full_url) < 0)
+		if (__insert_link(&fctx, &full_url) < 0)
 			goto fail_destroy_bufs;
 
 		savep = ++p;
@@ -686,4 +1059,259 @@ do_request(struct http_t *http)
 	update_status_code(status_code);
 
 	return status_code;
+}
+
+/**
+ * reap - archive the pages in the link cache,
+ *    choose one at random and return that choice. That will be
+ *    our next page from which to parse links.
+ * @cachep: the cache of parsed links
+ * @conn: our struct with connection context
+ */
+int
+reap(struct http_t *http)
+{
+	assert(http);
+
+	int nr_links = 0;
+	int nr_links_sibling;
+	int fill = 1;
+	int status_code = 0;
+	int i;
+	size_t len;
+	http_link_t *link;
+	buf_t *wbuf = &http_wbuf(http);
+	buf_t *rbuf = &http_rbuf(http);
+
+	trailing_slash_off(wrctx);
+/*
+ * As we archive the pages from URLs stored in one cache,
+ * we fill the sibling cache with URLs to follow in the next
+ * iteration of the while loop. We use the CACHE_SWITCH flag
+ * for using one while filling the other. Fill until we pass
+ * a threshold number of URLs we wish to have for archiving
+ * next. Stop filling when FILL == 0.
+ *
+ * Base case for the loop is our 'crawl depth' being equal
+ * to CRAWL_DEPTH (#iterations of while loop).
+ */
+
+	while (1)
+	{
+		fill = 1;
+
+		if (cache1.state == DRAINING)
+		{
+			link = (http_link_t *)cache1.cache;
+			nr_links = wr_cache_nr_used(cache1.cache);
+
+#ifdef DEBUG
+			fprintf(stderr, "Deconstructing binary tree in cache 2\n");
+#endif
+			deconstruct_btree(cache2.root, cache2.cache);
+
+			wr_cache_clear_all(cache2.cache);
+			if (cache2.cache->nr_assigned > 0)
+				cache2.cache->nr_assigned = 0;
+
+			assert(wr_cache_nr_used(cache2.cache) == 0);
+			cache2.root = NULL;
+
+			update_cache_status(1, FL_CACHE_STATUS_DRAINING);
+
+			if (fill)
+				update_cache_status(2, FL_CACHE_STATUS_FILLING);
+
+			update_operation_status("Draining URL cache 1");
+		}
+		else
+		{
+			link = (http_link_t *)cache2.cache;
+			nr_links = wr_cache_nr_used(cache2.cache);
+
+#ifdef DEBUG
+			fprintf(stderr, "Deconstructing binary tree in cache 1\n");
+#endif
+			deconstruct_btree(cache1.root, cache1.cache);
+
+			wr_cache_clear_all(cache1.cache);
+			if (cache1.cache->nr_assigned > 0)
+				cache1.cache->nr_assigned = 0;
+
+			assert(wr_cache_nr_used(cache1.cache) == 0);
+			cache1.root = NULL;
+
+			update_cache_status(2, FL_CACHE_STATUS_DRAINING);
+
+			if (fill)
+				update_cache_status(1, FL_CACHE_STATUS_FILLING);
+
+			update_operation_status("Draining URL cache 2");
+		}
+
+		if (!nr_links)
+			break;
+
+		url_cnt = nr_links;
+
+		for (i = 0; i < nr_links; ++i)
+		{
+			buf_clear(wbuf);
+			len = strlen(link->url);
+
+			if (!len)
+			{
+				++link;
+				continue;
+			}
+
+			assert(len < HTTP_URL_MAX);
+
+			strcpy(http->full_url, link->url);
+
+			if (!http_parse_page(http->full_url, http->page))
+				continue;
+
+			BLOCK_SIGNAL(SIGINT);
+			sleep(crawl_delay(wrctx));
+			UNBLOCK_SIGNAL(SIGINT);
+
+			http_check_host(conn);
+
+			resend:
+			if (link->nr_requests > 2) /* loop */
+			{
+				++link;
+				continue;
+			}
+
+			update_current_url(http->full_url);
+
+			status_code = do_request(conn);
+
+			if (status_code < 0)
+				goto fail;
+
+			++(link->nr_requests);
+
+			switch((unsigned int)status_code)
+			{
+				case HTTP_OK:
+				case HTTP_GONE:
+				case HTTP_NOT_FOUND: /* don't want to keep requesting the link and getting 404, so just archive it */
+					break;
+				case HTTP_BAD_REQUEST:
+					//__show_request_header(wbuf);
+
+					if (wr_cache_nr_used(cookies) > 0)
+						wr_cache_clear_all(cookies);
+
+					buf_clear(wbuf);
+					buf_clear(rbuf);
+
+					http_reconnect(http);
+
+					goto next;
+					break;
+				case HTTP_METHOD_NOT_ALLOWED:
+				case HTTP_FORBIDDEN:
+				case HTTP_INTERNAL_ERROR:
+				case HTTP_BAD_GATEWAY:
+				case HTTP_SERVICE_UNAV:
+				case HTTP_GATEWAY_TIMEOUT:
+					//__show_response_header(rbuf);
+
+					if (wr_cache_nr_used(cookies) > 0)
+						wr_cache_clear_all(cookies);
+
+					buf_clear(wbuf);
+					buf_clear(rbuf);
+
+					http_reconnect(http);
+
+					goto next;
+					break;
+				case HTTP_IS_XDOMAIN:
+				case HTTP_ALREADY_EXISTS:
+				case FL_HTTP_SKIP_LINK:
+					goto next;
+				case HTTP_OPERATION_TIMEOUT:
+
+					buf_clear(rbuf);
+
+					if (!http->host[0])
+						strcpy(http->host, http->primary_host);
+
+					http_reconnect(http);
+
+					goto next;
+					break;
+				default:
+					put_error_msg("Unknown HTTP status code returned (%d)", status_code);
+					goto fail;
+			}
+
+			if (fill)
+			{
+				if (__url_parseable(http->full_url))
+				{
+					if (cache1.state == DRAINING)
+					{
+/*
+ * parse_links(struct http_t *, struct cache_ctx *FCTX, struct cache_ctx *DCTX)
+ */
+						parse_links(http, &cache2, &cache1);
+						nr_links_sibling = wr_cache_nr_used(cache2.cache);
+						update_cache2_count(nr_links_sibling);
+					}
+					else
+					{
+						parse_links(http, &cache1, &cache2);
+						nr_links_sibling = wr_cache_nr_used(cache1.cache);
+						update_cache1_count(nr_links_sibling);
+					}
+
+					if (nr_links_sibling >= NR_LINKS_THRESHOLD)
+					{
+						fill = 0;
+/*
+ * if cache1 is draining, then it's cache2 that's full, and vice versa.
+ */
+						update_cache_status(cache1.state == DRAINING ? 2 : 1, FL_CACHE_STATUS_FULL);
+					}
+				}
+			}
+
+			archive_page(http);
+
+			next:
+			++link;
+			--url_cnt;
+
+			if (cache1.state == FILLING)
+				update_cache1_count(url_cnt);
+			else
+				update_cache2_count(url_cnt);
+
+			clear_error_msg();
+
+			trailing_slash_off(wrctx);
+		} /* for (i = 0; i < nr_links; ++i) */
+
+		++current_depth;
+
+		flip_cache_state(cache1);
+		flip_cache_state(cache2);
+
+		if (current_depth >= crawl_depth(wrctx))
+		{
+			update_operation_status("Reached maximum crawl depth");
+			break;
+		}
+	} /* while (1) */
+
+	return 0;
+
+	fail:
+	return -1;
 }
