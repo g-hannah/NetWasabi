@@ -18,7 +18,6 @@ static pthread_barrier_t start_barrier;
 static pthread_once_t once = PTHREAD_ONCE_INIT;
 static pthread_cond_t cache_switch_cond;
 static pthread_mutex_t eoc_mtx;
-static volatile sig_atomic_t do_switch = 0;
 static volatile sig_atomic_t nr_workers_eoc = 0;
 
 static wr_cache_t *filling;
