@@ -11,7 +11,6 @@
 #include "cache.h"
 #include "http.h"
 #include "malloc.h"
-#include "webreaper.h"
 
 #define HTTP_SMALL_READ_BLOCK 64
 #define HTTP_MAX_WAIT_TIME 6
