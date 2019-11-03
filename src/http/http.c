@@ -1,4 +1,5 @@
 #include <assert.h>
+#include <arpa/inet.h>
 #include <errno.h>
 #include <fcntl.h>
 #include <setjmp.h>
@@ -34,7 +35,7 @@ struct __http_t
 		buf_t write_buf;
 		char *host_ipv4;
 		SSL_CTX *ssl_ctx;
-	};
+	} conn;
 
 	wr_cache_t *headers;
 	wr_cache_t *cookies;
@@ -1075,7 +1076,7 @@ http_response_header_len(buf_t *buf)
 	return (p - buf->buf_head);
 }
 
-static char *
+char *
 http_parse_host(char *url, char *host)
 {
 	char *p;
@@ -1124,7 +1125,7 @@ http_parse_host(char *url, char *host)
 	return host;
 }
 
-static char *
+char *
 http_parse_page(char *url, char *page)
 {
 	char *p;
@@ -1148,6 +1149,7 @@ http_parse_page(char *url, char *page)
 		p += strlen("http://");
 	}
 
+#if 0
 	if (!keep_trailing_slash(wrctx))
 	{
 		if (*(endp - 1) == '/')
@@ -1156,6 +1158,7 @@ http_parse_page(char *url, char *page)
 			*endp = 0;
 		}
 	}
+#endif
 
 	while (*p == '/')
 		++p;
@@ -1438,7 +1441,7 @@ __http_init_obj(struct __http_t *__http)
 	buf_destroy(&__http->conn.read_buf);
 
 	fail_destroy_cache:
-	wr_cache_destroy(http->headers);
+	wr_cache_destroy(__http->headers);
 
 	fail:
 	return -1;
