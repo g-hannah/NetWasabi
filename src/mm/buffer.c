@@ -13,9 +13,7 @@
 #include <sys/stat.h>
 #include <unistd.h>
 #include "buffer.h"
-#include "connection.h"
 #include "malloc.h"
-#include "webreaper.h"
 
 #define BUF_ALIGN_SIZE(s) (((s) + 0xf) & ~(0xf))
 
