@@ -3,7 +3,7 @@
 
 #include "buffer.h"
 #include "cache.h"
-#include "connection.h"
+#include "graph.h"
 
 #define MAX_TOKEN 512
 
