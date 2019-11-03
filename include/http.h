@@ -27,6 +27,8 @@
 #define HTTP_ALREADY_EXISTS 702u
 #define HTTP_IS_XDOMAIN 703u
 
+#define HTTP_OPERATION_TIMEOUT 0x2
+
 #define HTTP_URL_MAX 768
 #define HTTP_COOKIE_MAX 2048 /* Surely this is more than enough */
 #define HTTP_HNAME_MAX 64 /* Header name */
@@ -107,6 +109,16 @@ typedef struct http_header_t
 #define http_rbuf(h) ((h)->conn.read_buf)
 #define http_wbuf(h) ((h)->conn.write_buf)
 
+struct conn
+{
+	int sock;
+	SSL *ssl;
+	buf_t read_buf;
+	buf_t write_buf;
+	char *host_ipv4;
+	SSL_CTX *ssl_ctx;
+};
+
 struct http_t
 {
 	char *host;
@@ -114,15 +126,7 @@ struct http_t
 	char *full_url;
 	char *primary_host;
 
-	struct conn
-	{
-		int sock;
-		SSL *ssl;
-		buf_t read_buf;
-		buf_t write_buf;
-		char *host_ipv4;
-		SSL_CTX *ssl_ctx;
-	};
+	struct conn conn;
 };
 
 size_t httplen;

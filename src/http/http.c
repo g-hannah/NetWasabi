@@ -12,6 +12,7 @@
 #include "cache.h"
 #include "http.h"
 #include "malloc.h"
+#include "webreaper.h"
 
 #define HTTP_SMALL_READ_BLOCK 64
 #define HTTP_MAX_WAIT_TIME 6
@@ -27,7 +28,8 @@ struct __http_t
 	char *full_url;
 	char *primary_host;
 
-	struct conn
+	struct conn conn;
+#if 0
 	{
 		int sock;
 		SSL *ssl;
@@ -36,6 +38,7 @@ struct __http_t
 		char *host_ipv4;
 		SSL_CTX *ssl_ctx;
 	} conn;
+#endif
 
 	wr_cache_t *headers;
 	wr_cache_t *cookies;
@@ -46,15 +49,10 @@ static struct sigaction oact;
 static struct sigaction nact;
 static sigjmp_buf TIMEOUT;
 
-static http_header_t *header = NULL;
-
 static void
 __ctor __http_init(void)
 {
 	return;
-
-	fail:
-	exit(EXIT_FAILURE);
 }
 
 static void
@@ -408,7 +406,7 @@ __http_read_until_eoh(struct http_t *http, char **p)
 	{
 		update_operation_status("Timed out waiting for response from server");
 		sigaction(SIGALRM, &oact, NULL);
-		return FL_OPERATION_TIMEOUT;
+		return HTTP_OPERATION_TIMEOUT;
 	}
 
 	alarm(HTTP_MAX_WAIT_TIME);
@@ -665,11 +663,13 @@ __http_do_chunked_recv(struct http_t *http)
 
 		save_size = chunk_size;
 
+#if 0
 /*
  * XXX: Protect the wrctx struct with a lock
  */
 		STATS_ADD_BYTES(wrctx, save_size);
 		update_bytes(total_bytes(wrctx));
+#endif
 
 		e += 2; /* Skip the \r\n do NOT use SKIP_CRNL(); chunk data could start with these bytes */
 
@@ -771,7 +771,6 @@ __http_set_new_location(struct http_t *http)
 	fail_release_lock:
 	wr_cache_unlock(__http->headers);
 
-	fail:
 	return -1;
 }
 
@@ -789,6 +788,7 @@ http_recv_response(struct http_t *http)
 	size_t overread;
 	ssize_t bytes;
 	int rv;
+	int http_status_code;
 	struct __http_t *__http = (struct __http_t *)http;
 	http_header_t *content_len = NULL;
 	http_header_t *transfer_enc = NULL;
@@ -809,14 +809,14 @@ http_recv_response(struct http_t *http)
 	__retry:
 	rv = __http_read_until_eoh(http, &p);
 
-	if (rv < 0 || FL_OPERATION_TIMEOUT == rv)
+	if (rv < 0 || HTTP_OPERATION_TIMEOUT == rv)
 		goto fail_dealloc;
 
 	__http_check_cookies(http);
 
 	http_status_code = http_status_code_int(buf);
 
-	switch(http_status_code)
+	switch((unsigned int)http_status_code)
 	{
 		case HTTP_FOUND:
 		case HTTP_MOVED_PERMANENTLY:
@@ -833,7 +833,7 @@ http_recv_response(struct http_t *http)
 				goto fail_dealloc;
 			}
 
-			goto __retry:
+			goto __retry;
 			break;
 		default:
 			break;
@@ -871,8 +871,10 @@ http_recv_response(struct http_t *http)
 
 		overread = (buf->buf_tail - p);
 
+#if 0
 		STATS_ADD_BYTES(wrctx, clen);
 		update_bytes(total_bytes(wrctx));
+#endif
 
 		if (overread < clen)
 		{
@@ -914,8 +916,10 @@ http_recv_response(struct http_t *http)
 		if (rv < 0)
 			goto fail_dealloc;
 
+#if 0
 		STATS_ADD_BYTES(wrctx, rv);
 		update_bytes(total_bytes(wrctx));
+#endif
 
 		p = strstr(buf->buf_head, "</body");
 
