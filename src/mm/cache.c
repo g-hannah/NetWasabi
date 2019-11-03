@@ -8,13 +8,13 @@
 
 #define BITS_PER_CHAR (sizeof(char) * 8)
 
-static inline void
+inline void
 wr_cache_lock(wr_cache_t *cachep)
 {
 	pthread_mutex_lock(&cachep->lock);
 }
 
-static inline void
+inline void
 wr_cache_unlock(wr_cache_t *cachep)
 {
 	pthread_mutex_lock(&cachep->lock);
@@ -279,7 +279,7 @@ wr_cache_create(char *name,
 		++bitmap_size;
 
 	wr_cache_t	*cachep = malloc(sizeof(wr_cache_t));
-	clear_struct(cachep);
+	memset(cachep, 0, sizeof(*cachep));
 
 	cachep->name = wr_calloc(WR_CACHE_MAX_NAME, 1);
 	strcpy(cachep->name, name);
@@ -383,7 +383,7 @@ wr_cache_destroy(wr_cache_t *cachep)
 
 	pthread_mutex_destroy(&cachep->lock);
 
-	clear_struct(cachep);
+	memset(cachep, 0, sizeof(*cachep));
 	free(cachep);
 	cachep = NULL;
 
