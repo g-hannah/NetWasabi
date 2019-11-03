@@ -88,7 +88,7 @@ http_connect(struct http_t *http)
 	{
 		__init_openssl();
 		http->conn.ssl_ctx = SSL_CTX_new(TLSv1_2_client_method());
-		http_tls(http) = SSL_new(conn->ssl_ctx);
+		http_tls(http) = SSL_new(http->conn.ssl_ctx);
 
 		SSL_set_fd(http_tls(http), http_socket(http)); /* Set the socket for reading/writing */
 		SSL_set_connect_state(http_tls(http)); /* Set as client */
@@ -149,7 +149,7 @@ http_reconnect(struct http_t *http)
 
 	clear_struct(&sock4);
 
-	if (getaddrinfo(conn->host, NULL, NULL, &ainf) < 0)
+	if (getaddrinfo(http->host, NULL, NULL, &ainf) < 0)
 	{
 		put_error_msg("open_connection: getaddrinfo error (%s)", gai_strerror(errno));
 		goto fail;
@@ -191,7 +191,7 @@ http_reconnect(struct http_t *http)
 	if (option_set(OPT_USE_TLS))
 	{
 		http->conn.ssl_ctx = SSL_CTX_new(TLSv1_2_client_method());
-		http_tls(http) = SSL_new(conn->ssl_ctx);
+		http_tls(http) = SSL_new(http->conn.ssl_ctx);
 
 		SSL_set_fd(http_tls(http), http_socket(http)); /* Set the socket for reading/writing */
 		SSL_set_connect_state(http_tls(http)); /* Set as client */
