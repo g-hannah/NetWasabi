@@ -2,8 +2,8 @@
 #define WR_CACHE_H 1
 
 #include <pthread.h>
+#include <stdint.h>
 #include <sys/types.h>
-#include "webreaper.h"
 
 #define WR_CACHE_SIZE 4096
 #define WR_CACHE_MAX_NAME 64
@@ -45,7 +45,7 @@ void *wr_cache_next_used(wr_cache_t *) __nonnull((1)) __wur;
 int wr_cache_nr_used(wr_cache_t *) __nonnull((1)) __wur;
 int wr_cache_capacity(wr_cache_t *) __nonnull((1)) __wur;
 void wr_cache_clear_all(wr_cache_t *) __nonnull((1));
-void wr_cache_lock(pthread_spinlock_t *) __nonnull((1));
-void wr_cache_unlock(pthread_spinlock_t *) __nonnull((1));
+void wr_cache_lock(wr_cache_t *) __nonnull((1));
+void wr_cache_unlock(wr_cache_t *) __nonnull((1));
 
 #endif /* WR_CACHE_H */
