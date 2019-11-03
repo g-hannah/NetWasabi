@@ -23,6 +23,9 @@ typedef struct buf_t
 
 #define BUF_NULL_TERMINATE(b) (*((b)->buf_tail) = 0)
 
+int SET_SOCK_FLAG_ONCE;
+int SET_SSL_SOCK_FLAG_ONCE;
+
 int buf_init(buf_t *, size_t) __nonnull((1));
 void buf_destroy(buf_t *) __nonnull((1));
 void buf_collapse(buf_t *, off_t, size_t) __nonnull((1));
