@@ -18,7 +18,6 @@ PRIMARY_DEPENDENCIES = \
 PRIMARY_SOURCE = \
 	main.c \
 	graph.c \
-	parse_links.c \
 	robots.c \
 	screen_utils.c \
 	utils_url.c \
