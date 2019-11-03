@@ -30,7 +30,7 @@ do_request(struct http_t *http)
 	if (local_archive_already_exists(http->full_url))
 		return HTTP_ALREADY_EXISTS;
 
-	if (connection_closed(http))
+	if (http_connection_closed(http))
 	{
 		//fprintf(stdout, "%s%sRemote peer closed connection%s\n", COL_RED, ACTION_DONE_STR, COL_END);
 		//__show_response_header(&http_rbuf(http));
