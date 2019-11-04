@@ -13,4 +13,6 @@ struct worker_ctx
 	struct http_t *http; /* private */
 };
 
+int do_fast_mode(const char *) __nonnull((1)) __wur;
+
 #endif /* !defined FAST_MODE_H */
