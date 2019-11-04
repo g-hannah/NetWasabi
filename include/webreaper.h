@@ -163,13 +163,13 @@ struct webreaper_ctx
 	unsigned int nr_errors;
 };
 
-#define flip_cache_state(c) ((c).state == (enum state) DRAINING ? (c).state = (enum state) FILLING : (c).state = (enum state) DRAINING)
-
 enum state
 {
 	DRAINING = 0,
 	FILLING = 1
 };
+
+#define flip_cache_state(c) ((c).state == DRAINING ? (c).state = FILLING : (c).state = DRAINING)
 
 struct cache_ctx
 {
