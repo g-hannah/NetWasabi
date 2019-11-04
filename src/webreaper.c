@@ -361,7 +361,7 @@ deconstruct_btree(http_link_t *root, wr_cache_t *cache)
 #ifdef DEBUG
 		fprintf(stderr, "node @ %p is beyond our cache... (cache %p to %p)\n",
 		root,
-		ctx->cache->cache,
+		cache,
 		(void *)((char *)cache->cache + cache->cache_size));
 #endif
 
@@ -1057,7 +1057,8 @@ do_request(struct http_t *http)
 	/*
 	 * Save bandwidth: send HEAD first.
 	 */
-	status_code = http_send_request(http, HTTP_HEAD);
+	http_send_request(http, HTTP_HEAD);
+	status_code = http_recv_response(http);
 
 	update_status_code(status_code);
 
@@ -1076,7 +1077,8 @@ do_request(struct http_t *http)
 	}
 
 	status_code &= ~status_code;
-	status_code = http_send_request(http, HTTP_GET);
+	http_send_request(http, HTTP_GET);
+	http_recv_response(http);
 
 	update_status_code(status_code);
 
