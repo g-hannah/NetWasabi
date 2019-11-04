@@ -171,18 +171,34 @@ struct cache_ctx
 #define STATS_ADD_BYTES(w, b) (wrstats_lock(w); ((w).nr_bytes_received += (b); wrstats_unlock(w))
 
 #define NR_URL_TYPES 11
+
+/*
+ * Global vars
+ */
+
+int nr_reaped;
+int current_depth;
+int url_cnt;
+
+struct cache_ctx cache1;
+struct cache_ctx cache2;
+
+/* Defined in main */
+
 struct url_types url_types[NR_URL_TYPES];
 int path_max;
 char **user_blacklist;
 int USER_BLACKLIST_NR_TOKENS;
+
 struct webreaper_ctx wrctx;
+uint32_t runtime_options;
 
 struct winsize winsize;
 struct graph_ctx *allowed;
 struct graph_ctx *forbidden;
 
-struct cache_ctx cache1;
-struct cache_ctx cache2;
+size_t httplen;
+size_t httpslen;
 
 #define FL_HTTP_SKIP_LINK 0x1
 

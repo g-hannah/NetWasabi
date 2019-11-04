@@ -52,6 +52,10 @@ do {\
 struct cache_ctx cache1;
 struct cache_ctx cache2;
 
+int nr_reaped = 0;
+int current_depth = 0;
+int url_cnt = 0;
+
 void
 update_bytes(size_t bytes)
 {

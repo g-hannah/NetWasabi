@@ -23,7 +23,7 @@
 static int get_opts(int, char *[]) __nonnull((2)) __wur;
 
 /*
- * Global variables.
+ * Global vars.
  */
 struct webreaper_ctx wrctx = {0};
 uint32_t runtime_options = 0;
@@ -34,18 +34,13 @@ size_t httpslen;
 char **user_blacklist;
 int USER_BLACKLIST_NR_TOKENS;
 
-static int nr_reaped = 0;
-static int current_depth = 0;
-
-struct winsize winsize;
-int url_cnt = 0;
-
 pthread_t thread_screen_tid;
 pthread_attr_t thread_screen_attr;
 pthread_mutex_t screen_mutex;
 
 static volatile sig_atomic_t screen_updater_stop = 0;
 
+struct winsize winsize;
 struct graph_ctx *allowed;
 struct graph_ctx *forbidden;
 
