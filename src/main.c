@@ -371,13 +371,12 @@ main(int argc, char *argv[])
 	clear_struct(&winsize);
 	ioctl(STDOUT_FILENO, TIOCGWINSZ, &winsize);
 
-	pthread_attr_setdetachstate(&thread_screen_attr, PTHREAD_CREATE_DETACHED);
-
 /*
  * Print the operation display box.
  */
 	__print_information_layout();
 
+	pthread_attr_setdetachstate(&thread_screen_attr, PTHREAD_CREATE_DETACHED);
 	pthread_create(&thread_screen_tid, &thread_screen_attr, screen_updater_thread, NULL);
 
 	if (option_set(FAST_MODE))
@@ -431,7 +430,13 @@ main(int argc, char *argv[])
 		goto fail;
 	}
 
+	url_len = strlen(argv[1]);
+	assert(url_len < HTTP_URL_MAX);
+	strcpy(http->full_url, argv[1]);
+
 	http_parse_host(argv[1], http->host);
+	http_parse_page(argv[1], http->page);
+
 	strcpy(http->primary_host, http->host);
 
 	if (http_connect(http) < 0)
@@ -475,13 +480,6 @@ main(int argc, char *argv[])
 	//if (__get_robots(&conn) < 0)
 		//put_error_msg("No robots.txt file");
 
-	http_parse_page(argv[1], http->page);
-	url_len = strlen(argv[1]);
-
-	assert(url_len < HTTP_URL_MAX);
-
-	strcpy(http->full_url, argv[1]);
-
 	buf_clear(rbuf);
 	buf_clear(wbuf);
 
@@ -500,6 +498,7 @@ main(int argc, char *argv[])
  * stop requesting it in the future.
  */
 	status_code = do_request(http);
+	update_status_code(status_code);
 
 	switch(status_code)
 	{
@@ -507,7 +506,8 @@ main(int argc, char *argv[])
 			break;
 		case HTTP_ALREADY_EXISTS:
 			do_not_archive = 1;
-			status_code = http_send_request(http, HTTP_GET); /* in this case we still need to get it to extract URLs */
+			http_send_request(http, HTTP_GET); /* in this case we still need to get it to extract URLs */
+			status_code = http_recv_response(http);
 			update_status_code(status_code);
 			break;
 		case HTTP_BAD_REQUEST:
@@ -551,6 +551,7 @@ main(int argc, char *argv[])
 	out_disconnect:
 	screen_updater_stop = 1;
 	http_disconnect(http);
+	http_delete(http);
 
 	if (wr_cache_nr_used(cache1.cache) > 0)
 		wr_cache_clear_all(cache1.cache);
@@ -575,6 +576,7 @@ main(int argc, char *argv[])
 	fail_disconnect:
 	screen_updater_stop = 1;
 	http_disconnect(http);
+	http_delete(http);
 
 	if (wr_cache_nr_used(cache1.cache) > 0)
 		wr_cache_clear_all(cache1.cache);
