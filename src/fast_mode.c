@@ -28,6 +28,7 @@ struct cache_ctx cache2;
 static void
 __ctor __fast_mode_init(void)
 {
+#if 0
 	if (!(cache1.cache = wr_cache_create(
 			"fast_mode_url_cache1",
 			sizeof(http_link_t),
@@ -64,16 +65,15 @@ __ctor __fast_mode_init(void)
 
 	cache1.root = NULL;
 	cache2.root = NULL;
+#endif
 
 	return;
-
-	fail:
-	exit(EXIT_FAILURE);
 }
 
 static void
 __dtor __fast_mode_fini(void)
 {
+#if 0
 	wr_cache_clear_all(cache1.cache);
 	wr_cache_clear_all(cache2.cache);
 	pthread_barrier_destroy(&start_barrier);
@@ -81,6 +81,7 @@ __dtor __fast_mode_fini(void)
 
 	wr_cache_destroy(cache1.cache);
 	wr_cache_destroy(cache2.cache);
+#endif
 
 	return;
 }
@@ -249,6 +250,28 @@ do_fast_mode(char *remote_host)
 	int __done = 0;
 	struct http_t *http = NULL;
 
+	if (!(cache1.cache = wr_cache_create(
+			"fast_mode_url_cache1",
+			sizeof(http_link_t),
+			0,
+			http_link_cache_ctor,
+			http_link_cache_dtor)))
+	{
+		fprintf(stderr, "__fast_mode_init: failed to create cache1\n");
+		goto fail;
+	}
+
+	if (!(cache2.cache = wr_cache_create(
+			"fast_mode_url_cache2",
+			sizeof(http_link_t),
+			0,
+			http_link_cache_ctor,
+			http_link_cache_dtor)))
+	{
+		fprintf(stderr, "__fast_mode_init: failed to create cache2\n");
+		goto fail;
+	}
+
 	if (!(http = http_new()))
 	{
 		fprintf(stderr, "do_fast_mode: failed to get HTTP object\n");
@@ -259,6 +282,9 @@ do_fast_mode(char *remote_host)
 		goto fail;
 	if (!http_parse_page(remote_host, http->page))
 		goto fail;
+
+	strcpy(http->full_url, remote_host);
+	strcpy(http->primary_host, http->host);
 
 	if (http_connect(http) < 0)
 	{
