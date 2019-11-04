@@ -1305,8 +1305,18 @@ reap(struct http_t *http)
 
 		++current_depth;
 
-		flip_cache_state(cache1);
-		flip_cache_state(cache2);
+		if (cache1.state == FILLING)
+			cache1.state = DRAINING;
+		else
+			cache1.state = FILLING;
+
+		if (cache2.state == FILLING)
+			cache2.state = DRAINING;
+		else
+			cache2.state = FILLING;
+
+		//flip_cache_state(cache1);
+		//flip_cache_state(cache2);
 
 		if (current_depth >= crawl_depth(wrctx))
 		{
