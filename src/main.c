@@ -13,6 +13,7 @@
 #include <unistd.h>
 #include "buffer.h"
 #include "cache.h"
+#include "fast_mode.h"
 #include "http.h"
 #include "malloc.h"
 #include "robots.h"
@@ -228,20 +229,6 @@ __print_information_layout(void)
 	return;
 }
 
-char *no_url_files[] =
-{
-	".jpg",
-	".jpeg",
-	".png",
-	".gif",
-	".js",
-	".css",
-	".pdf",
-	".svg",
-	".ico",
-	NULL
-};
-
 static void
 catch_signal(int signo)
 {
@@ -395,7 +382,6 @@ main(int argc, char *argv[])
 
 	if (option_set(FAST_MODE))
 	{
-		http_delete(http);
 		do_fast_mode(argv[1]);
 		goto out;
 	}
@@ -461,15 +447,15 @@ main(int argc, char *argv[])
 			"http_link_cache",
 			sizeof(http_link_t),
 			0,
-			wr_cache_http_link_ctor,
-			wr_cache_http_link_dtor);
+			http_link_cache_ctor,
+			http_link_cache_dtor);
 
 	cache2.cache = wr_cache_create(
 			"http_link_cache2",
 			sizeof(http_link_t),
 			0,
-			wr_cache_http_link_ctor,
-			wr_cache_http_link_dtor);
+			http_link_cache_ctor,
+			http_link_cache_dtor);
 
 	/*
 	 * Catch SIGINT and SIGQUIT so we can release cache memory, etc.
@@ -513,7 +499,6 @@ main(int argc, char *argv[])
  * for the name of the redirected URL in order that we
  * stop requesting it in the future.
  */
-	resend:
 	status_code = do_request(http);
 
 	switch(status_code)
@@ -534,8 +519,9 @@ main(int argc, char *argv[])
 		case HTTP_GATEWAY_TIMEOUT:
 		case HTTP_BAD_GATEWAY:
 		case HTTP_INTERNAL_ERROR:
-			__show_response_header(rbuf);
+			//__show_response_header(rbuf);
 		default:
+			update_status_code(status_code);
 			goto out_disconnect;
 	}
 
@@ -667,7 +653,7 @@ get_opts(int argc, char *argv[])
 		if (!strcmp("--fast-mode", argv[i])
 		|| !strcmp("-fm", argv[i]))
 		{
-			o.flags |= FAST_MODE;
+			set_option(FAST_MODE);
 		}
 		else
 		if (!strcmp("--blacklist", argv[i])
@@ -735,9 +721,9 @@ get_opts(int argc, char *argv[])
 		}
 	}
 
-	if (crawl_delay(wrctx) > 0 && (o.flags & FAST_MODE))
+	if (crawl_delay(wrctx) > 0 && option_set(FAST_MODE))
 	{
-			craw_delay(wrctx) = 0;
+			crawl_delay(wrctx) = 0;
 	}
 
 	if (!crawl_depth(wrctx))
