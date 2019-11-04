@@ -1,6 +1,7 @@
 #include <assert.h>
 #include <errno.h>
 #include <pthread.h>
+#include <signal.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -21,8 +22,8 @@ static volatile sig_atomic_t nr_workers_eoc = 0;
 static wr_cache_t *filling;
 static wr_cache_t *draining;
 
-static struct cache_ctx cache1;
-static struct cache_ctx cache2;
+struct cache_ctx cache1;
+struct cache_ctx cache2;
 
 static void
 __ctor __fast_mode_init(void)
@@ -108,16 +109,13 @@ worker_signal_eoc(void)
 	return;
 }
 
-#define __filling(c1, c2) ((c1).state == FILLING ? (c1) : (c2))
-#define __draining(c1, c2) ((c1).state == DRAINING ? (c1) : (c2))
-
 static void *
 worker_reap(void *args)
 {
 	char *main_url = (char *)args;
 	http_link_t *link = NULL;
 	struct http_t *http = NULL;
-	size_t len;
+	int status_code;
 
 	if (!(http = http_new()))
 	{
@@ -169,10 +167,10 @@ worker_reap(void *args)
 			case HTTP_NOT_FOUND:
 				break;
 			case HTTP_BAD_REQUEST:
-				buf_clear(wbuf);
-				buf_clear(rbuf);
+				buf_clear(&http_wbuf(http));
+				buf_clear(&http_rbuf(http));
 
-				reconnect(conn);
+				http_reconnect(http);
 
 				goto next;
 				break;
@@ -182,41 +180,36 @@ worker_reap(void *args)
 			case HTTP_BAD_GATEWAY:
 			case HTTP_SERVICE_UNAV:
 			case HTTP_GATEWAY_TIMEOUT:
-				buf_clear(wbuf);
-				buf_clear(rbuf);
+				buf_clear(&http_wbuf(http));
+				buf_clear(&http_rbuf(http));
 
-				reconnect(conn);
+				http_reconnect(http);
 
 				goto next;
 				break;
 			case HTTP_IS_XDOMAIN:
 			case HTTP_ALREADY_EXISTS:
-			/*
-			 * Ignore 302 Found because it is used a lot for obtaining a random
-			 * link, for example a random wiki article (Special:Random).
-			 */
-			case HTTP_FOUND:
 			case FL_HTTP_SKIP_LINK:
 				goto next;
 			case HTTP_OPERATION_TIMEOUT:
 
-				buf_clear(rbuf);
+				buf_clear(&http_rbuf(http));
 
 				if (!http->host[0])
 					strcpy(http->host, http->primary_host);
 
-				http_reconnect(ctx->http);
+				http_reconnect(http);
 
 				goto next;
 				break;
 			default:
 				put_error_msg("Unknown HTTP status code returned (%d)", status_code);
-				goto fail;
+				goto thread_fail;
 		}
 
 		next:
 
-		if (parse_links(http, &__filling(cache1, cache2), &__draining(cache1, cache2)) < 0)
+		if (parse_links(http, cache1.state == FILLING ? &cache1 : &cache2, cache1.state == DRAINING ? &cache1 : &cache2) < 0)
 			put_error_msg("0x%lx: failed to parse URLs from page", pthread_self());
 	}
 
@@ -231,7 +224,13 @@ worker_reap(void *args)
 	pthread_exit((void *)0);
 
 	thread_fail:
-	conn_destroy(&conn);
+
+	if (http)
+	{
+		http_disconnect(http);
+		http_delete(http);
+	}
+
 	pthread_exit((void *)-1);
 }
 
@@ -242,7 +241,7 @@ worker_reap(void *args)
  * @remote_host: the target website to crawl
  */
 int
-do_fast_mode(const char *remote_host)
+do_fast_mode(char *remote_host)
 {
 	int i;
 	int err;
@@ -268,6 +267,12 @@ do_fast_mode(const char *remote_host)
 	}
 
 	status_code = do_request(http);
+
+	if (HTTP_OK != status_code)
+	{
+		fprintf(stderr, "do_fast_mode: failed to obtain starting page (http code: %s)\n", http_status_code_string(status_code));
+		goto fail;
+	}
 
 	if (parse_links(http, &cache1, &cache2) < 0)
 	{
