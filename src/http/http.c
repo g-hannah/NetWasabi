@@ -209,6 +209,40 @@ http_link_cache_dtor(void *http_link)
 	return;
 }
 
+#ifdef DEBUG
+static void
+__http_print_request_hdr(struct http_t *http)
+{
+	char *eoh = HTTP_EOH(&http_wbuf(http));
+
+	if (!eoh)
+	{
+		fprintf(stderr, "__http_print_request_hdr: failed to find end of header\n");
+		return;
+	}
+
+	fprintf(stderr, "%s%.*s%s", COL_RED, (int)(eoh - http_wbuf(http).buf_head), http_wbuf(http).buf_head, COL_END);
+
+	return;
+}
+
+static void
+__http_print_response_hdr(struct http_t *http)
+{
+	char *eoh = HTTP_EOH(&http_rbuf(http));
+
+	if (!eoh)
+	{
+		fprintf(stderr, "__http_print_response_hdr: failed to find end of header\n");
+		return;
+	}
+
+	fprintf(stderr, "%s%.*s%s", COL_RED, (int)(eoh - http_rbuf(http).buf_head), http_rbuf(http).buf_head, COL_END);
+
+	return;
+}
+#endif
+
 /**
  * __http_check_cookies - check for Set-Cookie header fields in response header
  *			and clear all old cookies if there are new ones specified.
@@ -355,6 +389,10 @@ http_send_request(struct http_t *http, const char *http_verb)
 	buf_t *buf = &http_wbuf(http);
 
 	http_build_request_header(http, http_verb);
+
+#ifdef DEBUG
+	__http_print_request_hdr(http);
+#endif
 
 	if (option_set(OPT_USE_TLS))
 	{
@@ -730,21 +768,19 @@ __http_set_new_location(struct http_t *http)
 
 	http_header_t *location = NULL;
 
-	wr_cache_lock(__http->headers);
-
 	if (!(location = (http_header_t *)wr_cache_alloc(__http->headers, &location)))
 	{
 		fprintf(stderr, "__http_set_new_location: failed to obtain HTTP header cache object\n");
-		goto fail_release_lock;
+		goto fail_dealloc;
 	}
-
-	wr_cache_unlock(__http->headers);
 
 	if (!http_fetch_header(&http_rbuf(http), "Location", location, (off_t)0))
 	{
 		fprintf(stderr, "__http_set_new_location: failed to find HTTP header field \"Location\"\n");
 		goto fail_dealloc;
 	}
+
+	update_operation_status("Got location header");
 
 	if (!http_parse_host(location->value, http->host))
 	{
@@ -758,18 +794,12 @@ __http_set_new_location(struct http_t *http)
 		goto fail_dealloc;
 	}
 
-	wr_cache_lock(__http->headers);
 	wr_cache_dealloc(__http->headers, location, &location);
-	wr_cache_unlock(__http->headers);
 
 	return 0;
 
 	fail_dealloc:
-	wr_cache_lock(__http->headers);
 	wr_cache_dealloc(__http->headers, location, &location);
-
-	fail_release_lock:
-	wr_cache_unlock(__http->headers);
 
 	return -1;
 }
@@ -812,6 +842,10 @@ http_recv_response(struct http_t *http)
 	if (rv < 0 || HTTP_OPERATION_TIMEOUT == rv)
 		goto fail_dealloc;
 
+#ifdef DEBUG
+	__http_print_response_hdr(http);
+#endif
+
 	__http_check_cookies(http);
 
 	http_status_code = http_status_code_int(buf);
@@ -821,12 +855,14 @@ http_recv_response(struct http_t *http)
 		case HTTP_FOUND:
 		case HTTP_MOVED_PERMANENTLY:
 		case HTTP_SEE_OTHER:
+			update_operation_status("Getting location header");
 			if (__http_set_new_location(http) < 0)
 				goto fail_dealloc;
 
 			buf_clear(&http_rbuf(http));
 			buf_clear(&http_wbuf(http));
 
+			update_operation_status("Sending GET request");
 			if (http_send_request(http, HTTP_GET) < 0)
 			{
 				fprintf(stderr, "http_recv_response: failed to resend HTTP request after \"%s\" response\n", http_status_code_string(http_status_code));
