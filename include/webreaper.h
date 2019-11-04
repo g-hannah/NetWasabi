@@ -240,6 +240,7 @@ void update_operation_status(const char *, ...) __nonnull((1));
 void update_connection_state(struct http_t *, int) __nonnull((1));
 void update_current_url(const char *) __nonnull((1));
 void update_current_local(const char *) __nonnull((1));
+void update_status_code(int);
 void update_bytes(size_t);
 void update_cache1_count(int);
 void update_cache2_count(int);
@@ -251,6 +252,7 @@ void replace_with_local_urls(struct http_t *, buf_t *) __nonnull((1,2));
 int archive_page(struct http_t *) __nonnull((1)) __wur;
 int parse_links(struct http_t *, struct cache_ctx *, struct cache_ctx *) __nonnull((1,2,3)) __wur;
 void deconstruct_btree(http_link_t *, wr_cache_t *) __nonnull((1,2));
+int do_request(struct http_t *) __nonnull((1)) __wur;
 
 int reap(struct http_t *) __nonnull((1)) __wur;
 
