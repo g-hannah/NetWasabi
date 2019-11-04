@@ -95,11 +95,13 @@ http_connect(struct http_t *http)
 	}
 
 	update_connection_state(http, FL_CONNECTION_CONNECTED);
+	update_operation_status("Connected to remote host");
 	freeaddrinfo(ainf);
 	return 0;
 
 	fail_release_ainf:
 	update_connection_state(http, FL_CONNECTION_DISCONNECTED);
+	put_error_msg("HTTP: failed to connect to remote host");
 	freeaddrinfo(ainf);
 
 	fail:
