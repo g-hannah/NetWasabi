@@ -5,6 +5,7 @@
 #include <signal.h>
 #include <stdio.h>
 #include <stdlib.h>
+#include <sys/stat.h> /* for mkdir() */
 #include <unistd.h>
 #include "buffer.h"
 #include "cache.h"
@@ -32,6 +33,20 @@ struct cache_ctx cache2;
 int nr_reaped = 0;
 int current_depth = 0;
 int url_cnt = 0;
+
+char *no_url_files[] =
+{
+	".jpg",
+	".jpeg",
+	".png",
+	".gif",
+	".js",
+	".css",
+	".pdf",
+	".svg",
+	".ico",
+	NULL
+};
 
 void
 update_bytes(size_t bytes)
@@ -683,12 +698,6 @@ archive_page(struct http_t *http)
 	return -1;
 }
 
-static int nr_already = 0;
-static int nr_twins = 0;
-static int nr_dups = 0;
-static int nr_urls_call = 0;
-static int nr_urls_total = 0;
-
 static const char *const __disallowed_tokens[] =
 {
 	"javascript:",
@@ -698,6 +707,11 @@ static const char *const __disallowed_tokens[] =
 	"cgi-",
 	(char *)NULL
 };
+
+static int nr_already = 0;
+static int nr_twins = 0;
+static int nr_dups = 0;
+static int nr_urls_call = 0;
 
 /**
  * __url_acceptable - determine if parsed URL is acceptable by searching for certain tokens
@@ -716,7 +730,7 @@ __url_acceptable(struct http_t *http, struct cache_ctx *fctx, struct cache_ctx *
 	assert(dctx);
 	assert(url);
 
-	static char tmp_page[HTTP_URL_MAX];
+	//static char tmp_page[HTTP_URL_MAX];
 	int i;
 
 	if (url->data_len >= 256)
@@ -746,7 +760,7 @@ __url_acceptable(struct http_t *http, struct cache_ctx *fctx, struct cache_ctx *
 		return 0;
 	}
 
-	if (memchr(url->buf_head, '#', buf->buf_tail - url->buf_head))
+	if (memchr(url->buf_head, '#', url->buf_tail - url->buf_head))
 		return 0;
 
 	for (i = 0; __disallowed_tokens[i] != NULL; ++i)
@@ -865,13 +879,13 @@ __insert_link(struct cache_ctx *fctx, buf_t *url)
 		{
 			if (!nptr->left)
 			{
-				nptr_offset = (off_t)((char *)nptr - (char *)cachep->cache);
-				new_addr = (http_link_t *)wr_cache_alloc(cachep, &nptr->left);
-				*((unsigned long *)nptr_stack) = (unsigned long)((char *)cachep->cache + nptr_offset);
+				nptr_offset = (off_t)((char *)nptr - (char *)fctx->cache->cache);
+				new_addr = (http_link_t *)wr_cache_alloc(fctx->cache, &nptr->left);
+				*((unsigned long *)nptr_stack) = (unsigned long)((char *)fctx->cache->cache + nptr_offset);
 
 				nptr->left = new_addr;
 
-				assert(((char *)nptr - (char *)cachep->cache) < cachep->cache_size);
+				assert(((char *)nptr - (char *)fctx->cache->cache) < fctx->cache->cache_size);
 				assert(nptr->left);
 				strncpy(nptr->left->url, url->buf_head, url->data_len);
 				nptr->left->url[url->data_len] = 0;
@@ -889,10 +903,10 @@ __insert_link(struct cache_ctx *fctx, buf_t *url)
 		{
 			if (!nptr->right)
 			{
-				nptr_offset = (off_t)((char *)nptr - (char *)cachep->cache);
-				new_addr = wr_cache_alloc(cachep, &nptr->right);
-				*((unsigned long *)nptr_stack) = (unsigned long)((char *)cachep->cache + nptr_offset);
-				assert(((char *)nptr - (char *)cachep->cache) < cachep->cache_size);
+				nptr_offset = (off_t)((char *)nptr - (char *)fctx->cache->cache);
+				new_addr = wr_cache_alloc(fctx->cache, &nptr->right);
+				*((unsigned long *)nptr_stack) = (unsigned long)((char *)fctx->cache->cache + nptr_offset);
+				assert(((char *)nptr - (char *)fctx->cache->cache) < fctx->cache->cache_size);
 
 				nptr->right = new_addr;
 
@@ -901,7 +915,7 @@ __insert_link(struct cache_ctx *fctx, buf_t *url)
 				nptr->right->url[url->data_len] = 0;
 				nptr->right->parent = nptr;
 
-				//fprintf(stderr, "copied %s to node @ %p (%d)\n", url->buf_head, nptr->right, wr_cache_nr_used(cachep));
+				//fprintf(stderr, "copied %s to node @ %p (%d)\n", url->buf_head, nptr->right, wr_cache_nr_used(fctx->cache));
 				break;
 			}
 			else
@@ -1005,13 +1019,13 @@ parse_links(struct http_t *http, struct cache_ctx *fctx, struct cache_ctx *dctx)
 		buf_append_ex(&url, savep, url_len);
 		make_full_url(http, &url, &full_url);
 
-		if (!__url_acceptable(http, &fctx, &dctx, &full_url))
+		if (!__url_acceptable(http, fctx, dctx, &full_url))
 		{
 			savep = ++p;
 			continue;
 		}
 
-		if (__insert_link(&fctx, &full_url) < 0)
+		if (__insert_link(fctx, &full_url) < 0)
 			goto fail_destroy_bufs;
 
 		savep = ++p;
@@ -1029,6 +1043,7 @@ parse_links(struct http_t *http, struct cache_ctx *fctx, struct cache_ctx *dctx)
 	buf_destroy(&full_url);
 	buf_destroy(&path);
 
+	fail:
 	return -1;
 }
 
@@ -1038,12 +1053,10 @@ do_request(struct http_t *http)
 	assert(http);
 
 	int status_code = 0;
-	int rv;
 
 	/*
 	 * Save bandwidth: send HEAD first.
 	 */
-	resend_head:
 	status_code = http_send_request(http, HTTP_HEAD);
 
 	update_status_code(status_code);
@@ -1074,7 +1087,7 @@ do_request(struct http_t *http)
  * reap - archive the pages in the link cache,
  *    choose one at random and return that choice. That will be
  *    our next page from which to parse links.
- * @cachep: the cache of parsed links
+ * @fctx->cache: the cache of parsed links
  * @conn: our struct with connection context
  */
 int
