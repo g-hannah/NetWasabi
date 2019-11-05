@@ -306,6 +306,9 @@ do_fast_mode(char *remote_host)
 		goto fail;
 	}
 
+	cache1.state = DRAINING;
+	cache2.state = FILLING;
+
 	for (i = 0; i < FAST_MODE_NR_WORKERS; ++i)
 	{
 		if ((err = pthread_create(&workers[i], NULL, worker_reap, (void *)remote_host)) != 0)
