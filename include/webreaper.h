@@ -254,7 +254,7 @@ int parse_links(struct http_t *, struct cache_ctx *, struct cache_ctx *) __nonnu
 void deconstruct_btree(http_link_t *, wr_cache_t *) __nonnull((1,2));
 int do_request(struct http_t *) __nonnull((1)) __wur;
 
-int reap(struct http_t *) __nonnull((1)) __wur;
+int reap(struct http_t *, struct cache_ctx *, struct cache_ctx *) __nonnull((1,2,3)) __wur;
 
 #define TOKEN_MAX 64
 
