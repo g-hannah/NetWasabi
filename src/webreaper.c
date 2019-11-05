@@ -644,8 +644,13 @@ archive_page(struct http_t *http)
 	update_operation_status("Archiving %s", http->full_url);
 	p = HTTP_EOH(buf);
 
-	if (p)
-		buf_collapse(buf, (off_t)0, (p - buf->buf_head));
+	if (!p)
+	{
+		put_error_msg("Could not find end of HTTP header");
+		goto fail;
+	}
+
+	buf_collapse(buf, (off_t)0, (p - buf->buf_head));
 
 	if (__url_parseable(http->full_url))
 		replace_with_local_urls(http, buf);
@@ -695,6 +700,7 @@ archive_page(struct http_t *http)
 	buf_destroy(&tmp);
 	buf_destroy(&local_url);
 
+	fail:
 	return -1;
 }
 
@@ -1081,9 +1087,11 @@ do_request(struct http_t *http)
 		http_reconnect(http);
 	}
 
-	status_code &= ~status_code;
-	http_send_request(http, HTTP_GET);
-	http_recv_response(http);
+	if (http_send_request(http, HTTP_GET) < 0)
+		goto fail;
+
+	if (http_recv_response(http) < 0)
+		goto fail;
 
 	status_code = http_status_code_int(&http_rbuf(http));
 
