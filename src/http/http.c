@@ -302,6 +302,7 @@ http_build_request_header(struct http_t *http, const char *http_verb)
 	static char header_buf[4096];
 
 	buf_init(&tmp, HTTP_URL_MAX);
+	buf_clear(buf);
 
 /*
  * RFC 7230:
