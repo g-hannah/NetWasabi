@@ -1057,8 +1057,13 @@ do_request(struct http_t *http)
 	/*
 	 * Save bandwidth: send HEAD first.
 	 */
-	http_send_request(http, HTTP_HEAD);
-	status_code = http_recv_response(http);
+	if (http_send_request(http, HTTP_HEAD) < 0)
+		goto fail;
+
+	if (http_recv_response(http) < 0)
+		goto fail;
+
+	status_code = http_status_code_int(&http_rbuf(http));
 
 	update_status_code(status_code);
 
@@ -1080,9 +1085,14 @@ do_request(struct http_t *http)
 	http_send_request(http, HTTP_GET);
 	http_recv_response(http);
 
+	status_code = http_status_code_int(&http_rbuf(http));
+
 	update_status_code(status_code);
 
 	return status_code;
+
+	fail:
+	return -1;
 }
 
 /**
