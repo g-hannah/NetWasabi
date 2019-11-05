@@ -424,6 +424,7 @@ __http_read_until_eoh(struct http_t *http, char **p)
 	assert(http);
 
 	ssize_t n;
+	int is_http = 0;
 	buf_t *buf = &http_rbuf(http);
 
 	clear_struct(&oact);
@@ -468,15 +469,21 @@ __http_read_until_eoh(struct http_t *http, char **p)
 					goto out;
 				*p = strstr(buf->buf_head, HTTP_EOH_SENTINEL);
 				if (*p)
+				{
+					is_http = 1;
 					goto out;
+				}
 		}
 	}
 
 	out:
 	alarm(0);
 
-	assert(!strncmp(HTTP_EOH_SENTINEL, *p, strlen(HTTP_EOH_SENTINEL)));
-	*p += strlen(HTTP_EOH_SENTINEL);
+	if (is_http)
+	{
+		assert(!strncmp(HTTP_EOH_SENTINEL, *p, strlen(HTTP_EOH_SENTINEL)));
+		*p += strlen(HTTP_EOH_SENTINEL);
+	}
 
 	sigaction(SIGALRM, &oact, NULL);
 	return 0;
