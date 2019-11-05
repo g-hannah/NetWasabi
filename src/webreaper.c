@@ -27,9 +27,6 @@ do {\
 
 #define UNBLOCK_SIGNAL(signal) sigprocmask(SIG_SETMASK, &oldset, NULL)
 
-struct cache_ctx cache1;
-struct cache_ctx cache2;
-
 int nr_reaped = 0;
 int current_depth = 0;
 int url_cnt = 0;
@@ -683,7 +680,7 @@ archive_page(struct http_t *http)
 		goto fail_free_bufs;
 	}
 
-	update_operation_status("Created %s", local_url.buf_head);
+	//update_operation_status("Created %s", local_url.buf_head);
 	++nr_reaped;
 
 	buf_write_fd(fd, buf);
@@ -781,7 +778,6 @@ __url_acceptable(struct http_t *http, struct cache_ctx *fctx, struct cache_ctx *
 			return 0;
 	}
 
-
 /*
  * Check the current "draining" cache for duplicate URLs
  */
@@ -815,9 +811,10 @@ __url_acceptable(struct http_t *http, struct cache_ctx *fctx, struct cache_ctx *
 			if (!nptr)
 				break;
 		}
+
+		wr_cache_unlock(dctx->cache);
 	}
 
-	wr_cache_unlock(dctx->cache);
 	return 1;
 }
 
@@ -1060,6 +1057,9 @@ do_request(struct http_t *http)
 
 	int status_code = 0;
 
+	buf_clear(&http_rbuf(http));
+	buf_clear(&http_wbuf(http));
+
 	/*
 	 * Save bandwidth: send HEAD first.
 	 */
@@ -1090,6 +1090,8 @@ do_request(struct http_t *http)
 	if (http_send_request(http, HTTP_GET) < 0)
 		goto fail;
 
+	buf_clear(&http_rbuf(http));
+
 	if (http_recv_response(http) < 0)
 		goto fail;
 
@@ -1111,9 +1113,11 @@ do_request(struct http_t *http)
  * @conn: our struct with connection context
  */
 int
-reap(struct http_t *http)
+reap(struct http_t *http, struct cache_ctx *cache1, struct cache_ctx *cache2)
 {
 	assert(http);
+	assert(cache1);
+	assert(cache2);
 
 	int nr_links = 0;
 	int nr_links_sibling;
@@ -1142,22 +1146,22 @@ reap(struct http_t *http)
 	{
 		fill = 1;
 
-		if (cache1.state == DRAINING)
+		if (cache1->state == DRAINING)
 		{
-			link = (http_link_t *)cache1.cache;
-			nr_links = wr_cache_nr_used(cache1.cache);
+			link = (http_link_t *)cache1->cache->cache;
+			nr_links = wr_cache_nr_used(cache1->cache);
 
 #ifdef DEBUG
 			fprintf(stderr, "Deconstructing binary tree in cache 2\n");
 #endif
-			deconstruct_btree(cache2.root, cache2.cache);
+			deconstruct_btree(cache2->root, cache2->cache);
 
-			wr_cache_clear_all(cache2.cache);
-			if (cache2.cache->nr_assigned > 0)
-				cache2.cache->nr_assigned = 0;
+			wr_cache_clear_all(cache2->cache);
+			if (cache2->cache->nr_assigned > 0)
+				cache2->cache->nr_assigned = 0;
 
-			assert(wr_cache_nr_used(cache2.cache) == 0);
-			cache2.root = NULL;
+			assert(wr_cache_nr_used(cache2->cache) == 0);
+			cache2->root = NULL;
 
 			update_cache_status(1, FL_CACHE_STATUS_DRAINING);
 
@@ -1168,20 +1172,20 @@ reap(struct http_t *http)
 		}
 		else
 		{
-			link = (http_link_t *)cache2.cache;
-			nr_links = wr_cache_nr_used(cache2.cache);
+			link = (http_link_t *)cache2->cache->cache;
+			nr_links = wr_cache_nr_used(cache2->cache);
 
 #ifdef DEBUG
 			fprintf(stderr, "Deconstructing binary tree in cache 1\n");
 #endif
-			deconstruct_btree(cache1.root, cache1.cache);
+			deconstruct_btree(cache1->root, cache1->cache);
 
-			wr_cache_clear_all(cache1.cache);
-			if (cache1.cache->nr_assigned > 0)
-				cache1.cache->nr_assigned = 0;
+			wr_cache_clear_all(cache1->cache);
+			if (cache1->cache->nr_assigned > 0)
+				cache1->cache->nr_assigned = 0;
 
-			assert(wr_cache_nr_used(cache1.cache) == 0);
-			cache1.root = NULL;
+			assert(wr_cache_nr_used(cache1->cache) == 0);
+			cache1->root = NULL;
 
 			update_cache_status(2, FL_CACHE_STATUS_DRAINING);
 
@@ -1190,6 +1194,7 @@ reap(struct http_t *http)
 
 			update_operation_status("Draining URL cache 2");
 		}
+
 
 		if (!nr_links)
 			break;
@@ -1218,7 +1223,7 @@ reap(struct http_t *http)
 			sleep(crawl_delay(wrctx));
 			UNBLOCK_SIGNAL(SIGINT);
 
-			http_check_host(http);
+			//http_check_host(http);
 			update_current_url(http->full_url);
 			status_code = do_request(http);
 
@@ -1280,19 +1285,19 @@ reap(struct http_t *http)
 			{
 				if (__url_parseable(http->full_url))
 				{
-					if (cache1.state == DRAINING)
+					if (cache1->state == DRAINING)
 					{
 /*
  * parse_links(struct http_t *, struct cache_ctx *FCTX, struct cache_ctx *DCTX)
  */
-						parse_links(http, &cache2, &cache1);
-						nr_links_sibling = wr_cache_nr_used(cache2.cache);
+						parse_links(http, cache2, cache1);
+						nr_links_sibling = wr_cache_nr_used(cache2->cache);
 						update_cache2_count(nr_links_sibling);
 					}
 					else
 					{
-						parse_links(http, &cache1, &cache2);
-						nr_links_sibling = wr_cache_nr_used(cache1.cache);
+						parse_links(http, cache1, cache2);
+						nr_links_sibling = wr_cache_nr_used(cache1->cache);
 						update_cache1_count(nr_links_sibling);
 					}
 
@@ -1302,7 +1307,7 @@ reap(struct http_t *http)
 /*
  * if cache1 is draining, then it's cache2 that's full, and vice versa.
  */
-						update_cache_status(cache1.state == DRAINING ? 2 : 1, FL_CACHE_STATUS_FULL);
+						update_cache_status(cache1->state == DRAINING ? 2 : 1, FL_CACHE_STATUS_FULL);
 					}
 				}
 			}
@@ -1313,7 +1318,7 @@ reap(struct http_t *http)
 			++link;
 			--url_cnt;
 
-			if (cache1.state == FILLING)
+			if (cache1->state == FILLING)
 				update_cache1_count(url_cnt);
 			else
 				update_cache2_count(url_cnt);
@@ -1325,15 +1330,15 @@ reap(struct http_t *http)
 
 		++current_depth;
 
-		if (cache1.state == FILLING)
-			cache1.state = DRAINING;
+		if (cache1->state == FILLING)
+			cache1->state = DRAINING;
 		else
-			cache1.state = FILLING;
+			cache1->state = FILLING;
 
-		if (cache2.state == FILLING)
-			cache2.state = DRAINING;
+		if (cache2->state == FILLING)
+			cache2->state = DRAINING;
 		else
-			cache2.state = FILLING;
+			cache2->state = FILLING;
 
 		//flip_cache_state(cache1);
 		//flip_cache_state(cache2);
