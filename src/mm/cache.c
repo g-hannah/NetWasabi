@@ -17,7 +17,7 @@ wr_cache_lock(wr_cache_t *cachep)
 inline void
 wr_cache_unlock(wr_cache_t *cachep)
 {
-	pthread_mutex_lock(&cachep->lock);
+	pthread_mutex_unlock(&cachep->lock);
 }
 
 /**
