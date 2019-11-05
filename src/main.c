@@ -511,7 +511,6 @@ main(int argc, char *argv[])
 			update_status_code(status_code);
 			break;
 		case HTTP_BAD_REQUEST:
-			//__show_request_header(wbuf);
 			break;
 		case HTTP_FORBIDDEN:
 		case HTTP_METHOD_NOT_ALLOWED:
@@ -519,7 +518,6 @@ main(int argc, char *argv[])
 		case HTTP_GATEWAY_TIMEOUT:
 		case HTTP_BAD_GATEWAY:
 		case HTTP_INTERNAL_ERROR:
-			//__show_response_header(rbuf);
 		default:
 			update_status_code(status_code);
 			goto out_disconnect;
@@ -535,11 +533,14 @@ main(int argc, char *argv[])
 
 	if (!wr_cache_nr_used(cache1.cache))
 	{
-		update_operation_status("Parsed no URLs from page (already archived)");
+		//update_operation_status("Parsed no URLs from page (already archived)");
 		goto out_disconnect;
 	}
 
-	rv = reap(http);
+	cache1.state = DRAINING;
+	cache2.state = FILLING;
+
+	rv = reap(http, &cache1, &cache2);
 
 	if (rv < 0)
 	{
