@@ -122,13 +122,11 @@ do {\
 # define offsetof(type, member) ((size_t)((type *)0)->member)
 #endif
 
-#ifndef container_of
-# define container_of(ptr, type, member) \
+#define __container_of(ptr, type, member)\
 ({\
-	const void *__mptr = (void *)(ptr); \
-	(type *)((char *)__mptr - offsetof(type, member)); \
+	const void *__mptr = (void *)(ptr);\
+	(type *)((char *)__mptr - offsetof(type, member));\
 })
-#endif
 
 #define OPT_USE_TLS	0x1
 #define OPT_SHOW_REQ_HEADER 0x2
