@@ -831,6 +831,7 @@ http_recv_response(struct http_t *http)
 	http_header_t *content_len = NULL;
 	http_header_t *transfer_enc = NULL;
 	buf_t *buf = &http_rbuf(http);
+	char *http_red_url = NULL; /* URL that was redirected with 3xx code */
 
 	update_operation_status("Receiving data from server");
 
@@ -864,6 +865,14 @@ http_recv_response(struct http_t *http)
 		case HTTP_MOVED_PERMANENTLY:
 		case HTTP_SEE_OTHER:
 			update_operation_status("Getting location header");
+/*
+ * Save the URL that was redirected. Once we get the new URL and obtain
+ * a response to our GET request, copy that 'old' URL back into our
+ * HTTP object header. That way, if we archive the page using the old
+ * URL, we can avoid requesting it again in the future when we come
+ * across that URL within another page.
+ */
+			http_red_url = strdup(http->full_url);
 			if (__http_set_new_location(http) < 0)
 				goto fail_dealloc;
 
@@ -876,6 +885,9 @@ http_recv_response(struct http_t *http)
 				fprintf(stderr, "http_recv_response: failed to resend HTTP request after \"%s\" response\n", http_status_code_string(http_status_code));
 				goto fail_dealloc;
 			}
+
+			strcpy(http->full_url, http_red_url);
+			free(http_red_url);
 
 			goto __retry;
 			break;
