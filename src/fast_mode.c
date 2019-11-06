@@ -121,9 +121,9 @@ worker_signal_eoc(void)
  * __get_next_link - get next URL from the URL cache
  * @ctx: the cache context containing the cache and the binary tree root
  */
-static http_link_t *__get_next_link(struct cache_ctx ctx)
+static http_link_t *__get_next_link(struct cache_ctx *ctx)
 {
-	http_link_t *nptr = ctx.root;
+	http_link_t *nptr = ctx->root;
 
 	if (!nptr)
 		return NULL;
@@ -155,7 +155,7 @@ static http_link_t *__get_next_link(struct cache_ctx ctx)
 	}
 	else
 	{
-		ctx.root = NULL;
+		ctx->root = NULL;
 	}
 
 	return nptr;
@@ -224,7 +224,7 @@ worker_reap(void *args)
 	{
 		wr_cache_lock(draining);
 
-		link = __get_next_link(container_of(draining, (struct cache_ctx), cache));
+		link = __get_next_link(__container_of(draining, struct cache_ctx, cache));
 
 		if (!link)
 		{
