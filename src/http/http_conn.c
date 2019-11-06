@@ -6,6 +6,7 @@
 #include <openssl/conf.h>
 #include <openssl/err.h>
 #include <openssl/ssl.h>
+#include <pthread.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -14,6 +15,8 @@
 #include "cache.h"
 #include "http.h"
 #include "webreaper.h"
+
+static pthread_once_t __ossl_init_once = PTHREAD_ONCE_INIT;
 
 /**
  * __init_openssl - initialise the openssl library
@@ -86,7 +89,7 @@ http_connect(struct http_t *http)
 
 	if (option_set(OPT_USE_TLS))
 	{
-		__init_openssl();
+		pthread_once(&__ossl_init_once, __init_openssl);
 		http->conn.ssl_ctx = SSL_CTX_new(TLSv1_2_client_method());
 		http_tls(http) = SSL_new(http->conn.ssl_ctx);
 
