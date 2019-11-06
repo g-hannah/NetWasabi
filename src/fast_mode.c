@@ -314,7 +314,7 @@ do_fast_mode(char *remote_host)
 		goto fail;
 	}
 
-	pthread_barrier_init(&start_barrier, FAST_MODE_NR_WORKERS);
+	pthread_barrier_init(&start_barrier, NULL, FAST_MODE_NR_WORKERS);
 
 	for (i = 0; i < FAST_MODE_NR_WORKERS; ++i)
 	{
