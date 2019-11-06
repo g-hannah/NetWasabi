@@ -13,7 +13,7 @@
 #include "webreaper.h"
 
 static pthread_t workers[FAST_MODE_NR_WORKERS];
-static pthread_barrier_t start_barrier;
+//static pthread_barrier_t start_barrier;
 static pthread_once_t once = PTHREAD_ONCE_INIT;
 static pthread_cond_t cache_switch_cond;
 static pthread_mutex_t eoc_mtx;
@@ -24,6 +24,9 @@ static wr_cache_t *draining;
 
 struct cache_ctx cache1;
 struct cache_ctx cache2;
+
+static volatile long unsigned __initialising_thread = 0;
+static int __thread_exit = 0;
 
 static void
 __ctor __fast_mode_init(void)
@@ -95,6 +98,8 @@ init_worker_environ(void)
 	cache1.state = DRAINING;
 	cache2.state = FILLING;
 
+	__initialising_thread = pthread_self();
+
 	return;
 }
 
@@ -110,11 +115,58 @@ worker_signal_eoc(void)
 	return;
 }
 
+/**
+ * __get_next_link - get next URL from the URL cache
+ * @ctx: the cache context containing the cache and the binary tree root
+ */
+static http_link_t *__get_next_link(struct cache_ctx *ctx)
+{
+	assert(ctx);
+
+	http_link_t *nptr = ctx->root;
+
+	if (!nptr)
+		return NULL;
+
+	while (1)
+	{
+		if (!nptr->left && !nptr->right)
+			break;
+
+		while (nptr->left)
+			nptr = nptr->left;
+
+		while (nptr->right)
+			nptr = nptr->right;
+	}
+
+/*
+ * We are artificially removing the object from the cache by
+ * pointing the parent's pointer to NULL so that threads will
+ * not come to this already-found node.
+ */
+
+	if (nptr->parent)
+	{
+		if (nptr->parent->right == nptr)
+			nptr->parent->right = NULL;
+		else
+			nptr->parent->left = NULL;
+	}
+	else
+	{
+		ctx->root = NULL;
+	}
+
+	return nptr;
+}
+
 static void *
 worker_reap(void *args)
 {
 	char *main_url = (char *)args;
 	http_link_t *link = NULL;
+	http_link_t copy;
 	struct http_t *http = NULL;
 	int status_code;
 
@@ -125,11 +177,14 @@ worker_reap(void *args)
 	}
 
 	strcpy(http->full_url, main_url);
+
 	if (!http_parse_host(http->full_url, http->host))
 		goto thread_fail;
 
 	if (!http_parse_page(http->full_url, http->page))
 		goto thread_fail;
+
+	strcpy(http->primary_host, http->host);
 
 	if (http_connect(http) < 0)
 	{
@@ -137,14 +192,35 @@ worker_reap(void *args)
 		goto thread_fail;
 	}
 
-	pthread_barrier_wait(&start_barrier);
 	pthread_once(&once, init_worker_environ);
+
+	if (__initialising_thread == pthread_self())
+	{
+		status_code = do_request(http);
+		if (HTTP_OK != status_code)
+		{
+			__threads_exit = 1;
+		}
+		else
+		{
+			if (parse_links(http, &cache1, &cache2) < 0)
+			{
+				put_error_msg("Failed to get URLs from start page");
+				__threads_exit = 1;
+			}
+		}
+	}
+
+	pthread_barrier_wait(&start_barrier);
+
+	if (__threads_exit)
+		goto thread_exit;
 
 	while (1)
 	{
 		wr_cache_lock(draining);
 
-		link = wr_cache_next_used(draining);
+		link = __get_next_url(container_of(draining, (struct cache_ctx), cache));
 
 		if (!link)
 		{
@@ -157,6 +233,10 @@ worker_reap(void *args)
 			worker_signal_eoc();
 			pthread_cond_wait(&cache_switch_cond, &draining->lock);
 			continue;
+		}
+		else
+		{
+			wr_cache_unlock(draining);
 		}
 
 		status_code = do_request(http);
@@ -248,7 +328,9 @@ do_fast_mode(char *remote_host)
 	int err;
 	int status_code;
 	int __done = 0;
-	struct http_t *http = NULL;
+
+	cache1.cache = NULL;
+	cache2.cache = NULL;
 
 	if (!(cache1.cache = wr_cache_create(
 			"fast_mode_url_cache1",
@@ -261,10 +343,6 @@ do_fast_mode(char *remote_host)
 		goto fail;
 	}
 
-#ifdef DEBUG
-	fprintf(stderr, "Created cache1\n");
-#endif
-
 	if (!(cache2.cache = wr_cache_create(
 			"fast_mode_url_cache2",
 			sizeof(http_link_t),
@@ -273,44 +351,6 @@ do_fast_mode(char *remote_host)
 			http_link_cache_dtor)))
 	{
 		fprintf(stderr, "__fast_mode_init: failed to create cache2\n");
-		goto fail;
-	}
-
-#ifdef DEBUG
-	fprintf(stderr, "Created cache2\n");
-#endif
-
-	if (!(http = http_new()))
-	{
-		fprintf(stderr, "do_fast_mode: failed to get HTTP object\n");
-		goto fail;
-	}
-
-	if (!http_parse_host(remote_host, http->host))
-		goto fail;
-	if (!http_parse_page(remote_host, http->page))
-		goto fail;
-
-	strcpy(http->full_url, remote_host);
-	strcpy(http->primary_host, http->host);
-
-	if (http_connect(http) < 0)
-	{
-		fprintf(stderr, "do_fast_mode: failed to connect to remote host\n");
-		goto fail;
-	}
-
-	status_code = do_request(http);
-
-	if (HTTP_OK != status_code)
-	{
-		fprintf(stderr, "do_fast_mode: failed to obtain starting page (http code: %s)\n", http_status_code_string(status_code));
-		goto fail;
-	}
-
-	if (parse_links(http, &cache1, &cache2) < 0)
-	{
-		fprintf(stderr, "do_fast_mode: failed to parse links from starting page\n");
 		goto fail;
 	}
 
@@ -324,9 +364,6 @@ do_fast_mode(char *remote_host)
 			goto fail;
 		}
 	}
-
-	http_disconnect(http);
-	http_delete(http);
 
 	while (1)
 	{
@@ -365,8 +402,20 @@ do_fast_mode(char *remote_host)
 	for (i = 0; i < FAST_MODE_NR_WORKERS; ++i)
 		pthread_join(workers[i], NULL);
 
+	wr_cache_clear_all(cache1.cache);
+	wr_cache_clear_all(cache2.cache);
+	wr_cache_destroy(cache1.cache);
+	wr_cache_destroy(cache2.cache);
+
 	return 0;
 
 	fail:
+
+	if (cache1.cache)
+		wr_cache_destroy(cache1.cache);
+
+	if (cache2.cache)
+		wr_cache_destroy(cache2.cache);
+
 	return -1;
 }
