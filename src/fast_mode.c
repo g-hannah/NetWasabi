@@ -261,6 +261,10 @@ do_fast_mode(char *remote_host)
 		goto fail;
 	}
 
+#ifdef DEBUG
+	fprintf(stderr, "Created cache1\n");
+#endif
+
 	if (!(cache2.cache = wr_cache_create(
 			"fast_mode_url_cache2",
 			sizeof(http_link_t),
@@ -271,6 +275,10 @@ do_fast_mode(char *remote_host)
 		fprintf(stderr, "__fast_mode_init: failed to create cache2\n");
 		goto fail;
 	}
+
+#ifdef DEBUG
+	fprintf(stderr, "Created cache2\n");
+#endif
 
 	if (!(http = http_new()))
 	{
@@ -306,8 +314,7 @@ do_fast_mode(char *remote_host)
 		goto fail;
 	}
 
-	cache1.state = DRAINING;
-	cache2.state = FILLING;
+	pthread_barrier_init(&start_barrier, FAST_MODE_NR_WORKERS);
 
 	for (i = 0; i < FAST_MODE_NR_WORKERS; ++i)
 	{
@@ -320,8 +327,6 @@ do_fast_mode(char *remote_host)
 
 	http_disconnect(http);
 	http_delete(http);
-
-	pthread_barrier_wait(&start_barrier);
 
 	while (1)
 	{
