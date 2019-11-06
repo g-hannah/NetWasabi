@@ -13,7 +13,7 @@
 #include "webreaper.h"
 
 static pthread_t workers[FAST_MODE_NR_WORKERS];
-//static pthread_barrier_t start_barrier;
+static pthread_barrier_t start_barrier;
 static pthread_once_t once = PTHREAD_ONCE_INIT;
 static pthread_cond_t cache_switch_cond;
 static pthread_mutex_t eoc_mtx;
@@ -26,7 +26,9 @@ struct cache_ctx cache1;
 struct cache_ctx cache2;
 
 static volatile long unsigned __initialising_thread = 0;
-static int __thread_exit = 0;
+static int __threads_exit = 0;
+static int nr_draining;
+static int nr_filling;
 
 static void
 __ctor __fast_mode_init(void)
@@ -119,11 +121,9 @@ worker_signal_eoc(void)
  * __get_next_link - get next URL from the URL cache
  * @ctx: the cache context containing the cache and the binary tree root
  */
-static http_link_t *__get_next_link(struct cache_ctx *ctx)
+static http_link_t *__get_next_link(struct cache_ctx ctx)
 {
-	assert(ctx);
-
-	http_link_t *nptr = ctx->root;
+	http_link_t *nptr = ctx.root;
 
 	if (!nptr)
 		return NULL;
@@ -155,7 +155,7 @@ static http_link_t *__get_next_link(struct cache_ctx *ctx)
 	}
 	else
 	{
-		ctx->root = NULL;
+		ctx.root = NULL;
 	}
 
 	return nptr;
@@ -166,7 +166,6 @@ worker_reap(void *args)
 {
 	char *main_url = (char *)args;
 	http_link_t *link = NULL;
-	http_link_t copy;
 	struct http_t *http = NULL;
 	int status_code;
 
@@ -208,6 +207,11 @@ worker_reap(void *args)
 				put_error_msg("Failed to get URLs from start page");
 				__threads_exit = 1;
 			}
+			else
+			{
+				nr_draining = wr_cache_nr_used(cache1.cache);
+				nr_filling = 0;
+			}
 		}
 	}
 
@@ -220,7 +224,7 @@ worker_reap(void *args)
 	{
 		wr_cache_lock(draining);
 
-		link = __get_next_url(container_of(draining, (struct cache_ctx), cache));
+		link = __get_next_link(container_of(draining, (struct cache_ctx), cache));
 
 		if (!link)
 		{
@@ -236,6 +240,7 @@ worker_reap(void *args)
 		}
 		else
 		{
+			--nr_draining;
 			wr_cache_unlock(draining);
 		}
 
@@ -292,6 +297,10 @@ worker_reap(void *args)
 
 		if (parse_links(http, cache1.state == FILLING ? &cache1 : &cache2, cache1.state == DRAINING ? &cache1 : &cache2) < 0)
 			put_error_msg("0x%lx: failed to parse URLs from page", pthread_self());
+
+		wr_cache_lock(filling);
+		nr_filling = wr_cache_nr_used(filling);
+		wr_cache_unlock(filling);
 	}
 
 	thread_exit:
@@ -326,7 +335,6 @@ do_fast_mode(char *remote_host)
 {
 	int i;
 	int err;
-	int status_code;
 	int __done = 0;
 
 	cache1.cache = NULL;
@@ -388,7 +396,7 @@ do_fast_mode(char *remote_host)
 			cache2.state = FILLING;
 		}
 
-		if (!wr_cache_nr_used(draining) && !wr_cache_nr_used(filling))
+		if (!nr_draining && !nr_filling)
 			__done = 1;
 
 		wr_cache_lock(draining);
