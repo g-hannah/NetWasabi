@@ -53,18 +53,8 @@ struct __http_t
 	char *page;
 	char *full_url;
 	char *primary_host;
-
 	struct conn conn;
-#if 0
-	{
-		int sock;
-		SSL *ssl;
-		buf_t read_buf;
-		buf_t write_buf;
-		char *host_ipv4;
-		SSL_CTX *ssl_ctx;
-	} conn;
-#endif
+	enum request req_type;
 
 	wr_cache_t *headers;
 	wr_cache_t *cookies;
@@ -150,62 +140,6 @@ http_header_cache_dtor(void *hh)
 	return;
 }
 
-#define TIME_STRING_MAX 64
-
-#if 0
-int
-http_cookie_ctor(void *cookie)
-{
-	struct http_cookie_t *c = (struct http_cookie_t *)cookie;
-	clear_struct(c);
-
-	if (!(c->data = wr_calloc(HTTP_COOKIE_MAX+1, 1)))
-		goto fail;
-
-	if (!(c->domain = wr_calloc(HTTP_URL_MAX+1, 1)))
-		goto fail;
-
-	if (!(c->path = wr_calloc(HTTP_URL_MAX+1, 1)))
-		goto fail;
-
-	if (!(c->expires = wr_calloc(TIME_STRING_MAX+1, 1)))
-		goto fail;
-
-	c->data_len = 0;
-	c->domain_len = 0;
-	c->path_len = 0;
-	c->expires_len = 0;
-	c->expires_ts = 0;
-
-	return 0;
-
-	fail:
-	return -1;
-}
-
-void
-http_cookie_dtor(void *cookie)
-{
-	struct http_cookie_t *c = (struct http_cookie_t *)cookie;
-
-	if (c->data)
-		free(c->data);
-
-	if (c->domain)
-		free(c->domain);
-
-	if (c->path)
-		free(c->path);
-
-	if (c->expires)
-		free(c->expires);
-
-	clear_struct(c);
-
-	return;
-}
-#endif
-
 int
 http_link_cache_ctor(void *http_link)
 {
@@ -242,11 +176,12 @@ http_link_cache_dtor(void *http_link)
 	return;
 }
 
+#if 0
 #ifdef DEBUG
 static void
 __http_print_request_hdr(struct http_t *http)
 {
-	char *eoh = HTTP_EOH(&http_wbuf(http));
+	char *eoh = HTTP_EOH(&http->conn.write_buf);
 
 	if (!eoh)
 	{
@@ -262,7 +197,7 @@ __http_print_request_hdr(struct http_t *http)
 static void
 __http_print_response_hdr(struct http_t *http)
 {
-	char *eoh = HTTP_EOH(&http_rbuf(http));
+	char *eoh = HTTP_EOH(&http->conn.read_buf);
 
 	if (!eoh)
 	{
@@ -274,6 +209,7 @@ __http_print_response_hdr(struct http_t *http)
 
 	return;
 }
+#endif
 #endif
 
 /**
@@ -288,7 +224,7 @@ __http_check_cookies(struct http_t *http)
 {
 	assert(http);
 
-	buf_t *buf = &http_rbuf(http);
+	buf_t *buf = &http->conn.read_buf;
 	struct __http_t *__http = (struct __http_t *)http;
 
 	if (strstr(buf->buf_head, "Set-Cookie"))
@@ -330,12 +266,11 @@ http_build_request_header(struct http_t *http, const char *http_verb)
 	assert(http);
 	assert(http_verb);
 
-	buf_t *buf = &http_wbuf(http);
+	buf_t *buf = &http->conn.write_buf;
 	buf_t tmp;
 	static char header_buf[4096];
 
 	buf_init(&tmp, HTTP_URL_MAX);
-	buf_clear(buf);
 
 /*
  * RFC 7230:
@@ -416,22 +351,19 @@ http_build_request_header(struct http_t *http, const char *http_verb)
 }
 
 int
-http_send_request(struct http_t *http, const char *http_verb)
+http_send_request(struct http_t *http, enum request http_request)
 {
 	assert(http);
 
-	buf_t *buf = &http_wbuf(http);
+	buf_t *buf = &http->conn.write_buf;
 
-	http_build_request_header(http, http_verb);
-	_log("Built %s request header\n", http_verb);
+	buf_clear(buf);
 
-#ifdef DEBUG
-	__http_print_request_hdr(http);
-#endif
+	http_build_request_header(http, http_request);
 
 	if (option_set(OPT_USE_TLS))
 	{
-		if (buf_write_tls(http_tls(http), buf) == -1)
+		if (buf_write_tls(http->conn.ssl, buf) == -1)
 		{
 			fprintf(stderr, "http_send_request: failed to write to SSL socket (%s)\n", strerror(errno));
 			goto fail;
@@ -439,14 +371,15 @@ http_send_request(struct http_t *http, const char *http_verb)
 	}
 	else
 	{
-		if (buf_write_socket(http_socket(http), buf) == -1)
+		if (buf_write_socket(http->conn.sock, buf) == -1)
 		{
 			fprintf(stderr, "http_send_request: failed to write to socket (%s)\n", strerror(errno));
 			goto fail;
 		}
 	}
 
-	_log("Returning 0 from %s\n", __func__);
+	http->req_type = http_request;
+
 	return 0;
 
 	fail:
@@ -461,7 +394,7 @@ __http_read_until_eoh(struct http_t *http, char **p)
 
 	ssize_t n;
 	int is_http = 0;
-	buf_t *buf = &http_rbuf(http);
+	buf_t *buf = &http->conn.read_buf;
 
 	clear_struct(&oact);
 	clear_struct(&nact);
@@ -484,7 +417,6 @@ __http_read_until_eoh(struct http_t *http, char **p)
 		return HTTP_OPERATION_TIMEOUT;
 	}
 
-	_log("Reading in small blocks until getting HTTP response header\n");
 	alarm(HTTP_MAX_WAIT_TIME);
 	while (!(*p))
 	{
@@ -523,7 +455,6 @@ __http_read_until_eoh(struct http_t *http, char **p)
 	}
 
 	sigaction(SIGALRM, &oact, NULL);
-	_log("Returning 0 from %s\n", __func__);
 	return 0;
 }
 
@@ -557,7 +488,7 @@ __read_bytes(struct http_t *http, size_t toread)
 
 	ssize_t n;
 	size_t r = toread;
-	buf_t *buf = &http_rbuf(http);
+	buf_t *buf = &http->conn.read_buf;
 
 	while (r)
 	{
@@ -645,7 +576,7 @@ __http_do_chunked_recv(struct http_t *http)
 	char *p;
 	char *e;
 	off_t chunk_offset;
-	buf_t *buf = &http_rbuf(http);
+	buf_t *buf = &http->conn.read_buf;
 	size_t chunk_size;
 	size_t save_size;
 	size_t overread;
@@ -656,7 +587,6 @@ __http_do_chunked_recv(struct http_t *http)
 	int chunk_nr = 0;
 #endif
 
-	_log("Doing chunked transfer\n");
 	p = HTTP_EOH(buf);
 
 	while (!p)
@@ -726,7 +656,6 @@ __http_do_chunked_recv(struct http_t *http)
 					buf->buf_end);
 #endif
 
-			_log("Failed to find next chunk size\n");
 			return -1;
 		}
 
@@ -782,15 +711,6 @@ __http_do_chunked_recv(struct http_t *http)
 
 #if 0
 /*
- * BS=BUF_START ; CS=CHUNK_START ; CE=CHUNK_END ; b=byte
- *
- * |BSbbbbbbbbbbCSbbbbbbbbbbbbbbbbbbbbbbbbbCE\r\n5a8\r\n......
- *                                               ^
- *                                             __next_size
- * This is absolutey where __next_size should be pointing after
- * the below... Something is very wrong if the assertions fail.
- *
- * EDIT:
  * Assertion *(__next_size - 2) == '\r' was failing in a certain
  * case after the final chunk, jumping forward from buf_head
  * chunk_offset + save_size + 2, was pointing ONE byte past the
@@ -813,7 +733,6 @@ __http_set_new_location(struct http_t *http)
 	assert(http);
 
 	struct __http_t *__http = (struct __http_t *)http;
-
 	http_header_t *location = NULL;
 
 	if (!(location = (http_header_t *)wr_cache_alloc(__http->headers, &location)))
@@ -822,16 +741,16 @@ __http_set_new_location(struct http_t *http)
 		goto fail_dealloc;
 	}
 
-	if (!http_fetch_header(&http_rbuf(http), "Location", location, (off_t)0))
+	if (!http_fetch_header(&http->conn.read_buf, "Location", location, (off_t)0))
 	{
 		fprintf(stderr, "__http_set_new_location: failed to find HTTP header field \"Location\"\n");
 		goto fail_dealloc;
 	}
 
-	update_operation_status("Got location header");
-
 	assert(location->vlen < HTTP_URL_MAX);
 	strcpy(__http->full_url, location->value);
+
+	_log("Got new location: %s\n", location->value);
 
 	if (!http_parse_host(location->value, http->host))
 	{
@@ -847,7 +766,6 @@ __http_set_new_location(struct http_t *http)
 
 	wr_cache_dealloc(__http->headers, location, &location);
 
-	_log("Got Location header field \"%s\"\n", __http->full_url);
 	return 0;
 
 	fail_dealloc:
@@ -856,6 +774,10 @@ __http_set_new_location(struct http_t *http)
 	return -1;
 }
 
+/**
+ * http_set_sock_non_blocking - set the O_NONBLOCK flag for socket
+ * @http: our HTTP object
+ */
 static void
 http_set_sock_non_blocking(struct http_t *http)
 {
@@ -874,9 +796,16 @@ http_set_sock_non_blocking(struct http_t *http)
 	return;
 }
 
+/**
+ * http_set_ssl_non_blocking - set the READ file descriptor as non blocking
+ * @http: our HTTP object
+ */
 static void
 http_set_ssl_non_blocking(struct http_t *http)
 {
+	if (!http->conn.ssl)
+		return;
+
 	int rsock = SSL_get_rfd(http->conn.ssl);
 	int flags = fcntl(rsock, F_GETFL);
 
@@ -908,14 +837,16 @@ http_recv_response(struct http_t *http)
 	ssize_t bytes;
 	int rv;
 	int http_status_code;
-	struct __http_t *__http = (struct __http_t *)http;
 	http_header_t *content_len = NULL;
 	http_header_t *transfer_enc = NULL;
-	buf_t *buf = &http_rbuf(http);
+	buf_t *buf = &http->conn.read_buf;
 	char *http_red_url = NULL; /* URL that was redirected with 3xx code */
+	struct __http_t *__http = (struct __http_t *)http;
 
-	update_operation_status("Receiving data from server");
-
+/*
+ * Set the (ssl) socket to non-blocking.
+ * (just the read fd for ssl).
+ */
 	if (!http->conn.sock_nonblocking)
 		http_set_sock_non_blocking(http);
 	if (!http->conn.ssl_nonblocking)
@@ -931,48 +862,83 @@ http_recv_response(struct http_t *http)
 	if (!transfer_enc)
 		goto fail_dealloc;
 
+/*
+ * Jump back to here to resend a request after dealing with
+ * a 3xx URL redirect and resending the request.
+ */
 	__retry:
+	buf_clear(&http->conn.read_buf);
+	assert(http->conn.read_buf.data_len == 0);
+
 	rv = __http_read_until_eoh(http, &p);
 
 	if (rv < 0 || HTTP_OPERATION_TIMEOUT == rv)
 		goto fail_dealloc;
 
-#ifdef DEBUG
-	__http_print_response_hdr(http);
-#endif
-
+/*
+ * If the response header has any Set-Cookie header fields, then
+ * clear all current cookie objects from the cache and extract
+ * the new one(s) from the header and cache them.
+ */
 	__http_check_cookies(http);
 
 	http_status_code = http_status_code_int(buf);
 
+/*
+ * Check for a URL redirect status code.
+ */
 	switch((unsigned int)http_status_code)
 	{
+		case HTTP_OK:
+			if (HEAD == http->req_type)
+				goto out_dealloc;
+			break;
 		case HTTP_FOUND:
 		case HTTP_MOVED_PERMANENTLY:
 		case HTTP_SEE_OTHER:
-			update_operation_status("Getting location header");
 /*
- * Save the URL that was redirected. Once we get the new URL and obtain
- * a response to our GET request, copy that 'old' URL back into our
- * HTTP object header. That way, if we archive the page using the old
- * URL, we can avoid requesting it again in the future when we come
- * across that URL within another page.
+ * We want to avoid resending requests for URLs we come by in pages
+ * that are being redirected. Before we request any URLs, we are
+ * checking to see if we have already archived the page. If we archive
+ * a local copy of the page but use the _redirected_ URL, then we will
+ * ask for the old URL in the future if we come across it.
+ *
+ * To avoid this, if we are currently getting a response to a HEAD
+ * request, just send back HTTP_OK to the caller. Then, a GET request
+ * will be sent, and then when back here, we will get the Location
+ * header field, save the old URL, request the URL we received in the
+ * Location header field, and once we've resent the request, we can
+ * copy the _old_ URL back into the HTTP object. That way, the local
+ * copy will use the old URL, which will mean we will see in the future
+ * that we do indeed have it already.
+ *
+ * It's an ugly hack, but if we don't send back HTTP_OK when it's a HEAD
+ * request, then we replace the old URL and then we cannot do the above
+ * when we are back here getting a response to the subsequent GET request.
  */
+			if (HEAD == http->req_type)
+			{
+				http_status_code = HTTP_OK;
+				goto out_dealloc;
+			}
+
 			http_red_url = strdup(http->full_url);
+
 			if (__http_set_new_location(http) < 0)
 				goto fail_dealloc;
 
-			buf_clear(&http_rbuf(http));
-			buf_clear(&http_wbuf(http));
+			buf_clear(&http->conn.write_buf);
+			assert(http_wbuf(http).data_len == 0);
 
-			update_operation_status("Sending GET request");
-			if (http_send_request(http, HTTP_GET) < 0)
+			if (http_send_request(http, GET) < 0)
 			{
 				fprintf(stderr, "http_recv_response: failed to resend HTTP request after \"%s\" response\n", http_status_code_string(http_status_code));
 				goto fail_dealloc;
 			}
 
-			_log("Old url: %s ; new url: %s\n", http_red_url, http->full_url);
+/*
+ * Replace with the _old_ URL.
+ */
 			strcpy(http->full_url, http_red_url);
 			free(http_red_url);
 
@@ -982,22 +948,14 @@ http_recv_response(struct http_t *http)
 			break;
 	}
 
-	if (!p)
-	{
-		//fprintf(stderr, "http_recv_response: failed to find end of header sentinel\n");
-		goto out_dealloc;
-	}
-
 /*
- * \r\n\r\nBBBBBBB...
- *         ^
- *         p
+ * If it was a HEAD request, then we have
+ * nothing more to read from the socket.
  */
-
-	if (strstr(http_wbuf(http).buf_head, "HEAD"))
+	if (HEAD == http->req_type)
 		goto out_dealloc;
 
-	if (http_fetch_header(&http_rbuf(http), "Transfer-Encoding", transfer_enc, (off_t)0))
+	if (http_fetch_header(&http->conn.read_buf, "Transfer-Encoding", transfer_enc, (off_t)0))
 	{
 		if (!strncmp("chunked", transfer_enc->value, transfer_enc->vlen))
 		{
@@ -1503,7 +1461,7 @@ http_connection_closed(struct http_t *http)
 	assert(http);
 
 	http_header_t *connection;
-	buf_t *buf = &http_rbuf(http);
+	buf_t *buf = &http->conn.read_buf;
 	int rv = 0;
 	struct __http_t *__http = (struct __http_t *)http;
 
