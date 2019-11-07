@@ -34,9 +34,6 @@
 #define HTTP_HNAME_MAX 64 /* Header name */
 #define HTTP_HOST_MAX 256
 
-#define HTTP_GET		"GET"
-#define HTTP_HEAD		"HEAD"
-
 #define HTTP_VERSION				"1.1"
 #define HTTP_USER_AGENT			"Mozilla/5.0 (X11; Ubuntu; Linux x86_64; rv:68.0) Gecko/20100101 Firefox/68.0"
 #define HTTP_ACCEPT					"text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8"
@@ -115,8 +112,16 @@ struct conn
 	SSL *ssl;
 	buf_t read_buf;
 	buf_t write_buf;
+	int sock_nonblocking;
+	int ssl_nonblocking;
 	char *host_ipv4;
 	SSL_CTX *ssl_ctx;
+};
+
+enum request
+{
+	HEAD = 0,
+	GET = 1
 };
 
 struct http_t
@@ -127,13 +132,14 @@ struct http_t
 	char *primary_host;
 
 	struct conn conn;
+	enum request req_type;
 };
 
 size_t httplen;
 size_t httpslen;
 
-int http_build_request_header(struct http_t *, const char *http_verb) __nonnull((1,2)) __wur;
-int http_send_request(struct http_t *, const char *) __nonnull((1,2)) __wur;
+int http_build_request_header(struct http_t *, enum request) __nonnull((1,2)) __wur;
+int http_send_request(struct http_t *, enum request) __nonnull((1,2)) __wur;
 int http_recv_response(struct http_t *) __nonnull((1)) __wur;
 
 int http_append_header(buf_t *, http_header_t *) __nonnull((1,2)) __wur;
