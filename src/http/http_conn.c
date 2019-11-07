@@ -7,6 +7,7 @@
 #include <openssl/err.h>
 #include <openssl/ssl.h>
 #include <pthread.h>
+#include <setjmp.h>
 #include <signal.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -112,7 +113,7 @@ http_connect(struct http_t *http)
 	struct sigaction __new_act;
 
 	memset(&__new_act, 0, sizeof(__new_act));
-	sigemptyset(&__new_act.mask);
+	sigemptyset(&__new_act.sa_mask);
 	__new_act.sa_flags = 0;
 	__new_act.sa_handler = __catch_signal;
 
