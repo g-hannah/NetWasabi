@@ -261,10 +261,9 @@ __http_check_cookies(struct http_t *http)
 }
 
 int
-http_build_request_header(struct http_t *http, const char *http_verb)
+http_build_request_header(struct http_t *http, enum request http_request)
 {
 	assert(http);
-	assert(http_verb);
 
 	buf_t *buf = &http->conn.write_buf;
 	buf_t tmp;
@@ -295,7 +294,7 @@ http_build_request_header(struct http_t *http, const char *http_verb)
  * correct encoding present in the Location header.
  */
 
-	if (!strcmp("HEAD", http_verb))
+	if (HEAD == http_request)
 	{
 		buf_append(&tmp, "https://");
 		buf_append(&tmp, http->host);
@@ -331,6 +330,9 @@ http_build_request_header(struct http_t *http, const char *http_verb)
 
 	buf_append(buf, header_buf);
 
+/*
+ * Append any cached cookies to the request header.
+ */
 	int __nr_cookies = wr_cache_nr_used(((struct __http_t *)http)->cookies);
 
 	if (__nr_cookies)
