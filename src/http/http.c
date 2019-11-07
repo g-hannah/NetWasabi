@@ -17,6 +17,32 @@
 #define HTTP_SMALL_READ_BLOCK 64
 #define HTTP_MAX_WAIT_TIME 6
 
+FILE *logfp;
+
+#define LOG_FILE "./http_debug_log.txt"
+
+#ifdef DEBUG
+int _DEBUG = 1;
+#else
+int _DEBUG = 0;
+#endif
+
+static void
+_log(char *fmt, ...)
+{
+	va_list args;
+
+	if (!_DEBUG)
+		return;
+
+	va_start(args, fmt);
+	vfprintf(logfp, fmt, args);
+
+	va_end(args);
+
+	return;
+}
+
 /*
  * User gets struct http_t which does not
  * include the caches.
@@ -52,12 +78,19 @@ static sigjmp_buf TIMEOUT;
 static void
 __ctor __http_init(void)
 {
+#ifdef DEBUG
+	logfp = fdopen(open(LOG_FILE, O_RDWR|O_TRUNC|O_CREAT, S_IRUSR|S_IWUSR), "r+");
+#endif
 	return;
 }
 
 static void
 __dtor __http_fini(void)
 {
+#ifdef DEBUG
+	fclose(logfp);
+	logfp = NULL;
+#endif
 	return;
 }
 
@@ -390,6 +423,7 @@ http_send_request(struct http_t *http, const char *http_verb)
 	buf_t *buf = &http_wbuf(http);
 
 	http_build_request_header(http, http_verb);
+	_log("Built %s request header\n", http_verb);
 
 #ifdef DEBUG
 	__http_print_request_hdr(http);
@@ -412,6 +446,7 @@ http_send_request(struct http_t *http, const char *http_verb)
 		}
 	}
 
+	_log("Returning 0 from %s\n", __func__);
 	return 0;
 
 	fail:
@@ -449,6 +484,7 @@ __http_read_until_eoh(struct http_t *http, char **p)
 		return HTTP_OPERATION_TIMEOUT;
 	}
 
+	_log("Reading in small blocks until getting HTTP response header\n");
 	alarm(HTTP_MAX_WAIT_TIME);
 	while (!(*p))
 	{
@@ -487,6 +523,7 @@ __http_read_until_eoh(struct http_t *http, char **p)
 	}
 
 	sigaction(SIGALRM, &oact, NULL);
+	_log("Returning 0 from %s\n", __func__);
 	return 0;
 }
 
@@ -619,6 +656,7 @@ __http_do_chunked_recv(struct http_t *http)
 	int chunk_nr = 0;
 #endif
 
+	_log("Doing chunked transfer\n");
 	p = HTTP_EOH(buf);
 
 	while (!p)
@@ -688,6 +726,7 @@ __http_do_chunked_recv(struct http_t *http)
 					buf->buf_end);
 #endif
 
+			_log("Failed to find next chunk size\n");
 			return -1;
 		}
 
@@ -764,6 +803,7 @@ __http_do_chunked_recv(struct http_t *http)
 #endif
 	}
 
+	_log("Returning 0 from %s\n", __func__);
 	return 0;
 }
 
@@ -790,6 +830,9 @@ __http_set_new_location(struct http_t *http)
 
 	update_operation_status("Got location header");
 
+	assert(location->vlen < HTTP_URL_MAX);
+	strcpy(__http->full_url, location->value);
+
 	if (!http_parse_host(location->value, http->host))
 	{
 		fprintf(stderr, "__http_set_new_location: failed to parse host from URL\n");
@@ -804,12 +847,50 @@ __http_set_new_location(struct http_t *http)
 
 	wr_cache_dealloc(__http->headers, location, &location);
 
+	_log("Got Location header field \"%s\"\n", __http->full_url);
 	return 0;
 
 	fail_dealloc:
 	wr_cache_dealloc(__http->headers, location, &location);
 
 	return -1;
+}
+
+static void
+http_set_sock_non_blocking(struct http_t *http)
+{
+	int sock_flags = fcntl(sock, F_GETFL);
+
+	if (!(sock_flags & O_NONBLOCK))
+	{
+		sock_flags |= O_NONBLOCK;
+		fcntl(sock, F_SETFL, sock_flags);
+
+		http->conn.sock_nonblocking = 1;
+
+		return;
+	}
+
+	return;
+}
+
+static void
+http_set_ssl_non_blocking(struct http_t *http)
+{
+	int rsock = SSL_get_rfd(http->conn.ssl);
+	int flags = fcntl(rsock, F_GETFL);
+
+	if (!(flags & O_NONBLOCK))
+	{
+		flags |= O_NONBLOCK;
+		fcntl(rsock, F_SETFL, flags);
+
+		http->conn.ssl_nonblocking = 1;
+
+		return;
+	}
+
+	return;
 }
 
 /**
@@ -834,6 +915,11 @@ http_recv_response(struct http_t *http)
 	char *http_red_url = NULL; /* URL that was redirected with 3xx code */
 
 	update_operation_status("Receiving data from server");
+
+	if (!http->conn.sock_nonblocking)
+		http_set_socket_non_blocking(http);
+	if (!http->conn.ssl_nonblocking)
+		http-set_ssl_non_blocking(http);
 
 	content_len = (http_header_t *)wr_cache_alloc(__http->headers, &content_len);
 
@@ -886,6 +972,7 @@ http_recv_response(struct http_t *http)
 				goto fail_dealloc;
 			}
 
+			_log("Old url: %s ; new url: %s\n", http_red_url, http->full_url);
 			strcpy(http->full_url, http_red_url);
 			free(http_red_url);
 
@@ -992,6 +1079,7 @@ http_recv_response(struct http_t *http)
 	return 0;
 
 	fail_dealloc:
+	_log("Failed in %s\n", __func__);
 	if (content_len)
 	{
 		wr_cache_dealloc(__http->headers, (void *)content_len, &content_len);
@@ -1457,6 +1545,8 @@ __http_init_obj(struct __http_t *__http)
 		goto fail;
 	}
 
+	_log("Created header cache %s\n", __http_cache_name);
+
 	sprintf(__http_cache_name, "http_cookie_cache%d", __http_obj_cnt);
 	if (!(__http->cookies = wr_cache_create(
 			__http_cache_name,
@@ -1468,6 +1558,8 @@ __http_init_obj(struct __http_t *__http)
 		fprintf(stderr, "__http_init_obj: failed to create cache for HTTP cookie objects\n");
 		goto fail_destroy_cache;
 	}
+
+	_log("Created coookies cache %s\n", __http_cache_name);
 
 	__http->host = calloc(HTTP_HOST_MAX+1, 1);
 	__http->conn.host_ipv4 = calloc(__HTTP_ALIGN_SIZE(INET_ADDRSTRLEN+1), 1);
@@ -1494,6 +1586,8 @@ __http_init_obj(struct __http_t *__http)
 	assert(__http->full_url);
 
 	++__http_obj_cnt;
+
+	_log("Initialised HTTP object fields. #objs = %d\n", __http_obj_cnt);
 
 	return 0;
 
@@ -1524,6 +1618,7 @@ http_new(void)
 		goto fail;
 	}
 
+	_log("Created HTTP object @ %p\n", __http);
 	return (struct http_t *)__http;
 
 	fail:
@@ -1551,6 +1646,8 @@ http_delete(struct http_t *http)
 
 	buf_destroy(&__http->conn.read_buf);
 	buf_destroy(&__http->conn.write_buf);
+
+	_log("Deleted HTTP object\n");
 
 	return;
 }
