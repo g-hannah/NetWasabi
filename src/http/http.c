@@ -859,12 +859,12 @@ __http_set_new_location(struct http_t *http)
 static void
 http_set_sock_non_blocking(struct http_t *http)
 {
-	int sock_flags = fcntl(sock, F_GETFL);
+	int sock_flags = fcntl(http->conn.sock, F_GETFL);
 
 	if (!(sock_flags & O_NONBLOCK))
 	{
 		sock_flags |= O_NONBLOCK;
-		fcntl(sock, F_SETFL, sock_flags);
+		fcntl(http->conn.sock, F_SETFL, sock_flags);
 
 		http->conn.sock_nonblocking = 1;
 
