@@ -917,9 +917,9 @@ http_recv_response(struct http_t *http)
 	update_operation_status("Receiving data from server");
 
 	if (!http->conn.sock_nonblocking)
-		http_set_socket_non_blocking(http);
+		http_set_sock_non_blocking(http);
 	if (!http->conn.ssl_nonblocking)
-		http-set_ssl_non_blocking(http);
+		http_set_ssl_non_blocking(http);
 
 	content_len = (http_header_t *)wr_cache_alloc(__http->headers, &content_len);
 
