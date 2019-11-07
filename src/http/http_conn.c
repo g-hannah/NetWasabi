@@ -18,7 +18,9 @@
 #include "webreaper.h"
 
 static pthread_once_t __ossl_init_once = PTHREAD_ONCE_INIT;
+static sigjmp_buf __env__;
 
+#if 0
 static sigset_t __new;
 static sigset_t __old;
 
@@ -30,6 +32,13 @@ do {\
 } while (0)
 
 #define __unblock_signal(s) sigprocmask(SIG_SETMASK, &__old, NULL);
+#endif
+
+static void
+__catch_signal(int signo)
+{
+	siglongjmp(__env__, 1);
+}
 
 /**
  * __init_openssl - initialise the openssl library
@@ -94,14 +103,42 @@ http_connect(struct http_t *http)
 
 	assert(http_socket(http) > 2);
 
+/*
+ * Catch SIGINT here because if we are attempting to connect
+ * and the user presses ctrl+C then a segfault occurs. So
+ * catch it and then go to the correct label to release mem.
+ */
+	struct sigaction __old_act;
+	struct sigaction __new_act;
+
+	memset(&__new_act, 0, sizeof(__new_act));
+	sigemptyset(&__new_act.mask);
+	__new_act.sa_flags = 0;
+	__new_act.sa_handler = __catch_signal;
+
+	sigaction(SIGINT, &__new_act, &__old_act);
+
+	if (sigsetjmp(__env__, 1) != 0)
+	{
+		put_error_msg("http_connect: caught user-generated signal!");
+		goto fail_release_ainf;
+	}
+
 	if (connect(http_socket(http), (struct sockaddr *)&sock4, (socklen_t)sizeof(sock4)) != 0)
 	{
 		put_error_msg("open_connection: connect error (%s)", strerror(errno));
 		goto fail_release_ainf;
 	}
 
+	sigaction(SIGINT, &__old_act, NULL);
+
 	if (option_set(OPT_USE_TLS))
 	{
+/*
+ * Calling __init_openssl() more than once (multithreaded)
+ * has in some instances caused segfaults. Thus, use
+ * pthread_once() to do it once only.
+ */
 		pthread_once(&__ossl_init_once, __init_openssl);
 		http->conn.ssl_ctx = SSL_CTX_new(TLSv1_2_client_method());
 		http_tls(http) = SSL_new(http->conn.ssl_ctx);
