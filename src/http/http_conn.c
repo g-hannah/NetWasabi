@@ -148,6 +148,9 @@ http_connect(struct http_t *http)
 		SSL_set_connect_state(http_tls(http)); /* Set as client */
 	}
 
+	http->conn.sock_nonblocking = 0;
+	http->conn.ssl_nonblocking = 0;
+
 	update_connection_state(http, FL_CONNECTION_CONNECTED);
 	update_operation_status("Connected to remote host");
 	freeaddrinfo(ainf);
@@ -253,8 +256,8 @@ http_reconnect(struct http_t *http)
 		SSL_set_connect_state(http_tls(http)); /* Set as client */
 	}
 
-	SET_SOCK_FLAG_ONCE = 0;
-	SET_SSL_SOCK_FLAG_ONCE = 0;
+	http->conn.sock_nonblocking = 0;
+	http->conn.ssl_nonblocking = 0;
 
 	update_connection_state(http, FL_CONNECTION_CONNECTED);
 	freeaddrinfo(ainf);
