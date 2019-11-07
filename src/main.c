@@ -485,18 +485,6 @@ main(int argc, char *argv[])
 
 	update_current_url(http->full_url);
 
-/*
- * We no longer check here for any 3xx status codes
- * that result in a Location header field being sent
- * because it makes much more sense for that to be
- * dealt with behind the scenes within the HTTP
- * module.
- *
- * TODO: still learn, however, when we got a location
- * header sent to us so that we can save an empty file
- * for the name of the redirected URL in order that we
- * stop requesting it in the future.
- */
 	status_code = do_request(http);
 	update_status_code(status_code);
 
@@ -550,7 +538,6 @@ main(int argc, char *argv[])
 	update_operation_status("Finished crawling site");
 
 	out_disconnect:
-	screen_updater_stop = 1;
 	http_disconnect(http);
 	http_delete(http);
 
@@ -572,6 +559,7 @@ main(int argc, char *argv[])
 	sigaction(SIGQUIT, &old_sigquit, NULL);
 
 	out:
+	screen_updater_stop = 1;
 	exit(EXIT_SUCCESS);
 
 	fail_disconnect:
