@@ -342,6 +342,7 @@ buf_read_socket(int sock, buf_t *buf, size_t toread)
 		return -1;
 	}
 
+#if 0
 	int sock_flags;
 
 	if (!SET_SOCK_FLAG_ONCE)
@@ -357,6 +358,7 @@ buf_read_socket(int sock, buf_t *buf, size_t toread)
 
 		SET_SOCK_FLAG_ONCE = 1;
 	}
+#endif
 
 	slack = buf_slack(buf);
 
@@ -487,6 +489,7 @@ buf_read_tls(SSL *ssl, buf_t *buf, size_t toread)
 	fd_set rdfds;
 #endif
 
+#if 0
 	int sock_flags;
 	int read_socket;
 
@@ -505,6 +508,7 @@ buf_read_tls(SSL *ssl, buf_t *buf, size_t toread)
 
 		SET_SSL_SOCK_FLAG_ONCE = 1;
 	}
+#endif
 
 	slack = buf_slack(buf);
 
@@ -591,9 +595,6 @@ buf_read_tls(SSL *ssl, buf_t *buf, size_t toread)
 	}
 	else // !toread
 	{
-	read_socket = SSL_get_rfd(ssl);
-	sock_flags = fcntl(read_socket, F_GETFL);
-
 		while (1)
 		{
 			n = SSL_read(ssl, buf->buf_tail, slack-1);
