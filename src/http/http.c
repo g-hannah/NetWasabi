@@ -17,7 +17,7 @@
 #define HTTP_SMALL_READ_BLOCK 64
 #define HTTP_MAX_WAIT_TIME 6
 
-FILE *logfp;
+FILE *hlogfp = NULL;
 
 #define LOG_FILE "./http_debug_log.txt"
 
@@ -36,7 +36,7 @@ _log(char *fmt, ...)
 		return;
 
 	va_start(args, fmt);
-	vfprintf(logfp, fmt, args);
+	vfprintf(hlogfp, fmt, args);
 
 	va_end(args);
 
@@ -69,7 +69,9 @@ static void
 __ctor __http_init(void)
 {
 #ifdef DEBUG
-	logfp = fdopen(open(LOG_FILE, O_RDWR|O_TRUNC|O_CREAT, S_IRUSR|S_IWUSR), "r+");
+	hlogfp = fdopen(open(LOG_FILE, O_RDWR|O_TRUNC|O_CREAT, S_IRUSR|S_IWUSR), "r+");
+	assert(hlogfp);
+	_log("Opened log file\n");
 #endif
 	return;
 }
@@ -78,8 +80,8 @@ static void
 __dtor __http_fini(void)
 {
 #ifdef DEBUG
-	fclose(logfp);
-	logfp = NULL;
+	fclose(hlogfp);
+	hlogfp = NULL;
 #endif
 	return;
 }
@@ -886,6 +888,8 @@ http_recv_response(struct http_t *http)
 
 	http_status_code = http_status_code_int(buf);
 
+	_log("Got status code %d for req %s\n", http_status_code, HEAD == http->req_type ? "HEAD" : "GET");
+
 /*
  * Check for a URL redirect status code.
  */
@@ -1036,7 +1040,7 @@ http_recv_response(struct http_t *http)
 	wr_cache_dealloc(__http->headers, (void *)content_len, &content_len);
 	wr_cache_dealloc(__http->headers, (void *)transfer_enc, &transfer_enc);
 
-	return 0;
+	return http_status_code;
 
 	fail_dealloc:
 	_log("Failed in %s\n", __func__);
@@ -1273,7 +1277,7 @@ http_parse_page(char *url, char *page)
 
 	q = memchr(p, '/', (endp - p));
 
-	if (!q)
+	if (!q || (q + 1) == endp)
 	{
 		strncpy(page, "/", 1);
 		page[1] = 0;
