@@ -7,6 +7,7 @@
 #include <openssl/err.h>
 #include <openssl/ssl.h>
 #include <pthread.h>
+#include <signal.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -17,6 +18,18 @@
 #include "webreaper.h"
 
 static pthread_once_t __ossl_init_once = PTHREAD_ONCE_INIT;
+
+static sigset_t __new;
+static sigset_t __old;
+
+#define __block_signal(s)\
+do {\
+	sigemptyset(&__new);\
+	sigaddset(&__new, (s));\
+	sigprocmask(SIG_BLOCK, &__new, &__old);\
+} while (0)
+
+#define __unblock_signal(s) sigprocmask(SIG_SETMASK, &__old, NULL);
 
 /**
  * __init_openssl - initialise the openssl library
