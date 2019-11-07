@@ -1544,8 +1544,6 @@ __http_init_obj(struct __http_t *__http)
 	assert(__http->page);
 	assert(__http->full_url);
 
-	_log("Initialised HTTP object fields. #objs = %d\n", __http_obj_cnt);
-
 	return 0;
 
 	fail_release_mem:
