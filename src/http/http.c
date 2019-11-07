@@ -1486,13 +1486,12 @@ http_connection_closed(struct http_t *http)
 	return rv;
 }
 
-static int __http_obj_cnt = 0;
-static char __http_cache_name[64];
-
 static int
 __http_init_obj(struct __http_t *__http)
 {
-	sprintf(__http_cache_name, "http_header_cache%d", __http_obj_cnt);
+	char __http_cache_name[64];
+
+	sprintf(__http_cache_name, "http_header_cache-0x%lx", pthread_self());
 
 	if (!(__http->headers = wr_cache_create(
 			__http_cache_name,
@@ -1507,7 +1506,7 @@ __http_init_obj(struct __http_t *__http)
 
 	_log("Created header cache %s\n", __http_cache_name);
 
-	sprintf(__http_cache_name, "http_cookie_cache%d", __http_obj_cnt);
+	sprintf(__http_cache_name, "http_cookie_cache-0x%lx", pthread_self());
 	if (!(__http->cookies = wr_cache_create(
 			__http_cache_name,
 			sizeof(http_header_t),
@@ -1544,8 +1543,6 @@ __http_init_obj(struct __http_t *__http)
 	assert(__http->primary_host);
 	assert(__http->page);
 	assert(__http->full_url);
-
-	++__http_obj_cnt;
 
 	_log("Initialised HTTP object fields. #objs = %d\n", __http_obj_cnt);
 
