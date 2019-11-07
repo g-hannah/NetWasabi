@@ -138,8 +138,8 @@ struct http_t
 size_t httplen;
 size_t httpslen;
 
-int http_build_request_header(struct http_t *, enum request) __nonnull((1,2)) __wur;
-int http_send_request(struct http_t *, enum request) __nonnull((1,2)) __wur;
+int http_build_request_header(struct http_t *, enum request) __nonnull((1)) __wur;
+int http_send_request(struct http_t *, enum request) __nonnull((1)) __wur;
 int http_recv_response(struct http_t *) __nonnull((1)) __wur;
 
 int http_append_header(buf_t *, http_header_t *) __nonnull((1,2)) __wur;
