@@ -284,7 +284,7 @@ worker_crawl(void *args)
 		else
 		{
 			wlog("[0x%lx] calling parse_links()\n", pthread_self());
-			if (parse_links(http, &cache1, &cache2) < 0)
+			if ((nr_draining = parse_links(http, &cache1, &cache2)) < 0)
 			{
 				wlog("[0x%lx] failed to parse URLs from page\n", pthread_self());
 				put_error_msg("Failed to get URLs from start page");
@@ -292,8 +292,13 @@ worker_crawl(void *args)
 			}
 			else
 			{
-				assert(cache1.root != NULL);
-				nr_draining = cache_nr_used(cache1.cache);
+				if (nr_draining > 0)
+					assert(cache1.root != NULL);
+				else
+				{	
+					wlog("[0x%lx] Parsed no URLs from initial page\n", pthread_self());
+					__threads_exit = 1;
+				}
 				nr_filling = 0;
 				wlog("[0x%lx] %d in cache1\n", pthread_self(), nr_draining);
 			}
