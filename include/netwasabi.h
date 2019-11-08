@@ -1,5 +1,5 @@
-#ifndef WEBREAPER_H
-#define WEBREAPER_H 1
+#ifndef NETWASABI_H
+#define NETWASABI_H 1
 
 #include <stdint.h>
 #include <string.h>
@@ -9,8 +9,8 @@
 #include "graph.h"
 #include "http.h"
 
-#define WEBREAPER_BUILD		"0.0.2"
-#define WEBREAPER_DIR			"WR_Reaped"
+#define NETWASABI_BUILD		"0.0.2"
+#define NETWASABI_DIR			"WR_Reaped"
 
 #define COL_ORANGE	"\x1b[38;5;208m"
 #define COL_RED			"\x1b[38;5;9m"
@@ -148,7 +148,7 @@ struct url_types
 	size_t len;
 };
 
-struct webreaper_ctx
+struct netwasabi_ctx
 {
 	pthread_mutex_t lock;
 	unsigned char trailing_slash;
@@ -171,7 +171,7 @@ enum state
 
 struct cache_ctx
 {
-	wr_cache_t *cache;
+	cache_t *cache;
 	http_link_t *root;
 	enum state state;
 };
@@ -186,13 +186,20 @@ struct cache_ctx
 #define total_requests(w) ((w).nr_requests)
 #define total_pages(w) ((w).nr_pages)
 #define total_errors(w) ((w).nr_errors)
-#define wrstats_lock(w) (pthread_mutex_lock(&(w).lock))
-#define wrstats_unlock(w) (pthread_mutex_unlock(&(w).lock))
+
+#define nwstats_lock(w) (pthread_mutex_lock(&(w).lock))
+#define nwstats_unlock(w) (pthread_mutex_unlock(&(w).lock))
 
 #define STATS_INC_ERRORS(w) ++((w).nr_errors)
 #define STATS_INC_PAGES(w) ++((w).nr_pages)
 #define STATS_INC_REQS(w) ++((w).nr_requests)
-#define STATS_ADD_BYTES(w, b) (wrstats_lock(w); ((w).nr_bytes_received += (b); wrstats_unlock(w))
+
+#define STATS_ADD_BYTES(w, b)\
+do {\
+	nwstats_lock(w);\
+	((w).nr_bytes_received += (b));\
+	nwstats_unlock(w);\
+} while (0)
 
 #define NR_URL_TYPES 11
 
@@ -214,7 +221,7 @@ int path_max;
 char **user_blacklist;
 int USER_BLACKLIST_NR_TOKENS;
 
-struct webreaper_ctx wrctx;
+struct netwasabi_ctx nwctx;
 uint32_t runtime_options;
 
 struct winsize winsize;
@@ -249,10 +256,10 @@ int check_local_dirs(struct http_t *, buf_t *) __nonnull((1,2)) __wur;
 void replace_with_local_urls(struct http_t *, buf_t *) __nonnull((1,2));
 int archive_page(struct http_t *) __nonnull((1)) __wur;
 int parse_links(struct http_t *, struct cache_ctx *, struct cache_ctx *) __nonnull((1,2,3)) __wur;
-void deconstruct_btree(http_link_t *, wr_cache_t *) __nonnull((1,2));
+void deconstruct_btree(http_link_t *, cache_t *) __nonnull((1,2));
 int do_request(struct http_t *) __nonnull((1)) __wur;
 
-int reap(struct http_t *, struct cache_ctx *, struct cache_ctx *) __nonnull((1,2,3)) __wur;
+int crawl(struct http_t *, struct cache_ctx *, struct cache_ctx *) __nonnull((1,2,3)) __wur;
 
 #define TOKEN_MAX 64
 
@@ -280,4 +287,4 @@ pthread_mutex_t screen_mutex;
  */
 extern char **forbidden_tokens;
 
-#endif /* !defined WEBREAPER_H */
+#endif /* !defined NETWASABI_H */
