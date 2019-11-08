@@ -527,7 +527,7 @@ do_fast_mode(char *remote_host)
  * in their parent node that points to them by setting it to %NULL.
  * So we call cache_clear_all() here to actually empty the cache.
  */
-			deconstruct_btree(cache1.root, cache.cache);
+			deconstruct_btree(cache1.root, cache1.cache);
 			cache_clear_all(cache1.cache);
 
 			draining = cache2.cache;
