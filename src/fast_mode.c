@@ -134,6 +134,9 @@ init_worker_environ(void)
 	cache1.state = DRAINING;
 	cache2.state = FILLING;
 
+	update_cache_status(1, FL_CACHE_STATUS_DRAINING);
+	update_cache_status(2, FL_CACHE_STATUS_FILLING);
+
 	__initialising_thread = pthread_self();
 
 	return;
@@ -166,6 +169,12 @@ worker_signal_fin(void)
 /**
  * __get_next_link - get next URL from the URL cache
  * @ctx: the cache context containing the cache and the binary tree root
+ */
+
+/*
+ * XXX: There may be an issue here resulting in us believing
+ * we have processed all the URLs in the cache when in fact
+ * we may have missed perhaps a part of the binary tree.
  */
 static http_link_t *__get_next_link(struct cache_ctx *ctx)
 {
@@ -237,6 +246,14 @@ worker_reap(void *args)
 		goto thread_fail;
 	}
 
+/*
+ * Set up intitial state of caches (cache 1 state = DRAINING
+ * cache 2 state = FILLING). Draw cache states on the screen,
+ * etc. Thread that called init_worker_environ() then
+ * has the responsibility of getting the very initial page
+ * and filling cache 1 with its URLs (whilst the other
+ * threads wait to start working at the START_BARRIER).
+ */
 	pthread_once(&once, init_worker_environ);
 
 	if (__initialising_thread == pthread_self())
@@ -271,6 +288,10 @@ worker_reap(void *args)
 		}
 	}
 
+/*
+ * Workers that weren't the first ones to call pthread_once() wait
+ * here before starting to process the URLs in the DRAINING cache.
+ */
 	wlog("[0x%lx] Calling pthread_barrier_wait()\n", pthread_self());
 	pthread_barrier_wait(&start_barrier);
 
@@ -291,6 +312,10 @@ worker_reap(void *args)
 			wlog("[0x%lx] __get_next_link gave me NULL\n", pthread_self());
 			if (!wr_cache_nr_used(filling))
 			{
+/*
+ * There are no remaining URLs in the DRAINING cache, and we didn't
+ * add any new ones to the FILLING cache. So it's time to exit now.
+ */
 				wlog("[0x%lx] URLs in draining = %d\n", pthread_self(), wr_cache_nr_used(draining));
 				wlog("[0x%lx] Unlocking cache and jumping to thread_exit\n", pthread_self());
 				worker_signal_fin();
@@ -299,6 +324,16 @@ worker_reap(void *args)
 				goto thread_exit;
 			}
 
+/*
+ * The DRAINING cache is now empty. We have URLs in the FILLING cache that
+ * we will get once the main thread switches the cache states. So workers
+ * will signal end of cache (EOC) by calling worker_signal_eoc(). When the
+ * number of workers that have signaled EOC == FAST_MODE_NR_WORKERS, the main
+ * thread will switch the cache states and adjust our pointers and then
+ * broadcast to the workers that the condition has been met. The kernel will
+ * wake them back up and they can continue to work on the URLs in the
+ * now-DRAINING cache.
+ */
 			wlog("[0x%lx] Draining cache empty. Calling worker_signal_eoc()\n", pthread_self());
 			wlog("[0x%lx] Waiting for main thread to broadcast condition\n", pthread_self());
 			worker_signal_eoc();
@@ -307,7 +342,7 @@ worker_reap(void *args)
 		}
 		else
 		{
-			wlog("[0x%lx] Got URL from cache\n", pthread_self());
+			wlog("[0x%lx] Got \"%s\" from cache\n", pthread_self(), link->url);
 			--nr_draining;
 
 			if (draining == cache1.cache)
@@ -318,12 +353,11 @@ worker_reap(void *args)
 			wr_cache_unlock(draining);
 		}
 
-		wlog("[0x%lx] Calling do_request()\n", pthread_self());
-
 		strcpy(http->full_url, link->url);
 		http_parse_host(link->url, http->host);
 		http_parse_page(link->url, http->page);
 
+		wlog("[0x%lx] Calling do_request()\n", pthread_self());
 		status_code = do_request(http);
 
 		update_current_url(link->url);
@@ -380,8 +414,25 @@ worker_reap(void *args)
 
 		next:
 
+/*
+ * TODO:
+ *
+ * There seems to be a deadlock happening when some of the threads
+ * have called pthread_cond_wait() above and are waiting for the main
+ * thread to broadcast, whereas one worker is just parsing the URLs
+ * from the last link in the cache. It tries to lock FCTX->cache but
+ * waits forever. The only time we lock the FILLING cache is below
+ * when we want to update the number we have in it. When the threads
+ * call pthread_cond_wait, it's for the DRAINING cache, and the mutex
+ * is unlocked while the kernel places them on a waiting queue for
+ * the condition to be broadcast. So even the DRAINING cache mutex
+ * should be free.
+ */
 		if (parse_links(http, cache1.state == FILLING ? &cache1 : &cache2, cache1.state == DRAINING ? &cache1 : &cache2) < 0)
+		{
+			wlog("[0x%lx] Failed to parse URLs from %s\n", pthread_self(), link->url);
 			put_error_msg("0x%lx: failed to parse URLs from page", pthread_self());
+		}
 
 		wr_cache_lock(filling);
 
@@ -494,19 +545,36 @@ do_fast_mode(char *remote_host)
 
 		if (cache1.state == DRAINING)
 		{
+/*
+ * The workers didn't actually empty the cache. They artificially
+ * remove URLs from the cache by searching the binary tree overlay
+ * in postorder and when they find a node they adjust the pointer
+ * in their parent node that points to them by setting it to %NULL.
+ * So we call wr_cache_clear_all() here to actually empty the cache.
+ */
+			wr_cache_clear_all(cache1.cache);
+
 			draining = cache2.cache;
 			filling = cache1.cache;
 
 			cache2.state = DRAINING;
 			cache1.state = FILLING;
+
+			update_cache_status(1, FL_CACHE_STATUS_FILLING);
+			update_cache_status(2, FL_CACHE_STATUS_DRAINING);
 		}
 		else
 		{
+			wr_cache_clear_all(cache2.cache);
+
 			draining = cache1.cache;
 			filling = cache2.cache;
 
 			cache1.state = DRAINING;
 			cache2.state = FILLING;
+
+			update_cache_status(1, FL_CACHE_STATUS_DRAINING);
+			update_cache_status(2, FL_CACHE_STATUS_FILLING);
 		}
 
 		wlog("[main] Broadcasting condition to worker threads\n");
