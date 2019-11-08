@@ -319,6 +319,14 @@ worker_crawl(void *args)
 			wlog("[0x%lx] Waiting for main thread to broadcast condition\n", pthread_self());
 			worker_signal_eoc();
 			pthread_cond_wait(&cache_switch_cond, &draining->lock);
+/*
+ * When the workers return from pthread_cond_wait(), they compete automatically
+ * for the mutex that was associated with the condition, which was in the
+ * DRAINING cache_ctx but which has now become the FILLING cache_ctx. So each of
+ * them in turn will get to own the mutex after this, so each of them in turn
+ * has to unlock it.
+ */
+			cache_unlock(filling);
 			continue;
 		}
 		else
@@ -558,9 +566,8 @@ do_fast_mode(char *remote_host)
 
 		wlog("[main] Broadcasting condition to worker threads\n");
 
-		cache_lock(draining);
+		fill = 1;
 		pthread_cond_broadcast(&cache_switch_cond);
-		cache_unlock(draining);
 	}
 
 	pthread_attr_destroy(&attr);
