@@ -112,7 +112,7 @@ static inline int __cache_obj_index(cache_t *cachep, void *obj)
 	return (int)(__cache_obj_offset(cachep, obj) / cachep->objsize);
 }
 
-static inline int __cache_is_in_cache(cache_t *cachep, void *addr)
+static inline int __owner_is_in_cache(cache_t *cachep, void *addr)
 {
 	int in_cache = 0;
 
@@ -152,7 +152,7 @@ static inline int __cache_is_in_cache(cache_t *cachep, void *addr)
 #define CACHE_ASSIGN_PTR(c, p, s)\
 do {\
 	struct cache_obj_ctx *____ctx_p;\
-	int __in_cache = __cache_is_in_cache((c), (p));\
+	int __in_cache = __owner_is_in_cache((c), (p));\
 	int ____nr_ = (c)->nr_assigned;\
 	____ctx_p = ((c)->assigned_list + ____nr_);\
 	____ctx_p->ptr_addr = (p);\
@@ -425,7 +425,6 @@ cache_alloc(cache_t *cachep, void *ptr_addr)
 		COL_END);
 #endif
 
-	assert(cachep->nr_assigned <= cachep->capacity);
 /*
  * Our bitmap can be deceiving and an index may be return
  * because it found a zero-bit but in fact that has gone
@@ -477,7 +476,7 @@ cache_alloc(cache_t *cachep, void *ptr_addr)
 		cachep->assigned_list = wr_realloc(cachep->assigned_list, (new_capacity * sizeof(struct cache_obj_ctx)));
 		assert(cachep->assigned_list);
 
-		if (__cache_is_in_cache(cachep, owner_addr))
+		if (__owner_is_in_cache(cachep, owner_addr))
 		{
 			owner_off = (off_t)((char *)owner_addr - (char *)cachep->cache);
 		}
