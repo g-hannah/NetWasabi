@@ -190,11 +190,11 @@ __print_information_layout(void)
 {
 	fprintf(stderr,
 		"\n\n"
-		"  ;;;   ;;  ;;;;; ;;;;;;;;   ,; ;; ;,   ;;;;    ;;;;;   ;;;;    ;;;;;;   ,;,  \n"
-		"  ;;;;  ;; ;;        ;;      ;; ;; ;;  ;;;;;;  ;;      ;;;;;;  ;;;    ;  ;;;  \n"
-		"  ;; ;; ;; ;;;;;;    ;;      ;; ;; ;;  ;;  ;;  ;;;;;   ;;  ;;  ;;;;;;;   ;;;  \n"
-		"  ;;   ;;; ;;        ;;      ;; ;; ;;  ;;;;;;      ;;  ;;;;;;  ;;;    ;  ;;;  \n"
-		"  ;;    ;;  ;;;;;    ;;       ;;;;;;   ;;  ;;  ;;;;;   ;;  ;;   ;;;;;;   ;;;  \n"
+		"         ;;;   ;;  ;;;;; ;;;;;;;;   ,; ;; ;,   ;;;;    ;;;;;   ;;;;    ;;;;;;   ,;,  \n"
+		"         ;;;;  ;; ;;        ;;      ;; ;; ;;  ;;  ;;  ;;      ;;  ;;  ;;;    ;  ;;;  \n"
+		"         ;; ;; ;; ;;;;;;    ;;      ;; ;; ;;  ;;;;;;  ;;;;;   ;;;;;;  ;;;;;;;   ;;;  \n"
+		"         ;;   ;;; ;;        ;;      ;; ;; ;;  ;;  ;;      ;;  ;;  ;;  ;;;    ;  ;;;  \n"
+		"         ;;    ;;  ;;;;;    ;;       ;;;;;;   ;;  ;;  ;;;;;   ;;  ;;   ;;;;;;   ;;;  \n\n"
 		"   %sv%s%s\n\n",
 		COL_DARKRED,
 		NETWASABI_BUILD,
@@ -392,6 +392,12 @@ main(int argc, char *argv[])
 	pthread_attr_setdetachstate(&thread_screen_attr, PTHREAD_CREATE_DETACHED);
 	pthread_create(&thread_screen_tid, &thread_screen_attr, screen_updater_thread, NULL);
 
+/*
+ * Check for existence of the WR_Reaped directory
+ * in the user's home directory.
+ */
+	__check_directory();
+
 	if (option_set(FAST_MODE))
 	{
 		do_fast_mode(argv[1]);
@@ -423,11 +429,6 @@ main(int argc, char *argv[])
 		goto fail;
 	}
 
-/*
- * Check for existence of the WR_Reaped directory
- * in the user's home directory.
- */
-	__check_directory();
 
 	struct http_t *http;
 	int status_code;
