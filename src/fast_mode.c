@@ -180,9 +180,15 @@ static http_link_t *__get_next_link(struct cache_ctx *ctx)
 {
 	http_link_t *nptr = ctx->root;
 
+	if (nr_draining > 0)
+		assert(nptr);
+
 	if (!nptr)
 		return NULL;
 
+/*
+ * Search the binary tree in post-order.
+ */
 	while (1)
 	{
 		if (!nptr->left && !nptr->right)
@@ -191,7 +197,7 @@ static http_link_t *__get_next_link(struct cache_ctx *ctx)
 		while (nptr->left)
 			nptr = nptr->left;
 
-		while (nptr->right)
+		if (nptr->right)
 			nptr = nptr->right;
 	}
 
@@ -199,6 +205,9 @@ static http_link_t *__get_next_link(struct cache_ctx *ctx)
  * We are artificially removing the object from the cache by
  * pointing the parent's pointer to NULL so that threads will
  * not come to this already-found node.
+ *
+ * The main thread will actually call wr_cache_clear_all()
+ * when toggling the cache states.
  */
 
 	if (nptr->parent)
@@ -212,6 +221,8 @@ static http_link_t *__get_next_link(struct cache_ctx *ctx)
 	{
 		ctx->root = NULL;
 	}
+
+	--nr_draining;
 
 	return nptr;
 }
@@ -281,6 +292,7 @@ worker_reap(void *args)
 			}
 			else
 			{
+				assert(cache1.root != NULL);
 				nr_draining = wr_cache_nr_used(cache1.cache);
 				nr_filling = 0;
 				wlog("[0x%lx] %d in cache1\n", pthread_self(), nr_draining);
@@ -343,7 +355,6 @@ worker_reap(void *args)
 		else
 		{
 			wlog("[0x%lx] Got \"%s\" from cache\n", pthread_self(), link->url);
-			--nr_draining;
 
 			if (draining == cache1.cache)
 				update_cache1_count(nr_draining);
