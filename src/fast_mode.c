@@ -63,44 +63,6 @@ __ctor __fast_mode_init(void)
 #ifdef DEBUG
 	wlogfp = fdopen(open(WLOG_FILE, O_RDWR|O_TRUNC|O_CREAT, S_IRUSR|S_IWUSR), "r+");
 #endif
-#if 0
-	if (!(cache1.cache = cache_create(
-			"fast_mode_url_cache1",
-			sizeof(http_link_t),
-			0,
-			http_link_cache_ctor,
-			http_link_cache_dtor)))
-	{
-		fprintf(stderr, "__fast_mode_init: failed to create cache1\n");
-		goto fail;
-	}
-
-	if (!(cache2.cache = cache_create(
-			"fast_mode_url_cache2",
-			sizeof(http_link_t),
-			0,
-			http_link_cache_ctor,
-			http_link_cache_dtor)))
-	{
-		fprintf(stderr, "__fast_mode_init: failed to create cache2\n");
-		goto fail;
-	}
-
-	if (pthread_barrier_init(&start_barrier, NULL, (FAST_MODE_NR_WORKERS + 1)) != 0)
-	{
-		fprintf(stderr, "__fast_mode_init: failed to initialise start barrier\n");
-		goto fail;
-	}
-
-	if (pthread_mutex_init(&eoc_mtx, NULL) != 0)
-	{
-		fprintf(stderr, "__fast_mode_init: failed to initialise eoc mutex\n");
-		goto fail;
-	}
-
-	cache1.root = NULL;
-	cache2.root = NULL;
-#endif
 
 	return;
 }
@@ -111,15 +73,6 @@ __dtor __fast_mode_fini(void)
 #ifdef DEBUG
 	fclose(wlogfp);
 	wlogfp = NULL;
-#endif
-#if 0
-	cache_clear_all(cache1.cache);
-	cache_clear_all(cache2.cache);
-	pthread_barrier_destroy(&start_barrier);
-	pthread_mutex_destroy(&eoc_mtx);
-
-	cache_destroy(cache1.cache);
-	cache_destroy(cache2.cache);
 #endif
 
 	return;
@@ -171,14 +124,10 @@ worker_signal_fin(void)
  * @ctx: the cache context containing the cache and the binary tree root
  */
 
-/*
- * XXX: There may be an issue here resulting in us believing
- * we have processed all the URLs in the cache when in fact
- * we may have missed perhaps a part of the binary tree.
- */
 static http_link_t *__get_next_link(struct cache_ctx *ctx)
 {
 	http_link_t *nptr = ctx->root;
+	http_link_t *parent = NULL;
 
 	if (nr_draining > 0)
 		assert(nptr);
@@ -192,13 +141,23 @@ static http_link_t *__get_next_link(struct cache_ctx *ctx)
 	while (1)
 	{
 		if (!nptr->left && !nptr->right)
+		{
+			wlog("[0x%lx] Found node @ %p%s\n", pthread_self(), nptr, nptr == ctx->root ? "(is root)" : "");
+			wlog("[0x%lx] (parent @ %p ; left @ %p ; right @ %p)\n", pthread_self(), parent, nptr->left, nptr->right);
 			break;
+		}
 
 		while (nptr->left)
+		{
+			parent = nptr;
 			nptr = nptr->left;
+		}
 
 		if (nptr->right)
+		{
+			parent = nptr;
 			nptr = nptr->right;
+		}
 	}
 
 /*
@@ -210,12 +169,12 @@ static http_link_t *__get_next_link(struct cache_ctx *ctx)
  * when toggling the cache states.
  */
 
-	if (nptr->parent)
+	if (parent)
 	{
-		if (nptr->parent->right == nptr)
-			nptr->parent->right = NULL;
+		if (parent->right == nptr)
+			parent->right = NULL;
 		else
-			nptr->parent->left = NULL;
+			parent->left = NULL;
 	}
 	else
 	{
@@ -296,6 +255,7 @@ worker_crawl(void *args)
 					assert(cache1.root != NULL);
 				else
 				{	
+					update_operation_status("Parsed no URLs from initial page");
 					wlog("[0x%lx] Parsed no URLs from initial page\n", pthread_self());
 					__threads_exit = 1;
 				}
@@ -315,6 +275,8 @@ worker_crawl(void *args)
 	if (__threads_exit)
 	{
 		wlog("[0x%lx] __threads_exit == 1 ; jumping to label thread_exit\n", pthread_self());
+		worker_signal_fin();
+		worker_signal_eoc();
 		goto thread_exit;
 	}
 
@@ -326,6 +288,7 @@ worker_crawl(void *args)
 
 		if (!link)
 		{
+			assert(!nr_draining);
 			wlog("[0x%lx] __get_next_link gave me NULL\n", pthread_self());
 			if (!cache_nr_used(filling))
 			{
@@ -576,6 +539,8 @@ do_fast_mode(char *remote_host)
 			cache2.state = DRAINING;
 			cache1.state = FILLING;
 
+			nr_draining = cache_nr_used(cache2.cache);
+
 			update_cache_status(1, FL_CACHE_STATUS_FILLING);
 			update_cache_status(2, FL_CACHE_STATUS_DRAINING);
 		}
@@ -588,6 +553,8 @@ do_fast_mode(char *remote_host)
 
 			cache1.state = DRAINING;
 			cache2.state = FILLING;
+
+			nr_draining = cache_nr_used(cache1.cache);
 
 			update_cache_status(1, FL_CACHE_STATUS_DRAINING);
 			update_cache_status(2, FL_CACHE_STATUS_FILLING);
