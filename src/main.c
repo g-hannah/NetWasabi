@@ -19,14 +19,14 @@
 #include "robots.h"
 #include "screen_utils.h"
 #include "utils_url.h"
-#include "webreaper.h"
+#include "netwasabi.h"
 
 static int get_opts(int, char *[]) __nonnull((2)) __wur;
 
 /*
  * Global vars.
  */
-struct webreaper_ctx wrctx = {0};
+struct netwasabi_ctx nwctx = {0};
 uint32_t runtime_options = 0;
 
 size_t httplen;
@@ -77,9 +77,6 @@ __ctor __wr_init(void)
  * For calling fcntl() once only in buf_read_socket/tls()
  * to set O_NONBLOCK flag. On a reconnect, reset to zero.
  */
-	SET_SOCK_FLAG_ONCE = 0;
-	SET_SSL_SOCK_FLAG_ONCE = 0;
-
 	pthread_mutex_init(&screen_mutex, NULL);
 
 	return;
@@ -171,7 +168,7 @@ static void
 __noret usage(int exit_status)
 {
 	fprintf(stderr,
-		"webreaper <url> [options]\n\n"
+		"netwasabi <url> [options]\n\n"
 		"-T/--tls              use a TLS connection\n"
 		"-oH/--req-head        show the request header (\"out header\")\n"
 		"-iH/--res-head        show the response header (\"in header\")\n"
@@ -192,19 +189,22 @@ static void
 __print_information_layout(void)
 {
 	fprintf(stderr,
-		"%s"
 		"\n\n"
-		"                                                                                 ,`.               \n"
+		"  ooo   oo  oooo oooooo   o  o  o   oooo    ooooo   oooo   oooooo   oo\n"
+		"  oooo  oo o       oo     o  o  o  o    o  o       o    o  o     o  oo\n"
+		"  oo oo oo ooooo   oo     o  o  o  oooooo  ooooo   oooooo  oooooo   oo\n"
+		"  oo   ooo o       oo     o  o  o  o    o       o  o    o  o     o  oo\n"
+		"  oo    oo  oooo   oo      ooooo   o    o  ooooo   o    o  oooooo   oo\n"
+#if 0
 		"  @  @  @   @@@@@  @@@@@@   @@@@@@    @@@@@   @@@@@   @@@@@@    @@@@@  @@@@@@   , ,        @@@@@   \n"
 		"  @  @  @  @@      @@   @@  @@   @@  @@      @@   @@  @@   @@  @@      @@   @@  ' '       /'       \n"
 		"  @  @  @  @@@@@@  @@@@@@   @@@@@@   @@@@@@  @@@@@@@  @@@@@@   @@@@@@  @@@@@@   ` `      ' '       \n"
 		"   @ @ @   @@      @@   @@  @@  @@   @@      @@   @@  @@       @@      @@  @@    ` ` . .' .        \n"
 		"   *oOo*    @@@@@  @@@@@@   @@   @@   @@@@@  @@   @@  @@        @@@@@  @@   @@    ` . _ .'         \n"
-		"\n"
+#endif
 		"   %sv%s%s\n\n",
-		COL_DARKGREY,
 		COL_DARKRED,
-		WEBREAPER_BUILD,
+		NETWASABI_BUILD,
 		COL_END);
 /*       15               15                 22                  17             13
  *"===============|===============|======================|=================|============="
@@ -215,7 +215,7 @@ __print_information_layout(void)
 	"  %sDisconnected%s\n"
 	" ==========================================================================================\n"
   "  %sCache 1%s: %4d | %sCache 2%s: %4d | %sData%s: %12lu B | %sCrawl-Delay%s: %ds | %sStatus%s: %d\n"
-	"   %s%10s%s   | %s%10s%s    |                      |                 |                     \n"
+	"   %s%10s%s   | %s%10s%s    |                      |  %s  |                     \n"
 	" ------------------------------------------------------------------------------------------\n"
 	"\n"
 	"\n" /* current URL goes here */
@@ -223,8 +223,9 @@ __print_information_layout(void)
 	" ==========================================================================================\n\n",
 	COL_LIGHTGREY, COL_END,
 	COL_HEADINGS, COL_END, (int)0, COL_HEADINGS, COL_END, (int)0, COL_HEADINGS, COL_END, (size_t)0,
-	COL_HEADINGS, COL_END, crawl_delay(wrctx), COL_HEADINGS, COL_END, 0,
-	COL_DARKGREEN, "(filling)", COL_END, COL_LIGHTGREY, "(empty)", COL_END);
+	COL_HEADINGS, COL_END, crawl_delay(nwctx), COL_HEADINGS, COL_END, 0,
+	COL_DARKGREEN, "(filling)", COL_END, COL_LIGHTGREY, "(empty)", COL_END,
+	FAST_MODE ? "🗲 FAST MODE 🗲" : "             ");
 
 	return;
 }
@@ -246,7 +247,7 @@ __check_directory(void)
 
 	buf_init(&tmp, path_max);
 	buf_append(&tmp, home);
-	buf_append(&tmp, "/" WEBREAPER_DIR);
+	buf_append(&tmp, "/" NETWASABI_DIR);
 
 	if (access(tmp.buf_head, F_OK) != 0)
 		mkdir(tmp.buf_head, S_IRWXU);
@@ -285,7 +286,7 @@ __get_robots(connection_t *conn)
 	strcpy(http->full_url, full_url.buf_head);
 
 	buf_destroy(&full_url);
-	wrctx.got_token_graph = 0;
+	nwctx.got_token_graph = 0;
 
 	status_code = __do_request(conn);
 
@@ -310,7 +311,7 @@ __get_robots(connection_t *conn)
 		goto out_destroy_graphs;
 	}
 
-	wrctx.got_token_graph = 1;
+	nwctx.got_token_graph = 1;
 	return 0;
 
 	out_destroy_graphs:
@@ -340,7 +341,7 @@ __valid_url(char *url)
 }
 
 /*
- * ./webreaper <url> [options]
+ * ./netwasabi <url> [options]
  */
 int
 main(int argc, char *argv[])
@@ -426,7 +427,7 @@ main(int argc, char *argv[])
 
 	if (!(http = http_new()))
 	{
-		fprintf(stderr, "reap: failed to obtain new HTTP object\n");
+		fprintf(stderr, "main: failed to obtain new HTTP object\n");
 		goto fail;
 	}
 
@@ -448,14 +449,14 @@ main(int argc, char *argv[])
 	/*
 	 * Create a new cache for http_link_t objects.
 	 */
-	cache1.cache = wr_cache_create(
+	cache1.cache = cache_create(
 			"http_link_cache",
 			sizeof(http_link_t),
 			0,
 			http_link_cache_ctor,
 			http_link_cache_dtor);
 
-	cache2.cache = wr_cache_create(
+	cache2.cache = cache_create(
 			"http_link_cache2",
 			sizeof(http_link_t),
 			0,
@@ -494,7 +495,11 @@ main(int argc, char *argv[])
 			break;
 		case HTTP_ALREADY_EXISTS:
 			do_not_archive = 1;
-			http_send_request(http, HTTP_GET); /* in this case we still need to get it to extract URLs */
+/*
+ * It already exists, but we would like to get it anyway
+ * and extract URLs from it and start crawling from there.
+ */
+			http_send_request(http, GET);
 			status_code = http_recv_response(http);
 			update_status_code(status_code);
 			break;
@@ -512,14 +517,14 @@ main(int argc, char *argv[])
 	}
 
 	parse_links(http, &cache1, &cache2);
-	update_cache1_count(wr_cache_nr_used(cache1.cache));
+	update_cache1_count(cache_nr_used(cache1.cache));
 
 	if (!do_not_archive)
 	{
 		archive_page(http);
 	}
 
-	if (!wr_cache_nr_used(cache1.cache))
+	if (!cache_nr_used(cache1.cache))
 	{
 		//update_operation_status("Parsed no URLs from page (already archived)");
 		goto out_disconnect;
@@ -528,7 +533,7 @@ main(int argc, char *argv[])
 	cache1.state = DRAINING;
 	cache2.state = FILLING;
 
-	rv = reap(http, &cache1, &cache2);
+	rv = crawl(http, &cache1, &cache2);
 
 	if (rv < 0)
 	{
@@ -541,13 +546,13 @@ main(int argc, char *argv[])
 	http_disconnect(http);
 	http_delete(http);
 
-	if (wr_cache_nr_used(cache1.cache) > 0)
-		wr_cache_clear_all(cache1.cache);
-	if (wr_cache_nr_used(cache2.cache) > 0)
-		wr_cache_clear_all(cache2.cache);
+	if (cache_nr_used(cache1.cache) > 0)
+		cache_clear_all(cache1.cache);
+	if (cache_nr_used(cache2.cache) > 0)
+		cache_clear_all(cache2.cache);
 
-	wr_cache_destroy(cache1.cache);
-	wr_cache_destroy(cache2.cache);
+	cache_destroy(cache1.cache);
+	cache_destroy(cache2.cache);
 
 	if (allowed)
 		destroy_graph(allowed);
@@ -567,13 +572,13 @@ main(int argc, char *argv[])
 	http_disconnect(http);
 	http_delete(http);
 
-	if (wr_cache_nr_used(cache1.cache) > 0)
-		wr_cache_clear_all(cache1.cache);
-	if (wr_cache_nr_used(cache2.cache) > 0)
-		wr_cache_clear_all(cache2.cache);
+	if (cache_nr_used(cache1.cache) > 0)
+		cache_clear_all(cache1.cache);
+	if (cache_nr_used(cache2.cache) > 0)
+		cache_clear_all(cache2.cache);
 
-	wr_cache_destroy(cache1.cache);
-	wr_cache_destroy(cache2.cache);
+	cache_destroy(cache1.cache);
+	cache_destroy(cache2.cache);
 
 	if (allowed)
 		destroy_graph(allowed);
@@ -620,9 +625,9 @@ get_opts(int argc, char *argv[])
 				usage(EXIT_FAILURE);
 			}
 
-			crawl_depth(wrctx) = atoi(argv[i]);
-			assert(crawl_depth(wrctx) > 0);
-			assert(crawl_depth(wrctx) <= INT_MAX);
+			crawl_depth(nwctx) = atoi(argv[i]);
+			assert(crawl_depth(nwctx) > 0);
+			assert(crawl_depth(nwctx) <= INT_MAX);
 		}
 		else
 		if (!strcmp("--crawl-delay", argv[i])
@@ -636,9 +641,9 @@ get_opts(int argc, char *argv[])
 				usage(EXIT_FAILURE);
 			}
 
-			crawl_delay(wrctx) = atoi(argv[i]);
-			assert(crawl_delay(wrctx) >= 0);
-			assert(crawl_delay(wrctx) < MAX_CRAWL_DELAY);
+			crawl_delay(nwctx) = atoi(argv[i]);
+			assert(crawl_delay(nwctx) >= 0);
+			assert(crawl_delay(nwctx) < MAX_CRAWL_DELAY);
 		}
 		else
 		if (!strcmp("--fast-mode", argv[i])
@@ -712,13 +717,13 @@ get_opts(int argc, char *argv[])
 		}
 	}
 
-	if (crawl_delay(wrctx) > 0 && option_set(FAST_MODE))
+	if (crawl_delay(nwctx) > 0 && option_set(FAST_MODE))
 	{
-			crawl_delay(wrctx) = 0;
+			crawl_delay(nwctx) = 0;
 	}
 
-	if (!crawl_depth(wrctx))
-		crawl_depth(wrctx) = CRAWL_DEPTH_DEFAULT;
+	if (!crawl_depth(nwctx))
+		crawl_depth(nwctx) = CRAWL_DEPTH_DEFAULT;
 
 	return 0;
 }
