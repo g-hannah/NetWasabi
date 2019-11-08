@@ -2,7 +2,7 @@
 #include <stdlib.h>
 #include <unistd.h>
 #include "screen_utils.h"
-#include "webreaper.h"
+#include "netwasabi.h"
 
 void
 clear_line(void)

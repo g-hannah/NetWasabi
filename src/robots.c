@@ -4,7 +4,7 @@
 #include <string.h>
 #include "buffer.h"
 #include "robots.h"
-#include "webreaper.h"
+#include "netwasabi.h"
 
 /**
  * __url_legality - check that each token in the URL
