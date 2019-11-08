@@ -12,10 +12,11 @@ TOP_DIR := src
 PRIMARY_OBJS := \
 	$(TOP_DIR)/main.o \
 	$(TOP_DIR)/graph.o \
+	$(TOP_DIR)/fast_mode.o \
+	$(TOP_DIR)/netwasabi.o \
 	$(TOP_DIR)/robots.o \
 	$(TOP_DIR)/utils_url.o \
-	$(TOP_DIR)/screen_utils.o \
-	$(TOP_DIR)/webreaper.o
+	$(TOP_DIR)/screen_utils.o
 
 MM_OBJS := \
 	$(MM_DIR)/buffer.o \
@@ -30,7 +31,7 @@ ALL_OBJS := $(MM_OBJS) $(HTTP_OBJS) $(PRIMARY_OBJS)
 
 LIBS=-lcrypto -lssl -lpthread
 
-webreaper: $(ALL_OBJS)
+netwasabi: $(ALL_OBJS)
 ifeq ($(DEBUG),1)
 	@echo Compiling debug v$(BUILD)
 	cd $(MM_DIR); make DEBUG=1
@@ -42,4 +43,4 @@ else
 	cd $(HTTP_DIR); make
 	cd $(TOP_DIR); make
 endif
-	$(CC) $(CFLAGS) -Iinclude $^ -o webreaper $(LIBS)
+	$(CC) $(CFLAGS) -Iinclude $^ -o netwasabi $(LIBS)
