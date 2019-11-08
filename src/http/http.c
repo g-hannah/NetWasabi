@@ -55,6 +55,7 @@ struct __http_t
 	char *primary_host;
 	struct conn conn;
 	enum request req_type;
+	int code;
 	int redirected; /* non-zero if redirected via Location header field */
 	char *red_url; /* the URL that was redirected */
 
@@ -400,6 +401,7 @@ __http_read_until_eoh(struct http_t *http, char **p)
 
 	ssize_t n;
 	int is_http = 0;
+	int bytes = 0;
 	buf_t *buf = &http->conn.read_buf;
 
 	clear_struct(&oact);
@@ -437,6 +439,7 @@ __http_read_until_eoh(struct http_t *http, char **p)
 				continue;
 				break;
 			default:
+				bytes += (int)n;
 				if (!strstr(buf->buf_head, "HTTP/") && strncmp("\r\n", buf->buf_head, 2))
 					goto out;
 				*p = strstr(buf->buf_head, HTTP_EOH_SENTINEL);
@@ -458,7 +461,7 @@ __http_read_until_eoh(struct http_t *http, char **p)
 	}
 
 	sigaction(SIGALRM, &oact, NULL);
-	return 0;
+	return bytes;
 }
 
 #ifdef DEBUG
@@ -583,6 +586,7 @@ __http_do_chunked_recv(struct http_t *http)
 	size_t chunk_size;
 	size_t save_size;
 	size_t overread;
+	size_t total_bytes = 0;
 	static char tmp[HTTP_MAX_CHUNK_STR];
 #ifndef DEBUG
 	char *t;
@@ -595,7 +599,7 @@ __http_do_chunked_recv(struct http_t *http)
 
 	while (!p)
 	{
-		__read_bytes(http, 1);
+		total_bytes += __read_bytes(http, 1);
 		p = HTTP_EOH(buf);
 	}
 
@@ -700,15 +704,7 @@ __http_do_chunked_recv(struct http_t *http)
  * CHUNK SIZE, so we need to save this.
  */
 		save_size = chunk_size;
-
-/* XXX
- *
- * This should really be moved out of the HTTP module. Maybe we should
- * return the number of bytes read to the caller. They can call this
- * there.
- */
-		STATS_ADD_BYTES(nwctx, save_size);
-		update_bytes(total_bytes(nwctx));
+		total_bytes += save_size;
 
 /*
  * Do not use SKIP_CRNL() here, because the first few bytes of data
@@ -756,8 +752,8 @@ __http_do_chunked_recv(struct http_t *http)
 		__http_read_until_next_chunk_size(http, buf, &p);
 	}
 
-	_log("Returning 0 from %s\n", __func__);
-	return 0;
+	_log("Returning %lu from %s\n", total_bytes, __func__);
+	return total_bytes;
 }
 
 static int
@@ -872,8 +868,9 @@ http_recv_response(struct http_t *http)
 	size_t clen;
 	size_t overread;
 	ssize_t bytes;
-	int rv;
+	int rv = -1;
 	int http_status_code;
+	int total_bytes = 0;
 	http_header_t *content_len = NULL;
 	http_header_t *transfer_enc = NULL;
 	buf_t *buf = &http->conn.read_buf;
@@ -891,12 +888,18 @@ http_recv_response(struct http_t *http)
 	content_len = (http_header_t *)cache_alloc(__http->headers, &content_len);
 
 	if (!content_len)
+	{
+		_log("failed to get cache object for content_len\n");
 		goto fail;
+	}
 
 	transfer_enc = (http_header_t *)cache_alloc(__http->headers, &transfer_enc);
 
 	if (!transfer_enc)
+	{
+		_log("failed to get cache object for transfer_enc\n");
 		goto fail_dealloc;
+	}
 
 /*
  * Jump back to here to resend a request after dealing with
@@ -909,7 +912,13 @@ http_recv_response(struct http_t *http)
 	rv = __http_read_until_eoh(http, &p);
 
 	if (rv < 0 || HTTP_OPERATION_TIMEOUT == rv)
+	{
+		_log("__http_read_until_eoh() returned %d\n", rv);
 		goto fail_dealloc;
+	}
+
+	total_bytes += rv;
+	rv = -1;
 
 /*
  * If the response header has any Set-Cookie header fields, then
@@ -919,6 +928,7 @@ http_recv_response(struct http_t *http)
 	__http_check_cookies(http);
 
 	http_status_code = http_status_code_int(buf);
+	_log("got status code %d\n", http_status_code);
 
 	//_log("Got status code %d for req %s\n", http_status_code, HEAD == http->req_type ? "HEAD" : "GET");
 #ifdef DEBUG
@@ -935,7 +945,10 @@ http_recv_response(struct http_t *http)
 	{
 		case HTTP_OK:
 			if (HEAD == http->req_type)
+			{
+				http->code = HTTP_OK;
 				goto out_dealloc;
+			}
 			break;
 		case HTTP_FOUND:
 		case HTTP_MOVED_PERMANENTLY:
@@ -961,11 +974,14 @@ http_recv_response(struct http_t *http)
 			strcpy(http->red_url, http->full_url);
 
 			if (__http_set_new_location(http) < 0)
+			{
+				_log("__http_set_new_location() returned < 0\n");
 				goto fail_dealloc;
+			}
 
 			if (HEAD == http->req_type)
 			{
-				http_status_code = HTTP_OK;
+				http->code = HTTP_OK;
 				goto out_dealloc;
 			}
 /*
@@ -979,7 +995,7 @@ http_recv_response(struct http_t *http)
 
 			if (http_send_request(http, GET) < 0)
 			{
-				fprintf(stderr, "http_recv_response: failed to resend HTTP request after \"%s\" response\n", http_status_code_string(http_status_code));
+				_log("failed to resend GET request after setting new Location\n");
 				goto fail_dealloc;
 			}
 
@@ -1002,7 +1018,10 @@ http_recv_response(struct http_t *http)
 		if (!strncmp("chunked", transfer_enc->value, transfer_enc->vlen))
 		{
 			if (__http_do_chunked_recv(http) == -1)
+			{
+				_log("__http_do_chunked_recv() returned -1\n");
 				goto fail_dealloc;
+			}
 
 			goto out_dealloc;
 		}
@@ -1013,9 +1032,6 @@ http_recv_response(struct http_t *http)
 		clen = strtoul(content_len->value, NULL, 0);
 
 		overread = (buf->buf_tail - p);
-
-		STATS_ADD_BYTES(nwctx, clen);
-		update_bytes(total_bytes(nwctx));
 
 		if (overread < clen)
 		{
@@ -1028,15 +1044,21 @@ http_recv_response(struct http_t *http)
 				else
 					bytes = buf_read_socket(http_socket(http), buf, clen);
 
-				rv = bytes;
-
-				if (rv < 0)
+				if (bytes < 0)
+				{
+					_log("buf_read_[tls/socket]() returned %d\n", rv);
 					goto fail_dealloc;
+				}
 				else
 				if (!bytes)
+				{
 					continue;	
+				}
 				else
+				{
+					total_bytes += (int)bytes;
 					clen -= bytes;
+				}
 			}
 		}
 	}
@@ -1052,13 +1074,13 @@ http_recv_response(struct http_t *http)
 		else
 			bytes = buf_read_socket(http_socket(http), buf, 0);
 
-		rv = bytes;
-
-		if (rv < 0)
+		if (bytes < 0)
+		{
+			_log("buf_read_[tls/socket]() returned < 0 (reading with no content length)\n");
 			goto fail_dealloc;
+		}
 
-		STATS_ADD_BYTES(nwctx, rv);
-		update_bytes(total_bytes(nwctx));
+		total_bytes += (int)bytes;
 
 		p = strstr(buf->buf_head, "</body");
 
@@ -1072,12 +1094,9 @@ http_recv_response(struct http_t *http)
 	cache_dealloc(__http->headers, (void *)content_len, &content_len);
 	cache_dealloc(__http->headers, (void *)transfer_enc, &transfer_enc);
 
-	_log("local var http_status_code before return: %d\n", http_status_code);
-
-	return http_status_code;
+	return total_bytes;
 
 	fail_dealloc:
-	_log("Failed in %s\n", __func__);
 	if (content_len)
 	{
 		cache_dealloc(__http->headers, (void *)content_len, &content_len);
@@ -1089,7 +1108,7 @@ http_recv_response(struct http_t *http)
 	}
 
 	fail:
-	return rv;
+	return -1;
 }
 
 int
