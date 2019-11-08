@@ -829,7 +829,7 @@ __url_acceptable(struct http_t *http, struct cache_ctx *fctx, struct cache_ctx *
 
 		while (nptr)
 		{
-			cmp = strcmp(url->buf_head, nptr->url);
+			cmp = memcmp((void *)url->buf_head, (void *)nptr->url, url->data_len);
 
 			if (url->buf_head[0] && nptr->url[0] && !cmp)
 			{
