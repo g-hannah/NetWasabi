@@ -26,6 +26,7 @@ static volatile long unsigned __initialising_thread = 0;
 static volatile int __threads_exit = 0;
 static volatile int nr_draining = 0;
 static volatile int nr_filling = 0;
+static volatile int fill = 1;
 
 static cache_t *filling;
 static cache_t *draining;
@@ -393,36 +394,31 @@ worker_crawl(void *args)
 
 		next:
 
-/*
- * TODO:
- *
- * There seems to be a deadlock happening when some of the threads
- * have called pthread_cond_wait() above and are waiting for the main
- * thread to broadcast, whereas one worker is just parsing the URLs
- * from the last link in the cache. It tries to lock FCTX->cache but
- * waits forever. The only time we lock the FILLING cache is below
- * when we want to update the number we have in it. When the threads
- * call pthread_cond_wait, it's for the DRAINING cache, and the mutex
- * is unlocked while the kernel places them on a waiting queue for
- * the condition to be broadcast. So even the DRAINING cache mutex
- * should be free.
- */
-		if (parse_links(http, cache1.state == FILLING ? &cache1 : &cache2, cache1.state == DRAINING ? &cache1 : &cache2) < 0)
+		if (fill)
 		{
-			wlog("[0x%lx] Failed to parse URLs from %s\n", pthread_self(), link->url);
-			put_error_msg("0x%lx: failed to parse URLs from page", pthread_self());
+			if (parse_links(http, cache1.state == FILLING ? &cache1 : &cache2, cache1.state == DRAINING ? &cache1 : &cache2) < 0)
+			{
+				wlog("[0x%lx] Failed to parse URLs from %s\n", pthread_self(), link->url);
+				put_error_msg("0x%lx: failed to parse URLs from page", pthread_self());
+			}
+
+			cache_lock(filling);
+
+			nr_filling = cache_nr_used(filling);
+
+			if (filling == cache1.cache)
+				update_cache1_count(nr_filling);
+			else
+				update_cache2_count(nr_filling);
+
+			if (nr_filling >= NR_LINKS_THRESHOLD)
+			{
+				fill = 0;
+				update_cache_state(cache1.state == FILLING ? 1 : 2, FL_CACHE_STATUS_FULL);
+			}
+
+			cache_unlock(filling);
 		}
-
-		cache_lock(filling);
-
-		nr_filling = cache_nr_used(filling);
-
-		if (filling == cache1.cache)
-			update_cache1_count(nr_filling);
-		else
-			update_cache2_count(nr_filling);
-
-		cache_unlock(filling);
 
 		wlog("[0x%lx] Archiving page\n", pthread_self());
 		archive_page(http);
