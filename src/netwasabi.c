@@ -669,7 +669,6 @@ archive_page(struct http_t *http)
 	char *p;
 	int rv;
 
-	update_operation_status("Archiving %s", http->full_url);
 	p = HTTP_EOH(buf);
 
 	if (!p)
@@ -713,7 +712,6 @@ archive_page(struct http_t *http)
 
 	if (access(local_url.buf_head, F_OK) == 0)
 	{
-		//update_operation_status("Already archived local copy", 1);
 		goto out_free_bufs;
 	}
 
@@ -1136,16 +1134,12 @@ do_request(struct http_t *http)
 		goto fail;
 	}
 
-	LOG("Calling http_recv_response()\n");
 	if ((status_code = http_recv_response(http)) < 0)
 	{
 		LOG("Status code < 0 (%d)\n", status_code);
 		put_error_msg("Error receiving response to HEAD request");
-		LOG(http->conn.read_buf.buf_head);
 		goto fail;
 	}
-
-	LOG("Got status code %d\n", status_code);
 
 	update_status_code(status_code);
 
@@ -1165,10 +1159,6 @@ do_request(struct http_t *http)
 
 	if (http_connection_closed(http))
 	{
-		LOG("Remote peer closed connection -- reconnecting\n");
-		//fprintf(stdout, "%s%sRemote peer closed connection%s\n", COL_RED, ACTION_DONE_STR, COL_END);
-		//__show_response_header(&http_rbuf(http));
-		update_operation_status("Remote peer closed connection");
 		http_reconnect(http);
 	}
 
@@ -1183,18 +1173,21 @@ do_request(struct http_t *http)
 
 	buf_clear(&http_rbuf(http));
 
-	LOG("calling http_recv_response()\n");
 	if ((status_code = http_recv_response(http)) < 0)
 	{
 		LOG("Status code < 0 for response to GET (%d)\n", status_code);
-		LOG(http->conn.read_buf.buf_head);
 		put_error_msg("Error receiving response to GET request");
 		goto fail;
 	}
 
-	LOG("Got status code %d\n", status_code);
-
 	update_status_code(status_code);
+
+	if (!status_code)
+	{
+		char *__eoh = HTTP_EOH(&http->conn.read_buf);
+		if (__eoh)
+			LOG("\n\n%.*s\n", (int)(__eoh - http->conn.read_buf.buf_head), http->conn.read_buf.buf_head);
+	}
 
 	return status_code;
 
