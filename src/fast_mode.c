@@ -291,8 +291,12 @@ worker_crawl(void *args)
 		{
 			assert(!nr_draining);
 			wlog("[0x%lx] __get_next_link gave me NULL\n", pthread_self());
+
+			cache_lock(filling);
+
 			if (!cache_nr_used(filling))
 			{
+				cache_unlock(filling);
 /*
  * There are no remaining URLs in the DRAINING cache, and we didn't
  * add any new ones to the FILLING cache. So it's time to exit now.
@@ -304,6 +308,8 @@ worker_crawl(void *args)
 				cache_unlock(draining);
 				goto thread_exit;
 			}
+
+			cache_unlock(filling);
 
 /*
  * The DRAINING cache is now empty. We have URLs in the FILLING cache that
