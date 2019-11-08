@@ -871,10 +871,10 @@ __insert_link(struct cache_ctx *fctx, buf_t *url)
 	assert(fctx);
 	assert(url);
 
+	cache_lock(fctx->cache);
+
 	if (!(fctx->root))
 	{
-		cache_lock(fctx->cache);
-
 		http_link_t *r;
 		r = (http_link_t *)cache_alloc(fctx->cache, &fctx->root);
 
@@ -912,14 +912,11 @@ __insert_link(struct cache_ctx *fctx, buf_t *url)
 	void *nptr_stack = &nptr;
 	http_link_t *new_addr;
 
-	cache_lock(fctx->cache);
-
 	nptr = fctx->root;
 
 	while (1)
 	{
 		cmp = strcmp(url->buf_head, nptr->url);
-		//fprintf(stderr, "comparing %s with %s\n", url->buf_head, nptr->url);
 
 		if (nptr->url[0] && !cmp)
 		{
@@ -982,7 +979,6 @@ __insert_link(struct cache_ctx *fctx, buf_t *url)
 				nptr->right->url[url->data_len] = 0;
 				nptr->right->parent = nptr;
 
-				//fprintf(stderr, "copied %s to node @ %p (%d)\n", url->buf_head, nptr->right, cache_nr_used(fctx->cache));
 				break;
 			}
 			else
