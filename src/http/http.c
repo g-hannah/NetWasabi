@@ -12,7 +12,7 @@
 #include "cache.h"
 #include "http.h"
 #include "malloc.h"
-#include "webreaper.h"
+#include "netwasabi.h"
 
 #define HTTP_SMALL_READ_BLOCK 64
 #define HTTP_MAX_WAIT_TIME 6
@@ -58,8 +58,8 @@ struct __http_t
 	int redirected; /* non-zero if redirected via Location header field */
 	char *red_url; /* the URL that was redirected */
 
-	wr_cache_t *headers;
-	wr_cache_t *cookies;
+	cache_t *headers;
+	cache_t *cookies;
 	http_header_t *__ptr;
 };
 
@@ -95,9 +95,9 @@ __http_handle_timeout(int signo)
 }
 
 /**
- * wr_cache_http_cookie_ctor - initialise object for the cookie cache
+ * cache_http_cookie_ctor - initialise object for the cookie cache
  * @hh: pointer to the object in the cache
- *  -- called in wr_cache_create()
+ *  -- called in cache_create()
  */
 int
 http_header_cache_ctor(void *hh)
@@ -124,7 +124,7 @@ http_header_cache_ctor(void *hh)
 }
 
 /**
- * wr_cache_http_cookie_dtor - free memory in http_header_t cache object
+ * cache_http_cookie_dtor - free memory in http_header_t cache object
  * @hh: pointer to object in cache
  */
 void
@@ -235,11 +235,11 @@ __http_check_cookies(struct http_t *http)
 	{
 		off_t off = 0;
 
-		wr_cache_clear_all(__http->cookies);
+		cache_clear_all(__http->cookies);
 
 		while (http_check_header(buf, "Set-Cookie", off, &off))
 		{
-			if (!(__http->__ptr = (http_header_t *)wr_cache_alloc(__http->cookies, &__http->__ptr)))
+			if (!(__http->__ptr = (http_header_t *)cache_alloc(__http->cookies, &__http->__ptr)))
 			{
 				fprintf(stderr, "__http_check_cookies: failed to allocate HTTP header cache object\n");
 				goto fail;
@@ -258,7 +258,7 @@ __http_check_cookies(struct http_t *http)
 	return 0;
 
 	fail_dealloc:
-	wr_cache_clear_all(__http->cookies);
+	cache_clear_all(__http->cookies);
 
 	fail:
 	return -1;
@@ -337,7 +337,7 @@ http_build_request_header(struct http_t *http, enum request http_request)
 /*
  * Append any cached cookies to the request header.
  */
-	int __nr_cookies = wr_cache_nr_used(((struct __http_t *)http)->cookies);
+	int __nr_cookies = cache_nr_used(((struct __http_t *)http)->cookies);
 
 	if (__nr_cookies)
 	{
@@ -685,10 +685,10 @@ __http_do_chunked_recv(struct http_t *http)
 
 #if 0
 /*
- * XXX: Protect the wrctx struct with a lock
+ * XXX: Protect the nwctx struct with a lock
  */
-		STATS_ADD_BYTES(wrctx, save_size);
-		update_bytes(total_bytes(wrctx));
+		STATS_ADD_BYTES(nwctx, save_size);
+		update_bytes(total_bytes(nwctx));
 #endif
 
 		e += 2; /* Skip the \r\n do NOT use SKIP_CRNL(); chunk data could start with these bytes */
@@ -741,7 +741,7 @@ __http_set_new_location(struct http_t *http)
 	struct __http_t *__http = (struct __http_t *)http;
 	http_header_t *location = NULL;
 
-	if (!(location = (http_header_t *)wr_cache_alloc(__http->headers, &location)))
+	if (!(location = (http_header_t *)cache_alloc(__http->headers, &location)))
 	{
 		fprintf(stderr, "__http_set_new_location: failed to obtain HTTP header cache object\n");
 		goto fail_dealloc;
@@ -774,12 +774,12 @@ __http_set_new_location(struct http_t *http)
 
 	_log("Extracted page: %s\n", http->page);
 
-	wr_cache_dealloc(__http->headers, location, &location);
+	cache_dealloc(__http->headers, location, &location);
 
 	return 0;
 
 	fail_dealloc:
-	wr_cache_dealloc(__http->headers, location, &location);
+	cache_dealloc(__http->headers, location, &location);
 
 	return -1;
 }
@@ -861,12 +861,12 @@ http_recv_response(struct http_t *http)
 	if (!http->conn.ssl_nonblocking)
 		http_set_ssl_non_blocking(http);
 
-	content_len = (http_header_t *)wr_cache_alloc(__http->headers, &content_len);
+	content_len = (http_header_t *)cache_alloc(__http->headers, &content_len);
 
 	if (!content_len)
 		goto fail;
 
-	transfer_enc = (http_header_t *)wr_cache_alloc(__http->headers, &transfer_enc);
+	transfer_enc = (http_header_t *)cache_alloc(__http->headers, &transfer_enc);
 
 	if (!transfer_enc)
 		goto fail_dealloc;
@@ -987,8 +987,8 @@ http_recv_response(struct http_t *http)
 
 		overread = (buf->buf_tail - p);
 
-		STATS_ADD_BYTES(wrctx, clen);
-		update_bytes(total_bytes(wrctx));
+		STATS_ADD_BYTES(nwctx, clen);
+		update_bytes(total_bytes(nwctx));
 
 		if (overread < clen)
 		{
@@ -1030,8 +1030,8 @@ http_recv_response(struct http_t *http)
 		if (rv < 0)
 			goto fail_dealloc;
 
-		STATS_ADD_BYTES(wrctx, rv);
-		update_bytes(total_bytes(wrctx));
+		STATS_ADD_BYTES(nwctx, rv);
+		update_bytes(total_bytes(nwctx));
 
 		p = strstr(buf->buf_head, "</body");
 
@@ -1042,8 +1042,8 @@ http_recv_response(struct http_t *http)
 	}
 
 	out_dealloc:
-	wr_cache_dealloc(__http->headers, (void *)content_len, &content_len);
-	wr_cache_dealloc(__http->headers, (void *)transfer_enc, &transfer_enc);
+	cache_dealloc(__http->headers, (void *)content_len, &content_len);
+	cache_dealloc(__http->headers, (void *)transfer_enc, &transfer_enc);
 
 	_log("local var http_status_code before return: %d\n", http_status_code);
 
@@ -1053,12 +1053,12 @@ http_recv_response(struct http_t *http)
 	_log("Failed in %s\n", __func__);
 	if (content_len)
 	{
-		wr_cache_dealloc(__http->headers, (void *)content_len, &content_len);
+		cache_dealloc(__http->headers, (void *)content_len, &content_len);
 	}
 
 	if (transfer_enc)
 	{
-		wr_cache_dealloc(__http->headers, (void *)transfer_enc, &transfer_enc);
+		cache_dealloc(__http->headers, (void *)transfer_enc, &transfer_enc);
 	}
 
 	fail:
@@ -1269,7 +1269,7 @@ http_parse_page(char *url, char *page)
 	}
 
 #if 0
-	if (!keep_trailing_slash(wrctx))
+	if (!keep_trailing_slash(nwctx))
 	{
 		if (*(endp - 1) == '/')
 		{
@@ -1458,8 +1458,8 @@ http_check_host(struct http_t *http)
 
 	if (strcmp(http->host, old_host))
 	{
-		if (wr_cache_nr_used(__http->cookies) > 0)
-			wr_cache_clear_all(__http->cookies);
+		if (cache_nr_used(__http->cookies) > 0)
+			cache_clear_all(__http->cookies);
 
 		update_operation_status("Changing host: %s ==> %s", old_host, http->host);
 		http_reconnect(http);
@@ -1480,7 +1480,7 @@ http_connection_closed(struct http_t *http)
 
 	//fprintf(stderr, "allocating header obj in CONNECTION @ %p\n", &connection);
 
-	connection = wr_cache_alloc(__http->headers, &connection);
+	connection = cache_alloc(__http->headers, &connection);
 	assert(connection);
 
 	http_fetch_header(buf, "Connection", connection, (off_t)0);
@@ -1493,7 +1493,7 @@ http_connection_closed(struct http_t *http)
 
 	//fprintf(stderr, "deallocting header obj CONNECTION @ %p\n", &connection);
 
-	wr_cache_dealloc(__http->headers, connection, &connection);
+	cache_dealloc(__http->headers, connection, &connection);
 	return rv;
 }
 
@@ -1504,7 +1504,7 @@ __http_init_obj(struct __http_t *__http)
 
 	sprintf(__http_cache_name, "http_header_cache-0x%lx", pthread_self());
 
-	if (!(__http->headers = wr_cache_create(
+	if (!(__http->headers = cache_create(
 			__http_cache_name,
 			sizeof(http_header_t),
 			0,
@@ -1518,7 +1518,7 @@ __http_init_obj(struct __http_t *__http)
 	_log("Created header cache %s\n", __http_cache_name);
 
 	sprintf(__http_cache_name, "http_cookie_cache-0x%lx", pthread_self());
-	if (!(__http->cookies = wr_cache_create(
+	if (!(__http->cookies = cache_create(
 			__http_cache_name,
 			sizeof(http_header_t),
 			0,
@@ -1565,7 +1565,7 @@ __http_init_obj(struct __http_t *__http)
 	buf_destroy(&__http->conn.read_buf);
 
 	fail_destroy_cache:
-	wr_cache_destroy(__http->headers);
+	cache_destroy(__http->headers);
 
 	fail:
 	return -1;
@@ -1609,11 +1609,11 @@ http_delete(struct http_t *http)
 	free(__http->full_url);
 	free(__http->red_url);
 
-	wr_cache_clear_all(__http->headers);
-	wr_cache_destroy(__http->headers);
+	cache_clear_all(__http->headers);
+	cache_destroy(__http->headers);
 
-	wr_cache_clear_all(__http->cookies);
-	wr_cache_destroy(__http->cookies);
+	cache_clear_all(__http->cookies);
+	cache_destroy(__http->cookies);
 
 	buf_destroy(&__http->conn.read_buf);
 	buf_destroy(&__http->conn.write_buf);

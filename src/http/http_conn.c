@@ -16,7 +16,7 @@
 #include "buffer.h"
 #include "cache.h"
 #include "http.h"
-#include "webreaper.h"
+#include "netwasabi.h"
 
 static pthread_once_t __ossl_init_once = PTHREAD_ONCE_INIT;
 static sigjmp_buf __env__;

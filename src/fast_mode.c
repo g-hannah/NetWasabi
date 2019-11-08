@@ -12,7 +12,7 @@
 #include "fast_mode.h"
 #include "http.h"
 #include "screen_utils.h"
-#include "webreaper.h"
+#include "netwasabi.h"
 
 static pthread_t workers[FAST_MODE_NR_WORKERS];
 static pthread_barrier_t start_barrier;
@@ -27,8 +27,8 @@ static volatile int __threads_exit = 0;
 static volatile int nr_draining = 0;
 static volatile int nr_filling = 0;
 
-static wr_cache_t *filling;
-static wr_cache_t *draining;
+static cache_t *filling;
+static cache_t *draining;
 
 struct cache_ctx cache1;
 struct cache_ctx cache2;
@@ -64,7 +64,7 @@ __ctor __fast_mode_init(void)
 	wlogfp = fdopen(open(WLOG_FILE, O_RDWR|O_TRUNC|O_CREAT, S_IRUSR|S_IWUSR), "r+");
 #endif
 #if 0
-	if (!(cache1.cache = wr_cache_create(
+	if (!(cache1.cache = cache_create(
 			"fast_mode_url_cache1",
 			sizeof(http_link_t),
 			0,
@@ -75,7 +75,7 @@ __ctor __fast_mode_init(void)
 		goto fail;
 	}
 
-	if (!(cache2.cache = wr_cache_create(
+	if (!(cache2.cache = cache_create(
 			"fast_mode_url_cache2",
 			sizeof(http_link_t),
 			0,
@@ -113,13 +113,13 @@ __dtor __fast_mode_fini(void)
 	wlogfp = NULL;
 #endif
 #if 0
-	wr_cache_clear_all(cache1.cache);
-	wr_cache_clear_all(cache2.cache);
+	cache_clear_all(cache1.cache);
+	cache_clear_all(cache2.cache);
 	pthread_barrier_destroy(&start_barrier);
 	pthread_mutex_destroy(&eoc_mtx);
 
-	wr_cache_destroy(cache1.cache);
-	wr_cache_destroy(cache2.cache);
+	cache_destroy(cache1.cache);
+	cache_destroy(cache2.cache);
 #endif
 
 	return;
@@ -206,7 +206,7 @@ static http_link_t *__get_next_link(struct cache_ctx *ctx)
  * pointing the parent's pointer to NULL so that threads will
  * not come to this already-found node.
  *
- * The main thread will actually call wr_cache_clear_all()
+ * The main thread will actually call cache_clear_all()
  * when toggling the cache states.
  */
 
@@ -228,7 +228,7 @@ static http_link_t *__get_next_link(struct cache_ctx *ctx)
 }
 
 static void *
-worker_reap(void *args)
+worker_crawl(void *args)
 {
 	char *main_url = (char *)args;
 	http_link_t *link = NULL;
@@ -293,7 +293,7 @@ worker_reap(void *args)
 			else
 			{
 				assert(cache1.root != NULL);
-				nr_draining = wr_cache_nr_used(cache1.cache);
+				nr_draining = cache_nr_used(cache1.cache);
 				nr_filling = 0;
 				wlog("[0x%lx] %d in cache1\n", pthread_self(), nr_draining);
 			}
@@ -315,24 +315,24 @@ worker_reap(void *args)
 
 	while (1)
 	{
-		wr_cache_lock(draining);
+		cache_lock(draining);
 
 		link = __get_next_link(cache1.state == DRAINING ? &cache1 : &cache2);
 
 		if (!link)
 		{
 			wlog("[0x%lx] __get_next_link gave me NULL\n", pthread_self());
-			if (!wr_cache_nr_used(filling))
+			if (!cache_nr_used(filling))
 			{
 /*
  * There are no remaining URLs in the DRAINING cache, and we didn't
  * add any new ones to the FILLING cache. So it's time to exit now.
  */
-				wlog("[0x%lx] URLs in draining = %d\n", pthread_self(), wr_cache_nr_used(draining));
+				wlog("[0x%lx] URLs in draining = %d\n", pthread_self(), cache_nr_used(draining));
 				wlog("[0x%lx] Unlocking cache and jumping to thread_exit\n", pthread_self());
 				worker_signal_fin();
 				worker_signal_eoc();
-				wr_cache_unlock(draining);
+				cache_unlock(draining);
 				goto thread_exit;
 			}
 
@@ -361,7 +361,7 @@ worker_reap(void *args)
 			else
 				update_cache2_count(nr_draining);
 
-			wr_cache_unlock(draining);
+			cache_unlock(draining);
 		}
 
 		strcpy(http->full_url, link->url);
@@ -445,16 +445,16 @@ worker_reap(void *args)
 			put_error_msg("0x%lx: failed to parse URLs from page", pthread_self());
 		}
 
-		wr_cache_lock(filling);
+		cache_lock(filling);
 
-		nr_filling = wr_cache_nr_used(filling);
+		nr_filling = cache_nr_used(filling);
 
 		if (filling == cache1.cache)
 			update_cache1_count(nr_filling);
 		else
 			update_cache2_count(nr_filling);
 
-		wr_cache_unlock(filling);
+		cache_unlock(filling);
 
 		wlog("[0x%lx] Archiving page\n", pthread_self());
 		archive_page(http);
@@ -504,7 +504,7 @@ do_fast_mode(char *remote_host)
 	pthread_attr_init(&attr);
 	pthread_attr_setdetachstate(&attr, PTHREAD_CREATE_DETACHED);
 
-	if (!(cache1.cache = wr_cache_create(
+	if (!(cache1.cache = cache_create(
 			"fast_mode_url_cache1",
 			sizeof(http_link_t),
 			0,
@@ -515,7 +515,7 @@ do_fast_mode(char *remote_host)
 		goto fail;
 	}
 
-	if (!(cache2.cache = wr_cache_create(
+	if (!(cache2.cache = cache_create(
 			"fast_mode_url_cache2",
 			sizeof(http_link_t),
 			0,
@@ -533,7 +533,7 @@ do_fast_mode(char *remote_host)
 
 	for (i = 0; i < FAST_MODE_NR_WORKERS; ++i)
 	{
-		if ((err = pthread_create(&workers[i], &attr, worker_reap, (void *)remote_host)) != 0)
+		if ((err = pthread_create(&workers[i], &attr, worker_crawl, (void *)remote_host)) != 0)
 		{
 			fprintf(stderr, "do_fast_mode: failed to create worker thread (%s)\n", strerror(err));
 			goto fail_release_mem;
@@ -561,9 +561,9 @@ do_fast_mode(char *remote_host)
  * remove URLs from the cache by searching the binary tree overlay
  * in postorder and when they find a node they adjust the pointer
  * in their parent node that points to them by setting it to %NULL.
- * So we call wr_cache_clear_all() here to actually empty the cache.
+ * So we call cache_clear_all() here to actually empty the cache.
  */
-			wr_cache_clear_all(cache1.cache);
+			cache_clear_all(cache1.cache);
 
 			draining = cache2.cache;
 			filling = cache1.cache;
@@ -576,7 +576,7 @@ do_fast_mode(char *remote_host)
 		}
 		else
 		{
-			wr_cache_clear_all(cache2.cache);
+			cache_clear_all(cache2.cache);
 
 			draining = cache1.cache;
 			filling = cache2.cache;
@@ -590,9 +590,9 @@ do_fast_mode(char *remote_host)
 
 		wlog("[main] Broadcasting condition to worker threads\n");
 
-		wr_cache_lock(draining);
+		cache_lock(draining);
 		pthread_cond_broadcast(&cache_switch_cond);
-		wr_cache_unlock(draining);
+		cache_unlock(draining);
 	}
 
 	pthread_attr_destroy(&attr);
@@ -600,10 +600,10 @@ do_fast_mode(char *remote_host)
 	pthread_mutex_destroy(&fin_mtx);
 	pthread_cond_destroy(&cache_switch_cond);
 
-	wr_cache_clear_all(cache1.cache);
-	wr_cache_clear_all(cache2.cache);
-	wr_cache_destroy(cache1.cache);
-	wr_cache_destroy(cache2.cache);
+	cache_clear_all(cache1.cache);
+	cache_clear_all(cache2.cache);
+	cache_destroy(cache1.cache);
+	cache_destroy(cache2.cache);
 
 	return 0;
 
@@ -617,10 +617,10 @@ do_fast_mode(char *remote_host)
 	fail:
 
 	if (cache1.cache)
-		wr_cache_destroy(cache1.cache);
+		cache_destroy(cache1.cache);
 
 	if (cache2.cache)
-		wr_cache_destroy(cache2.cache);
+		cache_destroy(cache2.cache);
 
 	return -1;
 }
