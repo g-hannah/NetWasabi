@@ -913,7 +913,7 @@ __insert_link(struct cache_ctx *fctx, buf_t *url)
 
 	while (1)
 	{
-		cmp = strcmp(url->buf_head, nptr->url);
+		cmp = memcmp((void *)url->buf_head, (void *)nptr->url, url->data_len);
 
 		if (nptr->url[0] && !cmp)
 		{
