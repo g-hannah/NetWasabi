@@ -190,25 +190,16 @@ __print_information_layout(void)
 {
 	fprintf(stderr,
 		"\n\n"
-		"  ooo   oo  oooo oooooo   o  o  o   oooo    ooooo   oooo   oooooo   oo\n"
-		"  oooo  oo o       oo     o  o  o  o    o  o       o    o  o     o  oo\n"
-		"  oo oo oo ooooo   oo     o  o  o  oooooo  ooooo   oooooo  oooooo   oo\n"
-		"  oo   ooo o       oo     o  o  o  o    o       o  o    o  o     o  oo\n"
-		"  oo    oo  oooo   oo      ooooo   o    o  ooooo   o    o  oooooo   oo\n"
-#if 0
-		"  @  @  @   @@@@@  @@@@@@   @@@@@@    @@@@@   @@@@@   @@@@@@    @@@@@  @@@@@@   , ,        @@@@@   \n"
-		"  @  @  @  @@      @@   @@  @@   @@  @@      @@   @@  @@   @@  @@      @@   @@  ' '       /'       \n"
-		"  @  @  @  @@@@@@  @@@@@@   @@@@@@   @@@@@@  @@@@@@@  @@@@@@   @@@@@@  @@@@@@   ` `      ' '       \n"
-		"   @ @ @   @@      @@   @@  @@  @@   @@      @@   @@  @@       @@      @@  @@    ` ` . .' .        \n"
-		"   *oOo*    @@@@@  @@@@@@   @@   @@   @@@@@  @@   @@  @@        @@@@@  @@   @@    ` . _ .'         \n"
-#endif
+		"  ;;;   ;;  ;;;;; ;;;;;;;;   ,; ;; ;,   ;;;;    ;;;;;   ;;;;    ;;;;;;   ,;,  \n"
+		"  ;;;;  ;; ;;        ;;      ;; ;; ;;  ;;;;;;  ;;      ;;;;;;  ;;;    ;  ;;;  \n"
+		"  ;; ;; ;; ;;;;;;    ;;      ;; ;; ;;  ;;  ;;  ;;;;;   ;;  ;;  ;;;;;;;   ;;;  \n"
+		"  ;;   ;;; ;;        ;;      ;; ;; ;;  ;;;;;;      ;;  ;;;;;;  ;;;    ;  ;;;  \n"
+		"  ;;    ;;  ;;;;;    ;;       ;;;;;;   ;;  ;;  ;;;;;   ;;  ;;   ;;;;;;   ;;;  \n"
 		"   %sv%s%s\n\n",
 		COL_DARKRED,
 		NETWASABI_BUILD,
 		COL_END);
-/*       15               15                 22                  17             13
- *"===============|===============|======================|=================|============="
- */
+
 #define COL_HEADINGS COL_DARKORANGE
 if (!FAST_MODE)
 {
