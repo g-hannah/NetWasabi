@@ -6,7 +6,7 @@
 #include <unistd.h>
 #include "http.h"
 #include "utils_url.h"
-#include "webreaper.h"
+#include "netwasabi.h"
 
 struct url_encodings
 {
@@ -204,7 +204,7 @@ make_full_url(struct http_t *http, buf_t *in, buf_t *out)
 		}
 	}
 
-	if (!keep_trailing_slash(wrctx))
+	if (!keep_trailing_slash(nwctx))
 	{
 		if (*(out->buf_tail - 1) == '/')
 			buf_snip(out, (size_t)1);
@@ -238,7 +238,7 @@ make_local_url(struct http_t *http, buf_t *url, buf_t *path)
 	buf_clear(path);
 	buf_append(path, "file://");
 	buf_append(path, home);
-	buf_append(path, "/" WEBREAPER_DIR "/");
+	buf_append(path, "/" NETWASABI_DIR "/");
 
 	p = url->buf_head + strlen("http://");
 	if (*p == '/')
@@ -295,7 +295,7 @@ local_archive_exists(char *link)
 
 	home = getenv("HOME");
 	buf_append(&tmp, home);
-	buf_append(&tmp, "/" WEBREAPER_DIR "/");
+	buf_append(&tmp, "/" NETWASABI_DIR "/");
 	buf_append(&tmp, tmp_host);
 	buf_append(&tmp, tmp_page);
 
