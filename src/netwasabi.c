@@ -1113,6 +1113,7 @@ do_request(struct http_t *http)
 	assert(http);
 
 	int status_code = 0;
+	size_t bytes = 0;
 #ifdef DEBUG
 	char *__eoh = NULL;
 #endif
@@ -1126,18 +1127,20 @@ do_request(struct http_t *http)
 	LOG("sending HEAD request\n");
 	if (http_send_request(http, HEAD) < 0)
 	{
+		LOG("http_send_request failed (HEAD)\n");
 		goto fail;
 	}
 
-	if ((status_code = http_recv_response(http)) < 0)
+	if ((bytes = http_recv_response(http)) < 0)
 	{
-		LOG("Status code < 0 (%d)\n", status_code);
+		LOG("http_recv_response returned < 0 (%d)\n", bytes);
 		goto fail;
 	}
 
+	status_code = http->code;
 	update_status_code(status_code);
 
-	switch(status_code)
+	switch((unsigned int)status_code)
 	{
 		case HTTP_OK:
 		case HTTP_FOUND:
@@ -1162,15 +1165,20 @@ do_request(struct http_t *http)
 	LOG("sending GET request\n");
 	if (http_send_request(http, GET) < 0)
 	{
+		LOG("http_send_request failed (GET)\n");
 		goto fail;
 	}
 
-	if ((status_code = http_recv_response(http)) < 0)
+	if ((bytes = http_recv_response(http)) < 0)
 	{
-		LOG("Status code < 0 for response to GET (%d)\n", status_code);
+		LOG("http_recv_response returned < 0 (%d)\n", bytes);
 		goto fail;
 	}
 
+	STATS_ADD_BYTES(nwctx, bytes);
+	update_bytes(total_bytes(nwctx));
+
+	status_code = http->code;
 	update_status_code(status_code);
 
 #ifdef DEBUG
