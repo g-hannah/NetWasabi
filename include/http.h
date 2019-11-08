@@ -133,6 +133,8 @@ struct http_t
 
 	struct conn conn;
 	enum request req_type;
+	int redirected;
+	char *red_url;
 };
 
 size_t httplen;

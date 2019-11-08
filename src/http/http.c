@@ -55,6 +55,8 @@ struct __http_t
 	char *primary_host;
 	struct conn conn;
 	enum request req_type;
+	int redirected; /* non-zero if redirected via Location header field */
+	char *red_url; /* the URL that was redirected */
 
 	wr_cache_t *headers;
 	wr_cache_t *cookies;
@@ -762,11 +764,15 @@ __http_set_new_location(struct http_t *http)
 		goto fail_dealloc;
 	}
 
+	_log("Extracted host: %s\n", http->host);
+
 	if (!http_parse_page(location->value, http->page))
 	{
 		fprintf(stderr, "__http_set_new_location: failed to parse page from URL\n");
 		goto fail_dealloc;
 	}
+
+	_log("Extracted page: %s\n", http->page);
 
 	wr_cache_dealloc(__http->headers, location, &location);
 
@@ -828,7 +834,7 @@ http_set_ssl_non_blocking(struct http_t *http)
 
 /**
  * http_recv_response - receive HTTP response.
- * @conn: connection context
+ * @http: HTTP object
  */
 int
 http_recv_response(struct http_t *http)
@@ -844,7 +850,6 @@ http_recv_response(struct http_t *http)
 	http_header_t *content_len = NULL;
 	http_header_t *transfer_enc = NULL;
 	buf_t *buf = &http->conn.read_buf;
-	char *http_red_url = NULL; /* URL that was redirected with 3xx code */
 	struct __http_t *__http = (struct __http_t *)http;
 
 /*
@@ -888,7 +893,13 @@ http_recv_response(struct http_t *http)
 
 	http_status_code = http_status_code_int(buf);
 
-	_log("Got status code %d for req %s\n", http_status_code, HEAD == http->req_type ? "HEAD" : "GET");
+	//_log("Got status code %d for req %s\n", http_status_code, HEAD == http->req_type ? "HEAD" : "GET");
+#ifdef DEBUG
+	char *__eoh = HTTP_EOH(&http->conn.read_buf);
+	_log("\nHTTP RESPONSE HEADER TO %s\n\n%.*s",
+			HEAD == http->req_type ? "HEAD" : "GET",
+			(int)(__eoh - http->conn.read_buf.buf_head), http->conn.read_buf.buf_head);
+#endif
 
 /*
  * Check for a URL redirect status code.
@@ -909,30 +920,33 @@ http_recv_response(struct http_t *http)
  * a local copy of the page but use the _redirected_ URL, then we will
  * ask for the old URL in the future if we come across it.
  *
- * To avoid this, if we are currently getting a response to a HEAD
- * request, just send back HTTP_OK to the caller. Then, a GET request
- * will be sent, and then when back here, we will get the Location
- * header field, save the old URL, request the URL we received in the
- * Location header field, and once we've resent the request, we can
- * copy the _old_ URL back into the HTTP object. That way, the local
- * copy will use the old URL, which will mean we will see in the future
- * that we do indeed have it already.
+ * Set redirected flag to non-zero, and save the current URL in RED_URL
+ * so that when archiving, we can archive using RED_URL. That way, in
+ * future when we are checking if we have already archived a URL, we will
+ * correctly see that we have (assuming future URLs for this page are
+ * still using the obsolete URL, which seems to be the case).
  *
- * It's an ugly hack, but if we don't send back HTTP_OK when it's a HEAD
- * request, then we replace the old URL and then we cannot do the above
- * when we are back here getting a response to the subsequent GET request.
+ * If it's a HEAD request, just send back HTTP_OK. If it's a GET request,
+ * resend the request here with the new URL location and then jump above
+ * to the label __RETRY.
  */
+			http->redirected = 1;
+			strcpy(http->red_url, http->full_url);
+
+			if (__http_set_new_location(http) < 0)
+				goto fail_dealloc;
+
 			if (HEAD == http->req_type)
 			{
 				http_status_code = HTTP_OK;
 				goto out_dealloc;
 			}
-
-			http_red_url = strdup(http->full_url);
-
-			if (__http_set_new_location(http) < 0)
-				goto fail_dealloc;
-
+/*
+ * If we responded to a HEAD request and set the new URL above,
+ * then we really shouldn't get here with a following GET request.
+ * But let's just keep this here in case somehow or other we
+ * get here with a GET request.
+ */
 			buf_clear(&http->conn.write_buf);
 			assert(http_wbuf(http).data_len == 0);
 
@@ -941,12 +955,6 @@ http_recv_response(struct http_t *http)
 				fprintf(stderr, "http_recv_response: failed to resend HTTP request after \"%s\" response\n", http_status_code_string(http_status_code));
 				goto fail_dealloc;
 			}
-
-/*
- * Replace with the _old_ URL.
- */
-			strcpy(http->full_url, http_red_url);
-			free(http_red_url);
 
 			goto __retry;
 			break;
@@ -960,6 +968,7 @@ http_recv_response(struct http_t *http)
  */
 	if (HEAD == http->req_type)
 		goto out_dealloc;
+
 
 	if (http_fetch_header(&http->conn.read_buf, "Transfer-Encoding", transfer_enc, (off_t)0))
 	{
@@ -978,10 +987,8 @@ http_recv_response(struct http_t *http)
 
 		overread = (buf->buf_tail - p);
 
-#if 0
 		STATS_ADD_BYTES(wrctx, clen);
 		update_bytes(total_bytes(wrctx));
-#endif
 
 		if (overread < clen)
 		{
@@ -1023,10 +1030,8 @@ http_recv_response(struct http_t *http)
 		if (rv < 0)
 			goto fail_dealloc;
 
-#if 0
 		STATS_ADD_BYTES(wrctx, rv);
 		update_bytes(total_bytes(wrctx));
-#endif
 
 		p = strstr(buf->buf_head, "</body");
 
@@ -1039,6 +1044,8 @@ http_recv_response(struct http_t *http)
 	out_dealloc:
 	wr_cache_dealloc(__http->headers, (void *)content_len, &content_len);
 	wr_cache_dealloc(__http->headers, (void *)transfer_enc, &transfer_enc);
+
+	_log("local var http_status_code before return: %d\n", http_status_code);
 
 	return http_status_code;
 
@@ -1529,6 +1536,7 @@ __http_init_obj(struct __http_t *__http)
 	__http->primary_host = calloc(HTTP_HOST_MAX+1, 1);
 	__http->page = calloc(HTTP_URL_MAX+1, 1);
 	__http->full_url = calloc(HTTP_URL_MAX+1, 1);
+	__http->red_url = calloc(HTTP_URL_MAX+1, 1);
 
 	if (buf_init(&__http->conn.read_buf, HTTP_DEFAULT_READ_BUF_SIZE) < 0)
 	{
@@ -1547,6 +1555,9 @@ __http_init_obj(struct __http_t *__http)
 	assert(__http->primary_host);
 	assert(__http->page);
 	assert(__http->full_url);
+	assert(__http->red_url);
+
+	__http->redirected = 0;
 
 	return 0;
 
@@ -1596,6 +1607,7 @@ http_delete(struct http_t *http)
 	free(__http->conn.host_ipv4);
 	free(__http->page);
 	free(__http->full_url);
+	free(__http->red_url);
 
 	wr_cache_clear_all(__http->headers);
 	wr_cache_destroy(__http->headers);
