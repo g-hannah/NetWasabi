@@ -4,7 +4,7 @@
 #include "cache.h"
 #include "http.h"
 
-#define FAST_MODE_NR_WORKERS 4
+#define FAST_MODE_NR_WORKERS 8
 
 int do_fast_mode(char *) __nonnull((1)) __wur;
 
