@@ -889,6 +889,10 @@ __insert_link(struct cache_ctx *fctx, buf_t *url)
 
 		fctx->root = r;
 
+		assert(!fctx->root->left);
+		assert(!fctx->root->right);
+		assert(!fctx->root->parent);
+
 		cache_unlock(fctx->cache);
 
 		return 0;
