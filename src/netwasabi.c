@@ -13,7 +13,57 @@
 #include "robots.h"
 #include "screen_utils.h"
 #include "utils_url.h"
-#include "webreaper.h"
+#include "netwasabi.h"
+
+#ifdef DEBUG
+int __DEBUG = 1;
+#else
+int __DEBUG = 0;
+#endif
+
+#define __LOG_FILE__ "./wr_log.txt"
+
+FILE *logfp = NULL;
+
+static void
+LOG(const char *fmt, ...)
+{
+	va_list args;
+
+	if (!__DEBUG)
+		return;
+
+	va_start(args, fmt);
+	vfprintf(logfp, fmt, args);
+	va_end(args);
+
+	return;
+}
+
+static void
+__ctor __dbg_init(void)
+{
+	if (!__DEBUG)
+		return;
+
+	logfp = fdopen(open(__LOG_FILE__, O_RDWR|O_TRUNC|O_CREAT, S_IRUSR|S_IWUSR), "r+");
+
+	assert(logfp);
+
+	return;
+}
+
+static void
+__dtor __dbg_fini(void)
+{
+	if (!__DEBUG)
+		return;
+
+	fclose(logfp);
+	logfp = NULL;
+
+	return;
+}
 
 static sigset_t oldset;
 static sigset_t newset;
@@ -343,47 +393,28 @@ clear_error_msg(void)
 }
 
 void
-deconstruct_btree(http_link_t *root, wr_cache_t *cache)
+deconstruct_btree(http_link_t *root, cache_t *cache)
 {
 	if (!root)
 	{
-#ifdef DEBUG
-		fprintf(stderr, "deconstruct_btree: root is NULL\n");
-#endif
 		return;
 	}
 
 	if (((char *)root - (char *)cache->cache) >= cache->cache_size)
 	{
-#ifdef DEBUG
-		fprintf(stderr, "node @ %p is beyond our cache... (cache %p to %p)\n",
-		root,
-		cache,
-		(void *)((char *)cache->cache + cache->cache_size));
-#endif
-
 		assert(0);
 	}
 
 	if (root->left)
 	{
-#ifdef DEBUG
-		fprintf(stderr, "Going left from %p to %p\n", root, root->left);
-#endif
 		deconstruct_btree(root->left, cache);
 	}
 
 	if (root->right)
 	{
-#ifdef DEBUG
-		fprintf(stderr, "Going right from %p to %p\n", root, root->right);
-#endif
 		deconstruct_btree(root->right, cache);
 	}
 
-#ifdef DEBUG
-	fprintf(stderr, "Setting left/right/parent to NULL in node %p\n", root);
-#endif
 	root->left = NULL;
 	root->right = NULL;
 	root->parent = NULL;
@@ -409,11 +440,11 @@ check_local_dirs(struct http_t *http, buf_t *filename)
 		buf_snip(filename, 1);
 
 	end = filename->buf_tail;
-	p = strstr(name, WEBREAPER_DIR);
+	p = strstr(name, NETWASABI_DIR);
 
 	if (!p)
 	{
-		put_error_msg("check_local_dirs: failed to find webreaper directory in caller's filename\n");
+		put_error_msg("check_local_dirs: failed to find netwasabi directory in caller's filename\n");
 		errno = EPROTO;
 		return -1;
 	}
@@ -655,7 +686,21 @@ archive_page(struct http_t *http)
 	buf_init(&tmp, HTTP_URL_MAX);
 	buf_init(&local_url, 1024);
 
-	buf_append(&tmp, http->full_url);
+/*
+ * Make the local path name using the _old_ URL
+ * so we avoid asking for it again in the future.
+ */
+	if (http->redirected)
+	{
+		buf_append(&tmp, http->red_url);
+		http->redirected = 0;
+		http->red_url[0] = 0;
+	}
+	else
+	{
+		buf_append(&tmp, http->full_url);
+	}
+
 	make_local_url(http, &tmp, &local_url);
 
 /* Now we have "file:///path/to/file.extension" */
@@ -680,8 +725,7 @@ archive_page(struct http_t *http)
 		goto fail_free_bufs;
 	}
 
-	//update_operation_status("Created %s", local_url.buf_head);
-	++nr_reaped;
+	update_operation_status("Created %s", local_url.buf_head);
 
 	buf_write_fd(fd, buf);
 	close(fd);
@@ -746,7 +790,7 @@ __url_acceptable(struct http_t *http, struct cache_ctx *fctx, struct cache_ctx *
 			return 0;
 
 #if 0
-		if (got_token_graph(wrctx))
+		if (got_token_graph(nwctx))
 		{
 			http_parse_page(url->buf_head, tmp_page);
 			if (!robots_eval_url(allowed, forbidden, tmp_page))
@@ -783,7 +827,7 @@ __url_acceptable(struct http_t *http, struct cache_ctx *fctx, struct cache_ctx *
  */
 	if (dctx->cache)
 	{
-		wr_cache_lock(dctx->cache);
+		cache_lock(dctx->cache);
 
 		int cmp = 0;
 		http_link_t *nptr = dctx->root;
@@ -795,7 +839,7 @@ __url_acceptable(struct http_t *http, struct cache_ctx *fctx, struct cache_ctx *
 			if (url->buf_head[0] && nptr->url[0] && !cmp)
 			{
 				++nr_twins;
-				wr_cache_unlock(dctx->cache);
+				cache_unlock(dctx->cache);
 				return 0;
 			}
 			else
@@ -812,7 +856,7 @@ __url_acceptable(struct http_t *http, struct cache_ctx *fctx, struct cache_ctx *
 				break;
 		}
 
-		wr_cache_unlock(dctx->cache);
+		cache_unlock(dctx->cache);
 	}
 
 	return 1;
@@ -831,10 +875,10 @@ __insert_link(struct cache_ctx *fctx, buf_t *url)
 
 	if (!(fctx->root))
 	{
-		wr_cache_lock(fctx->cache);
+		cache_lock(fctx->cache);
 
-		http_link_t *r = fctx->root;
-		r = (http_link_t *)wr_cache_alloc(fctx->cache, &fctx->root);
+		http_link_t *r;
+		r = (http_link_t *)cache_alloc(fctx->cache, &fctx->root);
 
 		strncpy(r->url, url->buf_head, url->data_len);
 		r->url[url->data_len] = 0;
@@ -843,7 +887,9 @@ __insert_link(struct cache_ctx *fctx, buf_t *url)
 		r->right = NULL;
 		r->parent = NULL;
 
-		wr_cache_unlock(fctx->cache);
+		fctx->root = r;
+
+		cache_unlock(fctx->cache);
 
 		return 0;
 	}
@@ -858,13 +904,15 @@ __insert_link(struct cache_ctx *fctx, buf_t *url)
  * to iteratively insert nodes into the tree.
  */
 
-	http_link_t *nptr = fctx->root;
+	http_link_t *nptr;
 	int cmp;
 	off_t nptr_offset;
 	void *nptr_stack = &nptr;
 	http_link_t *new_addr;
 
-	wr_cache_lock(fctx->cache);
+	cache_lock(fctx->cache);
+
+	nptr = fctx->root;
 
 	while (1)
 	{
@@ -882,14 +930,27 @@ __insert_link(struct cache_ctx *fctx, buf_t *url)
 		{
 			if (!nptr->left)
 			{
+/*
+ * Our binary tree is an overlay on the cache. So every pointer we're dealing
+ * with is contained within the cache. Therefore, we need to save the offset
+ * of the current pointer we're working with here before calling cache_alloc()
+ * in case the cache is relocated on the heap.
+ *
+ * Our cache implementation already takes care of updating all the pointer addresses
+ * held by cache object owners in the event of a relocation. So adjust our NPTR
+ * after the alloc() if need be.
+ *
+ * (NPTR_STACK is pointing to the stack address of our local NPTR var).
+ */
 				nptr_offset = (off_t)((char *)nptr - (char *)fctx->cache->cache);
-				new_addr = (http_link_t *)wr_cache_alloc(fctx->cache, &nptr->left);
+				new_addr = (http_link_t *)cache_alloc(fctx->cache, &nptr->left);
 				*((unsigned long *)nptr_stack) = (unsigned long)((char *)fctx->cache->cache + nptr_offset);
+
+				assert((char *)nptr >= (char *)fctx->cache->cache && ((char *)nptr - (char *)fctx->cache->cache) < fctx->cache->cache_size);
+				assert(new_addr);
 
 				nptr->left = new_addr;
 
-				assert(((char *)nptr - (char *)fctx->cache->cache) < fctx->cache->cache_size);
-				assert(nptr->left);
 				strncpy(nptr->left->url, url->buf_head, url->data_len);
 				nptr->left->url[url->data_len] = 0;
 				nptr->left->parent = nptr;
@@ -907,18 +968,19 @@ __insert_link(struct cache_ctx *fctx, buf_t *url)
 			if (!nptr->right)
 			{
 				nptr_offset = (off_t)((char *)nptr - (char *)fctx->cache->cache);
-				new_addr = wr_cache_alloc(fctx->cache, &nptr->right);
+				new_addr = cache_alloc(fctx->cache, &nptr->right);
 				*((unsigned long *)nptr_stack) = (unsigned long)((char *)fctx->cache->cache + nptr_offset);
-				assert(((char *)nptr - (char *)fctx->cache->cache) < fctx->cache->cache_size);
+
+				assert((char *)nptr >= (char *)fctx->cache->cache && ((char *)nptr - (char *)fctx->cache->cache) < fctx->cache->cache_size);
+				assert(new_addr);
 
 				nptr->right = new_addr;
 
-				assert(nptr->right);
 				strncpy(nptr->right->url, url->buf_head, url->data_len);
 				nptr->right->url[url->data_len] = 0;
 				nptr->right->parent = nptr;
 
-				//fprintf(stderr, "copied %s to node @ %p (%d)\n", url->buf_head, nptr->right, wr_cache_nr_used(fctx->cache));
+				//fprintf(stderr, "copied %s to node @ %p (%d)\n", url->buf_head, nptr->right, cache_nr_used(fctx->cache));
 				break;
 			}
 			else
@@ -929,7 +991,7 @@ __insert_link(struct cache_ctx *fctx, buf_t *url)
 		}
 	}
 
-	wr_cache_unlock(fctx->cache);
+	cache_unlock(fctx->cache);
 
 	return 0;
 }
@@ -1063,39 +1125,70 @@ do_request(struct http_t *http)
 	/*
 	 * Save bandwidth: send HEAD first.
 	 */
-	if (http_send_request(http, HTTP_HEAD) < 0)
+	LOG("sending HEAD request\n");
+	if (http_send_request(http, HEAD) < 0)
+	{
+		put_error_msg("Error sending HEAD request");
 		goto fail;
+	}
 
-	if (http_recv_response(http) < 0)
+	LOG("Calling http_recv_response()\n");
+	if ((status_code = http_recv_response(http)) < 0)
+	{
+		LOG("Status code < 0 (%d)\n", status_code);
+		put_error_msg("Error receiving response to HEAD request");
+		LOG(http->conn.read_buf.buf_head);
 		goto fail;
+	}
 
-	status_code = http_status_code_int(&http_rbuf(http));
+	LOG("Got status code %d\n", status_code);
 
 	update_status_code(status_code);
 
-	if (HTTP_OK != status_code)
-		return status_code;
+	switch(status_code)
+	{
+		case HTTP_OK:
+		case HTTP_FOUND:
+		case HTTP_MOVED_PERMANENTLY:
+		case HTTP_SEE_OTHER:
+			break;
+		default:
+			return status_code;
+	}
 
 	if (local_archive_exists(http->full_url))
 		return HTTP_ALREADY_EXISTS;
 
 	if (http_connection_closed(http))
 	{
+		LOG("Remote peer closed connection -- reconnecting\n");
 		//fprintf(stdout, "%s%sRemote peer closed connection%s\n", COL_RED, ACTION_DONE_STR, COL_END);
 		//__show_response_header(&http_rbuf(http));
 		update_operation_status("Remote peer closed connection");
 		http_reconnect(http);
 	}
 
-	if (http_send_request(http, HTTP_GET) < 0)
+	buf_clear(&http_wbuf(http));
+
+	LOG("sending GET request\n");
+	if (http_send_request(http, GET) < 0)
+	{
+		put_error_msg("Error sending GET request");
 		goto fail;
+	}
 
 	buf_clear(&http_rbuf(http));
 
-	if (http_recv_response(http) < 0)
+	LOG("calling http_recv_response()\n");
+	if ((status_code = http_recv_response(http)) < 0)
+	{
+		LOG("Status code < 0 for response to GET (%d)\n", status_code);
+		LOG(http->conn.read_buf.buf_head);
+		put_error_msg("Error receiving response to GET request");
 		goto fail;
+	}
 
-	status_code = http_status_code_int(&http_rbuf(http));
+	LOG("Got status code %d\n", status_code);
 
 	update_status_code(status_code);
 
@@ -1113,7 +1206,7 @@ do_request(struct http_t *http)
  * @conn: our struct with connection context
  */
 int
-reap(struct http_t *http, struct cache_ctx *cache1, struct cache_ctx *cache2)
+crawl(struct http_t *http, struct cache_ctx *cache1, struct cache_ctx *cache2)
 {
 	assert(http);
 	assert(cache1);
@@ -1126,84 +1219,68 @@ reap(struct http_t *http, struct cache_ctx *cache1, struct cache_ctx *cache2)
 	int i;
 	size_t len;
 	http_link_t *link;
-	buf_t *wbuf = &http_wbuf(http);
-	buf_t *rbuf = &http_rbuf(http);
 
-	trailing_slash_off(wrctx);
-/*
- * As we archive the pages from URLs stored in one cache,
- * we fill the sibling cache with URLs to follow in the next
- * iteration of the while loop. We use the CACHE_SWITCH flag
- * for using one while filling the other. Fill until we pass
- * a threshold number of URLs we wish to have for archiving
- * next. Stop filling when FILL == 0.
- *
- * Base case for the loop is our 'crawl depth' being equal
- * to CRAWL_DEPTH (#iterations of while loop).
- */
+	trailing_slash_off(nwctx);
+
+	cache1->state = DRAINING;
+	cache2->state = FILLING;
 
 	while (1)
 	{
 		fill = 1;
 
+/*
+ * Update cache statuses on the screen; deconstruct
+ * the binary tree in the cache that we just drained
+ * (which now has the status FILLING).
+ */
 		if (cache1->state == DRAINING)
 		{
 			link = (http_link_t *)cache1->cache->cache;
-			nr_links = wr_cache_nr_used(cache1->cache);
+			nr_links = cache_nr_used(cache1->cache);
 
-#ifdef DEBUG
-			fprintf(stderr, "Deconstructing binary tree in cache 2\n");
-#endif
 			deconstruct_btree(cache2->root, cache2->cache);
+			cache_clear_all(cache2->cache);
 
-			wr_cache_clear_all(cache2->cache);
-			if (cache2->cache->nr_assigned > 0)
-				cache2->cache->nr_assigned = 0;
-
-			assert(wr_cache_nr_used(cache2->cache) == 0);
+			assert(!cache_nr_used(cache2->cache));
 			cache2->root = NULL;
 
 			update_cache_status(1, FL_CACHE_STATUS_DRAINING);
 
 			if (fill)
 				update_cache_status(2, FL_CACHE_STATUS_FILLING);
-
-			update_operation_status("Draining URL cache 1");
 		}
 		else
 		{
 			link = (http_link_t *)cache2->cache->cache;
-			nr_links = wr_cache_nr_used(cache2->cache);
+			nr_links = cache_nr_used(cache2->cache);
 
-#ifdef DEBUG
-			fprintf(stderr, "Deconstructing binary tree in cache 1\n");
-#endif
 			deconstruct_btree(cache1->root, cache1->cache);
+			cache_clear_all(cache1->cache);
 
-			wr_cache_clear_all(cache1->cache);
-			if (cache1->cache->nr_assigned > 0)
-				cache1->cache->nr_assigned = 0;
-
-			assert(wr_cache_nr_used(cache1->cache) == 0);
+			assert(!cache_nr_used(cache1->cache));
 			cache1->root = NULL;
 
 			update_cache_status(2, FL_CACHE_STATUS_DRAINING);
 
 			if (fill)
 				update_cache_status(1, FL_CACHE_STATUS_FILLING);
-
-			update_operation_status("Draining URL cache 2");
 		}
-
 
 		if (!nr_links)
 			break;
 
 		url_cnt = nr_links;
 
+/*
+ * Work through the cached URLs, archive each page, and
+ * fill the FILLING cache with any URLs we extract from
+ * these pages as we process them.
+ */
 		for (i = 0; i < nr_links; ++i)
 		{
-			buf_clear(wbuf);
+			buf_clear(&http_wbuf(http));
+
 			len = strlen(link->url);
 
 			if (!len)
@@ -1213,19 +1290,24 @@ reap(struct http_t *http, struct cache_ctx *cache1, struct cache_ctx *cache2)
 			}
 
 			assert(len < HTTP_URL_MAX);
-
 			strcpy(http->full_url, link->url);
 
 			if (!http_parse_page(http->full_url, http->page))
 				continue;
 
+/*
+ * We don't want a SIGINT in the middle of sleeping,
+ * otherwise it's bonjour la segmentation fault (usually).
+ */
 			BLOCK_SIGNAL(SIGINT);
-			sleep(crawl_delay(wrctx));
+			sleep(crawl_delay(nwctx));
 			UNBLOCK_SIGNAL(SIGINT);
 
-			//http_check_host(http);
+			http_check_host(http);
 			update_current_url(http->full_url);
+
 			status_code = do_request(http);
+			update_status_code(status_code);
 
 			if (status_code < 0)
 				goto fail;
@@ -1238,10 +1320,18 @@ reap(struct http_t *http, struct cache_ctx *cache1, struct cache_ctx *cache2)
 				case HTTP_GONE:
 				case HTTP_NOT_FOUND: /* don't want to keep requesting the link and getting 404, so just archive it */
 					break;
+#if 0
+				case HTTP_FOUND:
+				case HTTP_MOVED_PERMANENTLY:
+				case HTTP_SEE_OTHER:
+					handle_redirect(http);
+					goto send_request;
+					break;
+#endif
 				case HTTP_BAD_REQUEST:
 
-					buf_clear(wbuf);
-					buf_clear(rbuf);
+					buf_clear(&http_wbuf(http));
+					buf_clear(&http_rbuf(http));
 
 					http_reconnect(http);
 
@@ -1254,8 +1344,8 @@ reap(struct http_t *http, struct cache_ctx *cache1, struct cache_ctx *cache2)
 				case HTTP_SERVICE_UNAV:
 				case HTTP_GATEWAY_TIMEOUT:
 
-					buf_clear(wbuf);
-					buf_clear(rbuf);
+					buf_clear(&http_wbuf(http));
+					buf_clear(&http_rbuf(http));
 
 					http_reconnect(http);
 
@@ -1267,7 +1357,7 @@ reap(struct http_t *http, struct cache_ctx *cache1, struct cache_ctx *cache2)
 					goto next;
 				case HTTP_OPERATION_TIMEOUT:
 
-					buf_clear(rbuf);
+					buf_clear(&http_rbuf(http));
 
 					if (!http->host[0])
 						strcpy(http->host, http->primary_host);
@@ -1278,9 +1368,15 @@ reap(struct http_t *http, struct cache_ctx *cache1, struct cache_ctx *cache2)
 					break;
 				default:
 					put_error_msg("Unknown HTTP status code returned (%d)", status_code);
-					goto fail;
+					goto next;
 			}
 
+/*
+ * If we haven't yet reached the threshold of URLs in the
+ * FILLING cache (and thus fill is non-zero), then
+ * parse the URLs from the current page we're working on
+ * and cache them.
+ */
 			if (fill)
 			{
 				if (__url_parseable(http->full_url))
@@ -1291,13 +1387,13 @@ reap(struct http_t *http, struct cache_ctx *cache1, struct cache_ctx *cache2)
  * parse_links(struct http_t *, struct cache_ctx *FCTX, struct cache_ctx *DCTX)
  */
 						parse_links(http, cache2, cache1);
-						nr_links_sibling = wr_cache_nr_used(cache2->cache);
+						nr_links_sibling = cache_nr_used(cache2->cache);
 						update_cache2_count(nr_links_sibling);
 					}
 					else
 					{
 						parse_links(http, cache1, cache2);
-						nr_links_sibling = wr_cache_nr_used(cache1->cache);
+						nr_links_sibling = cache_nr_used(cache1->cache);
 						update_cache1_count(nr_links_sibling);
 					}
 
@@ -1319,31 +1415,49 @@ reap(struct http_t *http, struct cache_ctx *cache1, struct cache_ctx *cache2)
 			--url_cnt;
 
 			if (cache1->state == FILLING)
-				update_cache1_count(url_cnt);
-			else
+			{
+/*
+ * Only update if we are actually still filling the cache.
+ */
+				if (fill)
+					update_cache1_count(cache_nr_used(cache1->cache));
+
 				update_cache2_count(url_cnt);
+			}
+			else
+			{
+				if (fill)
+					update_cache2_count(cache_nr_used(cache2->cache));
+
+				update_cache1_count(url_cnt);
+			}
 
 			clear_error_msg();
 
-			trailing_slash_off(wrctx);
+			trailing_slash_off(nwctx);
 		} /* for (i = 0; i < nr_links; ++i) */
 
 		++current_depth;
 
+/*
+ * We've finished draining/filling the caches,
+ * now they switch roles and we will start back
+ * at the beginning of our outer while loop
+ * (unless we've reached a potential max CRAWL-
+ * DEPTH).
+ */
 		if (cache1->state == FILLING)
+		{
 			cache1->state = DRAINING;
-		else
-			cache1->state = FILLING;
-
-		if (cache2->state == FILLING)
-			cache2->state = DRAINING;
-		else
 			cache2->state = FILLING;
+		}
+		else
+		{
+			cache1->state = FILLING;
+			cache2->state = DRAINING;
+		}
 
-		//flip_cache_state(cache1);
-		//flip_cache_state(cache2);
-
-		if (current_depth >= crawl_depth(wrctx))
+		if (current_depth >= crawl_depth(nwctx))
 		{
 			update_operation_status("Reached maximum crawl depth");
 			break;
