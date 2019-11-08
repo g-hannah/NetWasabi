@@ -9,8 +9,8 @@
 #include "graph.h"
 #include "http.h"
 
-#define NETWASABI_BUILD		"0.0.2"
-#define NETWASABI_DIR			"WR_Reaped"
+#define NETWASABI_BUILD		"0.0.3"
+#define NETWASABI_DIR			"NetWasabi_Crawled"
 
 #define COL_ORANGE	"\x1b[38;5;208m"
 #define COL_RED			"\x1b[38;5;9m"
