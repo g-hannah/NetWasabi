@@ -400,10 +400,7 @@ deconstruct_btree(http_link_t *root, cache_t *cache)
 		return;
 	}
 
-	if (((char *)root - (char *)cache->cache) >= cache->cache_size)
-	{
-		assert(0);
-	}
+	assert((char *)root >= (char *)cache->cache && ((char *)root - (char *)cache->cache) < cache->cache_size);
 
 	if (root->left)
 	{
