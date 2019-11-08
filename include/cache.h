@@ -1,17 +1,17 @@
-#ifndef WR_CACHE_H
-#define WR_CACHE_H 1
+#ifndef CACHE_H
+#define CACHE_H 1
 
 #include <pthread.h>
 #include <stdint.h>
 #include <sys/types.h>
 
-#define WR_CACHE_SIZE 4096
-#define WR_CACHE_MAX_NAME 64
+#define CACHE_SIZE 4096
+#define CACHE_MAX_NAME 64
 
-typedef int (*wr_cache_ctor_t)(void *);
-typedef void (*wr_cache_dtor_t)(void *);
+typedef int (*cache_ctor_t)(void *);
+typedef void (*cache_dtor_t)(void *);
 
-struct wr_cache_obj_ctx
+struct cache_obj_ctx
 {
 	int in_cache; /* active pointer resides in cache */
 	void *ptr_addr; /* the address of the active pointer (it holds the address of a cache object) */
@@ -19,10 +19,10 @@ struct wr_cache_obj_ctx
 	off_t ptr_offset; /* offset of the active pointer if it resides in the cache */
 };
 
-typedef struct wr_cache_t
+typedef struct cache_t
 {
 	void *cache;
-	struct wr_cache_obj_ctx *assigned_list;
+	struct cache_obj_ctx *assigned_list;
 	int nr_assigned;
 	unsigned char *free_bitmap;
 	int capacity;
@@ -32,20 +32,20 @@ typedef struct wr_cache_t
 	uint16_t bitmap_size;
 	char *name;
 	pthread_mutex_t lock;
-	wr_cache_ctor_t ctor;
-	wr_cache_dtor_t dtor;
-} wr_cache_t;
+	cache_ctor_t ctor;
+	cache_dtor_t dtor;
+} cache_t;
 
-wr_cache_t *wr_cache_create(char *, size_t, int, wr_cache_ctor_t, wr_cache_dtor_t);
-void wr_cache_destroy(wr_cache_t *) __nonnull((1));
-void *wr_cache_alloc(wr_cache_t *, void *) __nonnull((1,2)) __wur;
-void wr_cache_dealloc(wr_cache_t *, void *, void *) __nonnull((1,2,3));
-int wr_cache_obj_used(wr_cache_t *, void *) __nonnull((1,2)) __wur;
-void *wr_cache_next_used(wr_cache_t *) __nonnull((1)) __wur;
-int wr_cache_nr_used(wr_cache_t *) __nonnull((1)) __wur;
-int wr_cache_capacity(wr_cache_t *) __nonnull((1)) __wur;
-void wr_cache_clear_all(wr_cache_t *) __nonnull((1));
-void wr_cache_lock(wr_cache_t *) __nonnull((1));
-void wr_cache_unlock(wr_cache_t *) __nonnull((1));
+cache_t *cache_create(char *, size_t, int, cache_ctor_t, cache_dtor_t);
+void cache_destroy(cache_t *) __nonnull((1));
+void *cache_alloc(cache_t *, void *) __nonnull((1,2)) __wur;
+void cache_dealloc(cache_t *, void *, void *) __nonnull((1,2,3));
+int cache_obj_used(cache_t *, void *) __nonnull((1,2)) __wur;
+void *cache_next_used(cache_t *) __nonnull((1)) __wur;
+int cache_nr_used(cache_t *) __nonnull((1)) __wur;
+int cache_capacity(cache_t *) __nonnull((1)) __wur;
+void cache_clear_all(cache_t *) __nonnull((1));
+void cache_lock(cache_t *) __nonnull((1));
+void cache_unlock(cache_t *) __nonnull((1));
 
-#endif /* WR_CACHE_H */
+#endif /* CACHE_H */
