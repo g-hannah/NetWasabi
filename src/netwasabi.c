@@ -21,7 +21,7 @@ int __DEBUG = 1;
 int __DEBUG = 0;
 #endif
 
-#define __LOG_FILE__ "./wr_log.txt"
+#define __LOG_FILE__ "./nw_log.txt"
 
 FILE *logfp = NULL;
 
