@@ -362,7 +362,6 @@ worker_crawl(void *args)
 
 				http_reconnect(http);
 
-				goto next;
 				break;
 			case HTTP_METHOD_NOT_ALLOWED:
 			case HTTP_FORBIDDEN:
@@ -375,12 +374,11 @@ worker_crawl(void *args)
 
 				http_reconnect(http);
 
-				goto next;
 				break;
 			case HTTP_IS_XDOMAIN:
 			case HTTP_ALREADY_EXISTS:
 			case FL_HTTP_SKIP_LINK:
-				goto next;
+				break;
 			case HTTP_OPERATION_TIMEOUT:
 
 				buf_clear(&http_rbuf(http));
@@ -390,17 +388,11 @@ worker_crawl(void *args)
 
 				http_reconnect(http);
 
-				goto next;
 				break;
 			default:
 				wlog("[0x%lx] Received erroneous status code %d\n", pthread_self(), status_code);
-				put_error_msg("Unknown HTTP status code returned (%d)", status_code);
-				worker_signal_fin();
-				worker_signal_eoc();
-				goto thread_fail;
+				continue;
 		}
-
-		next:
 
 		if (fill)
 		{
