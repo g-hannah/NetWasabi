@@ -414,7 +414,7 @@ worker_crawl(void *args)
 			if (nr_filling >= NR_LINKS_THRESHOLD)
 			{
 				fill = 0;
-				update_cache_state(cache1.state == FILLING ? 1 : 2, FL_CACHE_STATUS_FULL);
+				update_cache_status(cache1.state == FILLING ? 1 : 2, FL_CACHE_STATUS_FULL);
 			}
 
 			cache_unlock(filling);
