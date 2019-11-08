@@ -1101,7 +1101,7 @@ parse_links(struct http_t *http, struct cache_ctx *fctx, struct cache_ctx *dctx)
 	buf_destroy(&full_url);
 	buf_destroy(&path);
 
-	return 0;
+	return nr_urls_call;
 
 	fail_destroy_bufs:
 	buf_destroy(&url);
