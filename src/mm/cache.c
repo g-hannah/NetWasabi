@@ -31,25 +31,34 @@ static inline int __cache_next_free_idx(cache_t *cachep)
 	int capacity = cachep->capacity;
 	int idx = 0;
 
-	while (*bm & bit)
+	while (1)
 	{
-		bit <<= 1;
+		while (bit && (*bm & bit) && idx < capacity)
+		{
+			bit <<= 1;
+			++idx;
+		}
 
-		++idx;
+		if (idx >= capacity)
+			return -1;
 
 		if (!bit)
 		{
 			++bm;
 			bit = 1;
+			continue;
 		}
-
-		if (idx >= capacity)
+		else
+		if (bit && !(*bm & bit))
 		{
-			return -1;
+			if (idx >= capacity)
+				return -1;
+
+			return idx;
 		}
 	}
 
-	return idx;
+	return -1;
 }
 
 /**
@@ -154,6 +163,7 @@ do {\
 	struct cache_obj_ctx *____ctx_p;\
 	int __in_cache = __owner_is_in_cache((c), (p));\
 	int ____nr_ = (c)->nr_assigned;\
+	assert(____nr_ < (c)->capacity);\
 	____ctx_p = ((c)->assigned_list + ____nr_);\
 	____ctx_p->ptr_addr = (p);\
 	____ctx_p->obj_offset = __cache_obj_offset((c), (s));\
@@ -176,6 +186,7 @@ do {\
 	int ____nr_ = (c)->nr_assigned;\
 	int ____i_d_x;\
 	int ____k;\
+	assert(____nr_ <= (c)->capacity);\
 	for (____i_d_x = 0; ____i_d_x < ____nr_; ++____i_d_x)\
 	{\
 		if (____ctx_p->ptr_addr == (p))\
@@ -196,6 +207,7 @@ do {\
 	struct cache_obj_ctx *____ctx_p;\
 	int ____nr_ = (c)->nr_assigned;\
 	int ____i_d_x;\
+	assert(____nr_ <= (c)->capacity);\
 	for (____ctx_p = (c)->assigned_list, ____i_d_x = 0;\
 			____i_d_x < ____nr_;\
 			++____i_d_x)\
@@ -400,7 +412,6 @@ cache_alloc(cache_t *cachep, void *ptr_addr)
 	assert(cachep);
 
 	void *slot = NULL;
-	size_t cache_size = cachep->cache_size;
 	size_t new_size;
 	uint16_t bitmap_size = cachep->bitmap_size;
 	uint16_t new_bitmap_size;
@@ -409,6 +420,7 @@ cache_alloc(cache_t *cachep, void *ptr_addr)
 	int new_capacity;
 	int added_capacity;
 	int i;
+	int in_cache = 0;
 	unsigned char *bm;
 	void *old_cache;
 	void *owner_addr = ptr_addr;
@@ -430,7 +442,7 @@ cache_alloc(cache_t *cachep, void *ptr_addr)
  * because it found a zero-bit but in fact that has gone
  * beyond the capacity of the cache.
  */
-	if (idx != -1 && idx < old_capacity)
+	if (idx != -1 && idx < old_capacity && cachep->nr_assigned < old_capacity)
 	{
 		assert(idx < old_capacity);
 		slot = __cache_obj(cachep, idx);
@@ -479,17 +491,25 @@ cache_alloc(cache_t *cachep, void *ptr_addr)
 		if (__owner_is_in_cache(cachep, owner_addr))
 		{
 			owner_off = (off_t)((char *)owner_addr - (char *)cachep->cache);
+			in_cache = 1;
 		}
 
 		old_cache = cachep->cache;
 #ifdef DEBUG
 		fprintf(stderr, "%sCalling realloc() for ->cache%s\n", COL_RED, COL_END);
 #endif
-		cachep->cache = wr_realloc(cachep->cache, cache_size * 2);
+		cachep->cache = wr_realloc(cachep->cache, new_size);
+		assert(cachep->cache);
 #ifdef DEBUG
 		fprintf(stderr, "%sCalling realloc() for ->free_bitmap%s\n", COL_RED, COL_END);
 #endif
 		cachep->free_bitmap = wr_realloc(cachep->free_bitmap, new_bitmap_size);
+		assert(cachep->free_bitmap);
+
+		cachep->nr_free += added_capacity;
+		cachep->capacity = new_capacity;
+		cachep->cache_size = new_size;
+		cachep->bitmap_size = new_bitmap_size;
 
 /*
  * Patch all assigned pointers with the new
@@ -498,23 +518,16 @@ cache_alloc(cache_t *cachep, void *ptr_addr)
  */
 		if (old_cache != cachep->cache)
 		{
-			owner_addr = (void *)((char *)cachep->cache + owner_off);
+			if (in_cache)
+				owner_addr = (void *)((char *)cachep->cache + owner_off);
+
 			CACHE_ADJUST_PTRS(cachep);
 		}
-
-		assert(cachep->cache);
-		assert(cachep->free_bitmap);
-
-		cachep->nr_free += added_capacity;
-		cachep->capacity = new_capacity;
-		cachep->cache_size = new_size;
 
 		bm = (cachep->free_bitmap + bitmap_size);
 		int added_bitmap_size = (new_bitmap_size - bitmap_size);
 		for (i = 0; i < added_bitmap_size; ++i)
 			*bm++ = 0;
-
-		cachep->bitmap_size = new_bitmap_size;
 
 		if (cachep->ctor)
 		{
@@ -564,13 +577,14 @@ cache_dealloc(cache_t *cachep, void *slot, void *ptr_addr)
 	if (ptr_addr)
 	{
 		CACHE_REMOVE_PTR(cachep, ptr_addr);
+		assert(cachep->nr_assigned < nr_assigned);
+
 		if (cachep->nr_assigned >= nr_assigned)
 		{
 			fprintf(stderr, "cache \"%s\"; nr_assigned before=%d ; nr_assigned now=%d\n(cache capacity=%d)\n",
 				cachep->name, nr_assigned, cachep->nr_assigned,
 				cachep->capacity);
 		}
-		assert(cachep->nr_assigned < nr_assigned);
 	}
 
 	CACHE_INC_FREE(cachep);
