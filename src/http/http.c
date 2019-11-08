@@ -408,8 +408,6 @@ __http_read_until_eoh(struct http_t *http, char **p)
 	nact.sa_handler = __http_handle_timeout;
 	sigemptyset(&nact.sa_mask);
 
-	update_operation_status("Getting HTTP response header");
-
 	if (sigaction(SIGALRM, &nact, &oact) < 0)
 	{
 		fprintf(stderr, "__http_read_until_eoh: failed to set signal handler for SIGALRM\n");
@@ -418,7 +416,6 @@ __http_read_until_eoh(struct http_t *http, char **p)
 
 	if (sigsetjmp(TIMEOUT, 1) != 0)
 	{
-		update_operation_status("Timed out waiting for response from server");
 		sigaction(SIGALRM, &oact, NULL);
 		return HTTP_OPERATION_TIMEOUT;
 	}
@@ -1461,7 +1458,6 @@ http_check_host(struct http_t *http)
 		if (cache_nr_used(__http->cookies) > 0)
 			cache_clear_all(__http->cookies);
 
-		update_operation_status("Changing host: %s ==> %s", old_host, http->host);
 		http_reconnect(http);
 	}
 

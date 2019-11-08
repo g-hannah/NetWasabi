@@ -129,7 +129,6 @@ http_connect(struct http_t *http)
 	http->conn.ssl_nonblocking = 0;
 
 	update_connection_state(http, FL_CONNECTION_CONNECTED);
-	update_operation_status("Connected to remote host");
 	freeaddrinfo(ainf);
 	return 0;
 
@@ -255,10 +254,6 @@ http_switch_tls(struct http_t *http)
 	assert(http);
 
 	http_disconnect(http);
-
-#ifdef DEBUG
-	update_operation_status("Switching to TLS (%s)", http->host);
-#endif
 
 	set_option(OPT_USE_TLS);
 
