@@ -210,12 +210,14 @@ __print_information_layout(void)
  *"===============|===============|======================|=================|============="
  */
 #define COL_HEADINGS COL_DARKORANGE
+if (!FAST_MODE)
+{
 	fprintf(stderr,
 	" ==========================================================================================\n"
 	"  %sDisconnected%s\n"
 	" ==========================================================================================\n"
   "  %sCache 1%s: %4d | %sCache 2%s: %4d | %sData%s: %12lu B | %sCrawl-Delay%s: %ds | %sStatus%s: %d\n"
-	"   %s%10s%s   | %s%10s%s    |                      |  %s  |                     \n"
+	"   %s%10s%s   | %s%10s%s    |                      |                 |                     \n"
 	" ------------------------------------------------------------------------------------------\n"
 	"\n"
 	"\n" /* current URL goes here */
@@ -224,8 +226,27 @@ __print_information_layout(void)
 	COL_LIGHTGREY, COL_END,
 	COL_HEADINGS, COL_END, (int)0, COL_HEADINGS, COL_END, (int)0, COL_HEADINGS, COL_END, (size_t)0,
 	COL_HEADINGS, COL_END, crawl_delay(nwctx), COL_HEADINGS, COL_END, 0,
+	COL_DARKGREEN, "(filling)", COL_END, COL_LIGHTGREY, "(empty)", COL_END);
+}
+else
+{
+	fprintf(stderr,
+	" ==========================================================================================\n"
+	"  %sDisconnected%s\n"
+	" ==========================================================================================\n"
+  "  %sCache 1%s: %4d | %sCache 2%s: %4d | %sData%s: %12lu B | %s🗲%s  FAST MODE %s🗲%s  | %sStatus%s: %d\n"
+	"   %s%10s%s   | %s%10s%s    |                      |   (%d threads)   |                     \n"
+	" ------------------------------------------------------------------------------------------\n"
+	"\n"
+	"\n" /* current URL goes here */
+	"\n" /* general status messages can go here */
+	" ==========================================================================================\n\n",
+	COL_LIGHTGREY, COL_END,
+	COL_HEADINGS, COL_END, (int)0, COL_HEADINGS, COL_END, (int)0, COL_HEADINGS, COL_END, (size_t)0,
+	COL_HEADINGS, COL_END, COL_HEADINGS, COL_END, COL_HEADINGS, COL_END, 0,
 	COL_DARKGREEN, "(filling)", COL_END, COL_LIGHTGREY, "(empty)", COL_END,
-	FAST_MODE ? "🗲 FAST MODE 🗲" : "             ");
+	FAST_MODE_NR_WORKERS);
+}
 
 	return;
 }
@@ -565,6 +586,8 @@ main(int argc, char *argv[])
 
 	out:
 	screen_updater_stop = 1;
+
+	usleep(100000);
 	exit(EXIT_SUCCESS);
 
 	fail_disconnect:
