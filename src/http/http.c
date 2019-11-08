@@ -583,10 +583,11 @@ __http_do_chunked_recv(struct http_t *http)
 	size_t chunk_size;
 	size_t save_size;
 	size_t overread;
-	size_t range;
-	char *t;
 	static char tmp[HTTP_MAX_CHUNK_STR];
-#ifdef DEBUG
+#ifndef DEBUG
+	char *t;
+	size_t range;
+#else
 	int chunk_nr = 0;
 #endif
 
@@ -608,6 +609,12 @@ __http_do_chunked_recv(struct http_t *http)
 
 	while (1)
 	{
+/*
+ * Skip the first \r\n in "\r\nchunk_size\r\n"
+ * and collapse the buffer so we now have
+ * "chunk_size\r\n"
+ */
+#ifndef DEBUG
 		t = p;
 		SKIP_CRNL(p);
 
@@ -617,10 +624,9 @@ __http_do_chunked_recv(struct http_t *http)
 			buf_collapse(buf, (off_t)(t - buf->buf_head), range);
 			p = t;
 		}
-
-#ifdef DEBUG
+#else
 		++chunk_nr;
-		fprintf(stderr, "Chunk #%d\n", chunk_nr);
+		_log("Chunk #%d\n", chunk_nr);
 		SKIP_CRNL(p);
 #endif
 
@@ -628,7 +634,7 @@ __http_do_chunked_recv(struct http_t *http)
 
 		if (!e)
 		{
-			fprintf(stderr, "__http_do_chunked_recv: failed to find next carriage return\n");
+			_log("%s: failed to find next carriage return\n", __func__);
 
 #ifdef DEBUG
 			int i;
@@ -638,13 +644,13 @@ __http_do_chunked_recv(struct http_t *http)
 			p -= 32;
 
 			for (i = 0; i < 64; ++i)
-				fprintf(stderr, "%02hhx ", p[i]);
+				_log("%02hhx ", p[i]);
 
-			putchar(0x0a);
+			_log("\n");
 
-			fprintf(stderr, "%.*s\n", (int)64, p);
+			_log("%.*s\n", (int)64, p);
 
-			fprintf(stderr,
+			_log(
 					"BUF_SIZE=%lu bytes\n"
 					"END - DATA = %lu bytes\n"
 					"TAIL - HEAD = %lu bytes\n"
@@ -662,41 +668,74 @@ __http_do_chunked_recv(struct http_t *http)
 			return -1;
 		}
 
+/*
+ * Now we have chunk_size\r\n
+ *             ^         ^
+ *             p         e
+ */
 		strncpy(tmp, p, (e - p));
 		tmp[e - p] = 0;
 
 		chunk_size = strtoul(tmp, NULL, 16);
 
 #ifdef DEBUG
-		fprintf(stderr, "%sCHUNK SIZE=%lu BYTES%s\n", COL_ORANGE, chunk_size, COL_END);
+		_log("%sCHUNK SIZE=%lu BYTES%s\n", COL_ORANGE, chunk_size, COL_END);
 #endif
 
 		if (!chunk_size)
 		{
+/*
+ * Then we just dealt with the last chunk and there are no more to come.
+ * Collapse the buffer to get rid of the final "0\r\n" sequence.
+ */
 			--p;
 			buf_collapse(buf, (off_t)(p - buf->buf_head), (buf->buf_tail - p));
 			break;
 		}
 
+/*
+ * Save the chunk size here because below we may find we already received
+ * some of the chunk data, so we will do chunk_size - overread, but we
+ * later need to calculate the position BUFFER START + CHUNK OFFSET +
+ * CHUNK SIZE, so we need to save this.
+ */
 		save_size = chunk_size;
 
-#if 0
-/*
- * XXX: Protect the nwctx struct with a lock
+/* XXX
+ *
+ * This should really be moved out of the HTTP module. Maybe we should
+ * return the number of bytes read to the caller. They can call this
+ * there.
  */
 		STATS_ADD_BYTES(nwctx, save_size);
 		update_bytes(total_bytes(nwctx));
-#endif
 
-		e += 2; /* Skip the \r\n do NOT use SKIP_CRNL(); chunk data could start with these bytes */
+/*
+ * Do not use SKIP_CRNL() here, because the first few bytes of data
+ * after the \r\nCHUNK_SIZE\r\n could well be one or more \r / \n
+ * chars. This would result in jumping too far when we go forward
+ * CHUNK_SIZE bytes from start of the chunk data.
+ */
+		e += 2;
 
+#ifndef DEBUG
 		buf_collapse(buf, (off_t)(p - buf->buf_head), (e - p));
 		e = p;
+#endif
 
+/*
+ * Save the offset from the start of the buffer of the chunk data,
+ * since reading more data into the buffer can result in a
+ * realloc(), which may move our buffer data elsewhere on the heap.
+ * So use this to make sure our pointer is pointing in the right
+ * place on the heap by doing start of buffer + offset later.
+ */
 		chunk_offset = (e - buf->buf_head);
-
 		overread = (buf->buf_tail - e);
 
+/*
+ * Check if we already received some of the chunk data.
+ */
 		if (overread >= chunk_size)
 		{
 			p = (e + save_size);
@@ -709,21 +748,12 @@ __http_do_chunked_recv(struct http_t *http)
 
 		__read_bytes(http, chunk_size);
 
+/*
+ * After this, P should be pointing to where the initial
+ * \r is/will be in the "\r\nchunk_size\r\n" sequence.
+ */
 		p = (buf->buf_head + chunk_offset + save_size);
 		__http_read_until_next_chunk_size(http, buf, &p);
-
-#if 0
-/*
- * Assertion *(__next_size - 2) == '\r' was failing in a certain
- * case after the final chunk, jumping forward from buf_head
- * chunk_offset + save_size + 2, was pointing ONE byte past the
- * 30 byte: 0d0a0d0a300d0a
- *                    ^
- * To solve this, don't jump forward the extra 2 bytes, and then
- * use SKIP_CRNL to land on the start of the next size string.
- *
- */
-#endif
 	}
 
 	_log("Returning 0 from %s\n", __func__);
