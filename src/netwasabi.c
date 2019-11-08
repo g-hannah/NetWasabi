@@ -1116,6 +1116,9 @@ do_request(struct http_t *http)
 	assert(http);
 
 	int status_code = 0;
+#ifdef DEBUG
+	char *__eoh = NULL;
+#endif
 
 	buf_clear(&http_rbuf(http));
 	buf_clear(&http_wbuf(http));
@@ -1126,14 +1129,12 @@ do_request(struct http_t *http)
 	LOG("sending HEAD request\n");
 	if (http_send_request(http, HEAD) < 0)
 	{
-		put_error_msg("Error sending HEAD request");
 		goto fail;
 	}
 
 	if ((status_code = http_recv_response(http)) < 0)
 	{
 		LOG("Status code < 0 (%d)\n", status_code);
-		put_error_msg("Error receiving response to HEAD request");
 		goto fail;
 	}
 
@@ -1159,35 +1160,41 @@ do_request(struct http_t *http)
 	}
 
 	buf_clear(&http_wbuf(http));
+	buf_clear(&http_rbuf(http));
 
 	LOG("sending GET request\n");
 	if (http_send_request(http, GET) < 0)
 	{
-		put_error_msg("Error sending GET request");
 		goto fail;
 	}
-
-	buf_clear(&http_rbuf(http));
 
 	if ((status_code = http_recv_response(http)) < 0)
 	{
 		LOG("Status code < 0 for response to GET (%d)\n", status_code);
-		put_error_msg("Error receiving response to GET request");
 		goto fail;
 	}
 
 	update_status_code(status_code);
 
+#ifdef DEBUG
 	if (!status_code)
 	{
-		char *__eoh = HTTP_EOH(&http->conn.read_buf);
+		__eoh = HTTP_EOH(&http->conn.read_buf);
 		if (__eoh)
-			LOG("\n\n%.*s\n", (int)(__eoh - http->conn.read_buf.buf_head), http->conn.read_buf.buf_head);
+			LOG("0: \n\n%.*s\n", (int)(__eoh - http->conn.read_buf.buf_head), http->conn.read_buf.buf_head);
 	}
+#endif
 
 	return status_code;
 
 	fail:
+
+#ifdef DEBUG
+	__eoh = HTTP_EOH(&http->conn.read_buf);
+	if (__eoh)
+		LOG("< 0: \n\n%.*s\n", (int)(__eoh - http->conn.read_buf.buf_head), http->conn.read_buf.buf_head);
+#endif
+
 	return -1;
 }
 
