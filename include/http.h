@@ -27,7 +27,7 @@
 #define HTTP_ALREADY_EXISTS 702u
 #define HTTP_IS_XDOMAIN 703u
 
-#define HTTP_OPERATION_TIMEOUT 0x2
+#define HTTP_OPERATION_TIMEOUT -2
 
 #define HTTP_URL_MAX 768
 #define HTTP_COOKIE_MAX 2048 /* Surely this is more than enough */
