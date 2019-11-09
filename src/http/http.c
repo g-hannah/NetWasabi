@@ -921,13 +921,12 @@ http_recv_response(struct http_t *http)
 	http_status_code = http_status_code_int(buf);
 	_log("got status code %d\n", http_status_code);
 
-	//_log("Got status code %d for req %s\n", http_status_code, HEAD == http->req_type ? "HEAD" : "GET");
-#ifdef DEBUG
-	char *__eoh = HTTP_EOH(&http->conn.read_buf);
-	_log("\nHTTP RESPONSE HEADER TO %s\n\n%.*s",
-			HEAD == http->req_type ? "HEAD" : "GET",
-			(int)(__eoh - http->conn.read_buf.buf_head), http->conn.read_buf.buf_head);
-#endif
+	if (http_status_code != HTTP_OK)
+	{
+		char *__eoh = HTTP_EOH(&http->conn.read_buf);
+		if (__eoh)
+			_log("\nRESPONSE HEADER\n\n%.*s\n", (int)(__eoh - http->conn.read_buf.buf_head), http->conn.read_buf.buf_head);
+	}
 
 /*
  * Check for a URL redirect status code.
