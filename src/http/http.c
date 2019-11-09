@@ -381,6 +381,7 @@ http_send_request(struct http_t *http, enum request http_request)
 	return -1;
 }
 
+#define CYCLES_MAX 100000000
 
 static int
 __http_read_until_eoh(struct http_t *http, char **p)
@@ -397,7 +398,7 @@ __http_read_until_eoh(struct http_t *http, char **p)
 	{
 		++cycles;
 
-		if (cycles > 100000)
+		if (cycles >= CYCLES_MAX)
 			return HTTP_OPERATION_TIMEOUT;
 
 		if (option_set(OPT_USE_TLS))
@@ -468,9 +469,14 @@ __read_bytes(struct http_t *http, size_t toread)
 	ssize_t n;
 	size_t r = toread;
 	buf_t *buf = &http->conn.read_buf;
+	register int cycles = 0;
 
 	while (r)
 	{
+		++cycles;
+		if (cycles > CYCLES_MAX)
+			break;
+
 		if (option_set(OPT_USE_TLS))
 			n = buf_read_tls(http_tls(http), buf, r);
 		else
@@ -718,6 +724,7 @@ __http_do_chunked_recv(struct http_t *http)
 
 		__read_bytes(http, chunk_size);
 
+#if 0
 /*
  * Every now and again, we get stuck trying to read more bytes
  * (somehow) even though we already actually have gotten all
@@ -726,6 +733,7 @@ __http_do_chunked_recv(struct http_t *http)
  */
 		if (strstr(buf->buf_head, "</html>"))
 			break;
+#endif
 
 /*
  * After this, P should be pointing to where the initial
