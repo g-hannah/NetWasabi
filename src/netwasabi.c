@@ -414,7 +414,6 @@ deconstruct_btree(http_link_t *root, cache_t *cache)
 
 	root->left = NULL;
 	root->right = NULL;
-	root->parent = NULL;
 
 	return;
 }
@@ -880,13 +879,11 @@ __insert_link(struct cache_ctx *fctx, buf_t *url)
 
 		r->left = NULL;
 		r->right = NULL;
-		r->parent = NULL;
 
 		fctx->root = r;
 
 		assert(!fctx->root->left);
 		assert(!fctx->root->right);
-		assert(!fctx->root->parent);
 
 		cache_unlock(fctx->cache);
 
@@ -908,8 +905,11 @@ __insert_link(struct cache_ctx *fctx, buf_t *url)
 	off_t nptr_offset;
 	void *nptr_stack = &nptr;
 	http_link_t *new_addr;
+	http_link_t *parent;
+	http_link_t *gparent;
 
 	nptr = fctx->root;
+	parent = gparent = NULL;
 
 	while (1)
 	{
@@ -949,13 +949,18 @@ __insert_link(struct cache_ctx *fctx, buf_t *url)
 
 				strncpy(nptr->left->url, url->buf_head, url->data_len);
 				nptr->left->url[url->data_len] = 0;
-				nptr->left->parent = nptr;
+
+				nptr->left->left = NULL;
+				nptr->left->right = NULL;
 
 				break;
 			}
 			else
 			{
+				gparent = parent;
+				parent = nptr;
 				nptr = nptr->left;
+				assert(nptr != parent && nptr != gparent);
 				continue;
 			}
 		}
@@ -974,13 +979,18 @@ __insert_link(struct cache_ctx *fctx, buf_t *url)
 
 				strncpy(nptr->right->url, url->buf_head, url->data_len);
 				nptr->right->url[url->data_len] = 0;
-				nptr->right->parent = nptr;
+
+				nptr->right->left = NULL;
+				nptr->right->right = NULL;
 
 				break;
 			}
 			else
 			{
+				gparent = parent;
+				parent = nptr;
 				nptr = nptr->right;
+				assert(nptr != parent && nptr != gparent);
 				continue;
 			}
 		}
