@@ -2,8 +2,6 @@
 #include <arpa/inet.h>
 #include <errno.h>
 #include <fcntl.h>
-#include <setjmp.h>
-#include <signal.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <sys/stat.h>
@@ -14,7 +12,7 @@
 #include "malloc.h"
 #include "netwasabi.h"
 
-#define HTTP_SMALL_READ_BLOCK 64
+#define HTTP_SMALL_READ_BLOCK 8
 #define HTTP_MAX_WAIT_TIME 6
 
 FILE *hlogfp = NULL;
@@ -64,10 +62,6 @@ struct __http_t
 	http_header_t *__ptr;
 };
 
-static struct sigaction oact;
-static struct sigaction nact;
-static sigjmp_buf TIMEOUT;
-
 static void
 __ctor __http_init(void)
 {
@@ -87,12 +81,6 @@ __dtor __http_fini(void)
 	hlogfp = NULL;
 #endif
 	return;
-}
-
-static void
-__http_handle_timeout(int signo)
-{
-	siglongjmp(TIMEOUT, 1);
 }
 
 /**
@@ -403,28 +391,15 @@ __http_read_until_eoh(struct http_t *http, char **p)
 	int is_http = 0;
 	int bytes = 0;
 	buf_t *buf = &http->conn.read_buf;
+	register int cycles = 0;
 
-	clear_struct(&oact);
-	clear_struct(&nact);
-	nact.sa_flags = 0;
-	nact.sa_handler = __http_handle_timeout;
-	sigemptyset(&nact.sa_mask);
-
-	if (sigaction(SIGALRM, &nact, &oact) < 0)
-	{
-		fprintf(stderr, "__http_read_until_eoh: failed to set signal handler for SIGALRM\n");
-		return -1;
-	}
-
-	if (sigsetjmp(TIMEOUT, 1) != 0)
-	{
-		sigaction(SIGALRM, &oact, NULL);
-		return HTTP_OPERATION_TIMEOUT;
-	}
-
-	alarm(HTTP_MAX_WAIT_TIME);
 	while (!(*p))
 	{
+		++cycles;
+
+		if (cycles > 100000)
+			return HTTP_OPERATION_TIMEOUT;
+
 		if (option_set(OPT_USE_TLS))
 			n = buf_read_tls(http_tls(http), buf, HTTP_SMALL_READ_BLOCK);
 		else
@@ -452,7 +427,6 @@ __http_read_until_eoh(struct http_t *http, char **p)
 	}
 
 	out:
-	alarm(0);
 
 	if (is_http)
 	{
@@ -460,7 +434,6 @@ __http_read_until_eoh(struct http_t *http, char **p)
 		*p += strlen(HTTP_EOH_SENTINEL);
 	}
 
-	sigaction(SIGALRM, &oact, NULL);
 	return bytes;
 }
 
@@ -588,11 +561,15 @@ __http_do_chunked_recv(struct http_t *http)
 	size_t overread;
 	size_t total_bytes = 0;
 	static char tmp[HTTP_MAX_CHUNK_STR];
+	char *t;
+	size_t range;
+#if 0
 #ifndef DEBUG
 	char *t;
 	size_t range;
 #else
 	int chunk_nr = 0;
+#endif
 #endif
 
 	p = HTTP_EOH(buf);
@@ -618,7 +595,6 @@ __http_do_chunked_recv(struct http_t *http)
  * and collapse the buffer so we now have
  * "chunk_size\r\n"
  */
-#ifndef DEBUG
 		t = p;
 		SKIP_CRNL(p);
 
@@ -628,7 +604,7 @@ __http_do_chunked_recv(struct http_t *http)
 			buf_collapse(buf, (off_t)(t - buf->buf_head), range);
 			p = t;
 		}
-#else
+#if 0
 		++chunk_nr;
 		_log("Chunk #%d\n", chunk_nr);
 		SKIP_CRNL(p);
@@ -714,10 +690,8 @@ __http_do_chunked_recv(struct http_t *http)
  */
 		e += 2;
 
-#ifndef DEBUG
 		buf_collapse(buf, (off_t)(p - buf->buf_head), (e - p));
 		e = p;
-#endif
 
 /*
  * Save the offset from the start of the buffer of the chunk data,
@@ -743,6 +717,15 @@ __http_do_chunked_recv(struct http_t *http)
 		}
 
 		__read_bytes(http, chunk_size);
+
+/*
+ * Every now and again, we get stuck trying to read more bytes
+ * (somehow) even though we already actually have gotten all
+ * the data (we have </html>[\r\n]). So just break if we have
+ * the closing html tag.
+ */
+		if (strstr(buf->buf_head, "</html>"))
+			break;
 
 /*
  * After this, P should be pointing to where the initial
