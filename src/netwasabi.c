@@ -1128,6 +1128,9 @@ do_request(struct http_t *http)
 	char *__eoh = NULL;
 #endif
 
+	if (http_connection_closed(http))
+		http_reconnect(http);
+
 	buf_clear(&http_rbuf(http));
 	buf_clear(&http_wbuf(http));
 
