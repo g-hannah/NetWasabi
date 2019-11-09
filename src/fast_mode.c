@@ -14,19 +14,28 @@
 #include "screen_utils.h"
 #include "netwasabi.h"
 
-static pthread_t workers[FAST_MODE_NR_WORKERS];
+struct worker_thread
+{
+	pthread_t tid;
+	int active;
+	int idx;
+	char *main_url;
+};
+
+static struct worker_thread workers[FAST_MODE_NR_WORKERS];
+static pthread_attr_t attr;
 static pthread_barrier_t start_barrier;
 static pthread_once_t once = PTHREAD_ONCE_INIT;
 static pthread_cond_t cache_switch_cond;
 static pthread_mutex_t eoc_mtx;
 static pthread_mutex_t fin_mtx;
 static volatile int nr_workers_eoc = 0;
-static volatile int nr_workers_fin = 0;
 static volatile long unsigned __initialising_thread = 0;
 static volatile int __threads_exit = 0;
 static volatile int nr_draining = 0;
 static volatile int nr_filling = 0;
 static volatile int fill = 1;
+static volatile int NR_EXTANT_WORKERS = FAST_MODE_NR_WORKERS;
 
 static cache_t *filling;
 static cache_t *draining;
@@ -112,11 +121,14 @@ worker_signal_eoc(void)
  * worker_signal_fin - signal that thread has finished and is exiting
  */
 static inline void
-worker_signal_fin(void)
+worker_signal_fin(struct worker_thread *wt)
 {
 	pthread_mutex_lock(&fin_mtx);
-	++nr_workers_fin;
+	--NR_EXTANT_WORKERS;
 	pthread_mutex_unlock(&fin_mtx);
+
+	wt->active = 0;
+
 	return;
 }
 
@@ -190,10 +202,13 @@ static http_link_t *__get_next_link(struct cache_ctx *ctx)
 static void *
 worker_crawl(void *args)
 {
-	char *main_url = (char *)args;
+	struct worker_thread *wt = (struct worker_thread *)args;
+	char *main_url;
 	http_link_t *link = NULL;
 	struct http_t *http = NULL;
 	int status_code;
+
+	main_url = wt->main_url;
 
 	if (!(http = http_new()))
 	{
@@ -276,7 +291,7 @@ worker_crawl(void *args)
 	if (__threads_exit)
 	{
 		wlog("[0x%lx] __threads_exit == 1 ; jumping to label thread_exit\n", pthread_self());
-		worker_signal_fin();
+		worker_signal_fin(wt);
 		worker_signal_eoc();
 		goto thread_exit;
 	}
@@ -303,7 +318,7 @@ worker_crawl(void *args)
  */
 				wlog("[0x%lx] URLs in draining = %d\n", pthread_self(), cache_nr_used(draining));
 				wlog("[0x%lx] Unlocking cache and jumping to thread_exit\n", pthread_self());
-				worker_signal_fin();
+				worker_signal_fin(wt);
 				worker_signal_eoc();
 				cache_unlock(draining);
 				goto thread_exit;
@@ -445,6 +460,8 @@ worker_crawl(void *args)
 	thread_fail:
 
 	wlog("[0x%lx] Failed -- exiting\n", pthread_self());
+	worker_signal_fin(wt);
+	worker_signal_eoc();
 
 	if (http)
 	{
@@ -453,6 +470,42 @@ worker_crawl(void *args)
 	}
 
 	pthread_exit((void *)-1);
+}
+
+/**
+ * respawn_dead_threads - respawn dead threads
+ *
+ * Some threads may exit due to an error of some sort.
+ * They will call worker_signal_fin(), which will
+ * decrement NR_EXTANT_WORKERS. The main thread will
+ * check this against FAST_MODE_NR_WORKERS, and call
+ * this function if there are fewer extant than we
+ * started with.
+ */
+static void
+respawn_dead_threads(void)
+{
+	int i;
+	int err;
+
+	for (i = 0; i < FAST_MODE_NR_WORKERS; ++i)
+	{
+		if (!workers[i].active)
+		{
+			workers[i].active = 1;
+
+			if ((err = pthread_create(&workers[i].tid, &attr, worker_crawl, (void *)&workers[i])) != 0)
+			{
+				wlog("[main] Failed to respawn dead thread (%s)\n", strerror(err));
+			}
+			else
+			{
+				pthread_mutex_lock(&fin_mtx);
+				++NR_EXTANT_WORKERS;
+				pthread_mutex_unlock(&fin_mtx);
+			}
+		}
+	}
 }
 
 /**
@@ -466,7 +519,6 @@ do_fast_mode(char *remote_host)
 {
 	int i;
 	int err;
-	pthread_attr_t attr;
 
 	cache1.cache = NULL;
 	cache2.cache = NULL;
@@ -503,7 +555,11 @@ do_fast_mode(char *remote_host)
 
 	for (i = 0; i < FAST_MODE_NR_WORKERS; ++i)
 	{
-		if ((err = pthread_create(&workers[i], &attr, worker_crawl, (void *)remote_host)) != 0)
+		workers[i].active = 1;
+		workers[i].idx = i;
+		workers[i].main_url = remote_host;
+
+		if ((err = pthread_create(&workers[i].tid, &attr, worker_crawl, (void *)&workers[i])) != 0)
 		{
 			fprintf(stderr, "do_fast_mode: failed to create worker thread (%s)\n", strerror(err));
 			goto fail_release_mem;
@@ -512,18 +568,38 @@ do_fast_mode(char *remote_host)
 
 	while (1)
 	{
-		while (nr_workers_eoc < FAST_MODE_NR_WORKERS);
+		while (1)
+		{
+			if (nr_workers_eoc >= FAST_MODE_NR_WORKERS)
+				break;
+		}
 
 		nr_workers_eoc = 0;
 
-		if (nr_workers_fin == FAST_MODE_NR_WORKERS)
+		if (NR_EXTANT_WORKERS < FAST_MODE_NR_WORKERS)
 		{
-			wlog("[main] Both caches empty ; workers have quit. Quitting now\n");
-			break;
+			if ((FAST_MODE_NR_WORKERS - NR_EXTANT_WORKERS) == FAST_MODE_NR_WORKERS)
+			{
+				if (!nr_filling && !nr_draining)
+				{
+					wlog("[main] Caches are empty. Workers have finished. Main thread exiting\n");
+					break;
+				}
+			}
+/*
+ * Otherwise, we have NR_EXTANT_WORKERS workers waiting for the main
+ * thread to switch the cache states and call pthread_cond_broadcast().
+ * Respawn the dead threads first and then toggle the cache states.
+ */
+			int nr_respawn = (FAST_MODE_NR_WORKERS - NR_EXTANT_WORKERS);
+
+			pthread_barrier_destroy(&start_barrier);
+			pthread_barrier_init(&start_barrier, NULL, nr_respawn);
+
+			respawn_dead_threads();
 		}
 
 		wlog("[main] Switching cache states\n");
-
 		if (cache1.state == DRAINING)
 		{
 /*
@@ -574,6 +650,7 @@ do_fast_mode(char *remote_host)
 	pthread_mutex_destroy(&eoc_mtx);
 	pthread_mutex_destroy(&fin_mtx);
 	pthread_cond_destroy(&cache_switch_cond);
+	pthread_barrier_destroy(&start_barrier);
 
 	cache_clear_all(cache1.cache);
 	cache_clear_all(cache2.cache);
@@ -588,6 +665,7 @@ do_fast_mode(char *remote_host)
 	pthread_mutex_destroy(&eoc_mtx);
 	pthread_mutex_destroy(&fin_mtx);
 	pthread_cond_destroy(&cache_switch_cond);
+	pthread_barrier_destroy(&start_barrier);
 
 	fail:
 
