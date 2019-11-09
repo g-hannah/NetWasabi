@@ -80,7 +80,6 @@ typedef struct http_link_t
 	int nr_requests;
 	struct http_link_t *left;
 	struct http_link_t *right;
-	struct http_link_t *parent;
 } http_link_t;
 
 typedef struct http_state_t
