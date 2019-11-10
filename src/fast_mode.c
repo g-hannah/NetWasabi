@@ -248,8 +248,6 @@ static http_link_t *__get_next_link(struct cache_ctx *ctx)
 		ctx->root = NULL;
 	}
 
-	--nr_draining;
-
 	return nptr;
 }
 
@@ -406,12 +404,6 @@ worker_crawl(void *args)
 		else
 		{
 			wlog("[0x%lx] Got \"%s\" from cache\n", pthread_self(), link->url);
-
-			if (draining == cache1.cache)
-				update_cache1_count(nr_draining);
-			else
-				update_cache2_count(nr_draining);
-
 			cache_unlock(draining);
 		}
 
@@ -499,6 +491,16 @@ worker_crawl(void *args)
 
 		wlog("[0x%lx] Archiving page\n", pthread_self());
 		archive_page(http);
+
+		cache_lock(draining);
+
+		--nr_draining;
+		if (cache1.state == DRAINING)
+			update_cache1_count(nr_draining);
+		else
+			update_cache2_count(nr_draining);
+
+		cache_unlock(draining);
 
 		check_reconnect:
 
