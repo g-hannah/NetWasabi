@@ -567,6 +567,7 @@ respawn_dead_threads(void)
 			}
 			else
 			{
+				wlog("[main] Respawned dead thread\n");
 				pthread_mutex_lock(&fin_mtx);
 				++NR_EXTANT_WORKERS;
 				pthread_mutex_unlock(&fin_mtx);
@@ -725,6 +726,7 @@ do_fast_mode(char *remote_host)
 
 		wlog("[main] Broadcasting condition to worker threads\n");
 
+		nr_filling = 0;
 		fill = 1;
 		pthread_cond_broadcast(&cache_switch_cond);
 	}
