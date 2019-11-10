@@ -183,6 +183,7 @@ struct cache_ctx
 #define got_token_graph(w) ((w).got_token_graph)
 #define crawl_delay(w) ((w).crawl_delay)
 #define crawl_depth(w) ((w).crawl_depth)
+#define cache_threshold(o) ((o).cache_threshold)
 #define total_bytes(w) ((w).nr_bytes_received)
 #define total_requests(w) ((w).nr_requests)
 #define total_pages(w) ((w).nr_pages)
