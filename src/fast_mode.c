@@ -20,6 +20,7 @@ struct worker_thread
 	int active;
 	int idx;
 	char *main_url;
+	struct netwasabi_ctx nwctx;
 };
 
 static struct worker_thread workers[FAST_MODE_NR_WORKERS];
@@ -480,7 +481,7 @@ worker_crawl(void *args)
 
 			if (!option_set(OPT_NO_CACHE_THRESH))
 			{
-				if (nr_filling >= o.cache_threshold)
+				if (nr_filling >= cache_threshold(wt->nwctx))
 				{
 					fill = 0;
 					update_cache_status(cache1.state == FILLING ? 1 : 2, FL_CACHE_STATUS_FULL);
@@ -562,6 +563,7 @@ respawn_dead_threads(void)
 		if (!workers[i].active)
 		{
 			workers[i].active = 1;
+			memcpy((void *)&workers[i].nwctx, (void *)&nwctx, sizeof(nwctx));
 
 			if ((err = pthread_create(&workers[i].tid, &attr, worker_crawl, (void *)&workers[i])) != 0)
 			{
