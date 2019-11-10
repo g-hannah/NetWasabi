@@ -3,6 +3,7 @@
 #include <fcntl.h>
 #include <pthread.h>
 #include <signal.h>
+#include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -14,6 +15,8 @@
 #include "screen_utils.h"
 #include "netwasabi.h"
 
+#define __option_set(wt, o) ((wt)->flags & (o))
+
 struct worker_thread
 {
 	pthread_t tid;
@@ -21,6 +24,7 @@ struct worker_thread
 	int idx;
 	char *main_url;
 	struct netwasabi_ctx nwctx;
+	uint32_t flags;
 };
 
 static struct worker_thread workers[FAST_MODE_NR_WORKERS];
@@ -80,6 +84,8 @@ wlog(const char *fmt, ...)
 	va_start(args, fmt);
 	vfprintf(wlogfp, fmt, args);
 	va_end(args);
+
+	fflush(wlogfp);
 
 	return;
 }
@@ -479,7 +485,7 @@ worker_crawl(void *args)
 			else
 				update_cache2_count(nr_filling);
 
-			if (!option_set(OPT_NO_CACHE_THRESH))
+			if (!__option_set(wt, OPT_NO_CACHE_THRESH))
 			{
 				if (nr_filling >= cache_threshold(wt->nwctx))
 				{
@@ -502,6 +508,8 @@ worker_crawl(void *args)
 		{
 			http_disconnect(http);
 			http_reconnect(http);
+
+			wlog("[0x%lx] Doing reconnect!\n");
 
 			++nr_reconnected;
 
@@ -562,8 +570,15 @@ respawn_dead_threads(void)
 	{
 		if (!workers[i].active)
 		{
+/*
+ * Give each thread copy of RUNTIME_OPTIONS to stop simultaneous
+ * reads of same global var, and also each worker gets its own
+ * struct netwasabi_ctx member to check the user-chosen cache-
+ * threshold (if not disabled).
+ */
 			workers[i].active = 1;
 			memcpy((void *)&workers[i].nwctx, (void *)&nwctx, sizeof(nwctx));
+			workers[i].flags = runtime_options;
 
 			if ((err = pthread_create(&workers[i].tid, &attr, worker_crawl, (void *)&workers[i])) != 0)
 			{
@@ -730,6 +745,7 @@ do_fast_mode(char *remote_host)
 
 		wlog("[main] Broadcasting condition to worker threads\n");
 
+		assert(nr_draining >= 0);
 		nr_filling = 0;
 		fill = 1;
 		pthread_cond_broadcast(&cache_switch_cond);
