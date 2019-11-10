@@ -709,6 +709,24 @@ get_opts(int argc, char *argv[])
 			set_option(OPT_ALLOW_XDOMAIN);
 		}
 		else
+		if (!strcmp("--cache-no-threshold", argv[i]))
+		{
+			set_option(OPT_NO_CACHE_THRESH);
+		}
+		else
+		if (!strcmp("--cache-set-threshold", argv[i]))
+		{
+			++i;
+
+			if (i == argc || argv[i][0] == '-')
+			{
+				fprintf(stderr, "--cache-set-threshold requires an argument\n");
+				usage(EXIT_FAILURE);
+			}
+
+			cache_threshold(nwctx) = (unsigned int)atoi(argv[i+1]);
+		}
+		else
 		if (!strcmp("-oH", argv[i])
 			|| !strcmp("--req-head", argv[i]))
 		{
