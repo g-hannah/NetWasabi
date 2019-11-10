@@ -196,9 +196,6 @@ static http_link_t *__get_next_link(struct cache_ctx *ctx)
 	http_link_t *nptr = ctx->root;
 	http_link_t *parent = NULL;
 
-	if (nr_draining > 0)
-		assert(nptr);
-
 	if (!nptr)
 		return NULL;
 
