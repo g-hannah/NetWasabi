@@ -35,8 +35,9 @@ _log(char *fmt, ...)
 
 	va_start(args, fmt);
 	vfprintf(hlogfp, fmt, args);
-
 	va_end(args);
+
+	fflush(hlogfp);
 
 	return;
 }
