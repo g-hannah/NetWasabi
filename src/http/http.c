@@ -763,7 +763,7 @@ __http_set_new_location(struct http_t *http)
 
 	if (!http_fetch_header(&http->conn.read_buf, "Location", location, (off_t)0))
 	{
-		fprintf(stderr, "__http_set_new_location: failed to find HTTP header field \"Location\"\n");
+		_log("%s: failed to find HTTP header field \"Location\"\n", __func__);
 		goto fail_dealloc;
 	}
 
@@ -774,7 +774,7 @@ __http_set_new_location(struct http_t *http)
 
 	if (!http_parse_host(location->value, http->host))
 	{
-		fprintf(stderr, "__http_set_new_location: failed to parse host from URL\n");
+		_log("%s: failed to parse HOST from URL\n", __func__);
 		goto fail_dealloc;
 	}
 
@@ -782,7 +782,7 @@ __http_set_new_location(struct http_t *http)
 
 	if (!http_parse_page(location->value, http->page))
 	{
-		fprintf(stderr, "__http_set_new_location: failed to parse page from URL\n");
+		_log("%s: failed to parse page from URL\n", __func__);
 		goto fail_dealloc;
 	}
 
