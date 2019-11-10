@@ -169,18 +169,24 @@ __noret usage(int exit_status)
 {
 	fprintf(stderr,
 		"netwasabi <url> [options]\n\n"
-		"-T/--tls              use a TLS connection\n"
-		"-oH/--req-head        show the request header (\"out header\")\n"
-		"-iH/--res-head        show the response header (\"in header\")\n"
-		"-D/--depth            maximum crawl-depth\n"
-		"    (each URL cache clear + sibling URL cache (re)fill == 1)\n"
-		"-cD/--crawl-delay     delay (seconds) between each request\n"
-		"    (default is 3 seconds)\n"
-		"-fm/--fast-mode       Request more than one URL per second\n"
-		"    (this option supercedes any crawl delay specified)\n"
-		"-X/--xdomain          follow URLs into other domains\n"
-		"-B/--blacklist        blacklist tokens in URLs\n"
-		"--help/-h             display this information\n");
+		"-cD/--crawl-delay       Delay (seconds) between each request (default is\n"
+		"                        3 seconds; ignored if in fast mode).\n\n"
+		"-D/--depth              Set maximum crawl-depth (one \"layer\" of depth\n"
+		"                        is defined as emptying a single cache of all its\n"
+		"                        URLs and switching to the sibling cache.\n\n"
+		"--cache-set-threshold   Set threshold above which no more URLs will\n"
+		"                        be added to the sibling cache while draining\n"
+		"                        the other.\n\n"
+		"--cache-no-threshold    Remove threshold completely from the cache;\n"
+		"                        an unlimited number of URLs can be placed in the\n"
+		"                        sibling cache while draining the other.\n\n"
+		"-fm/--fast-mode         Request more than one URL per second\n"
+		"                        (this option supercedes any crawl delay\n"
+		"                        specified).\n\n"
+		"-X/--xdomain            Follow URLs into other domains.\n\n"
+		"-B/--blacklist          Blacklist tokens in URLs.\n\n"
+		"-T/--tls                Use a TLS connection.\n\n"
+		"--help/-h               Display this information\n");
 
 	exit(exit_status);
 }
