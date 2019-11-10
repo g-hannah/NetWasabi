@@ -132,6 +132,7 @@ do {\
 #define OPT_SHOW_REQ_HEADER 0x2
 #define OPT_SHOW_RES_HEADER 0x4
 #define OPT_ALLOW_XDOMAIN 0x8 /* if not set, ignore URLs that are a different host */
+#define OPT_NO_CACHE_THRESH 0x10 /* No threshold on number of URLs cache can hold */
 
 #define CRAWL_DELAY_DEFAULT 3
 #define MAX_CRAWL_DELAY 30
@@ -139,7 +140,6 @@ do {\
 #define MAX_TIME_WAIT 8
 #define MAX_FAILS 10
 #define RESET_DELAY 3
-#define NR_LINKS_THRESHOLD 500
 
 struct url_types
 {
@@ -154,6 +154,7 @@ struct netwasabi_ctx
 	unsigned char trailing_slash;
 	unsigned int crawl_delay;
 	unsigned int crawl_depth;
+	unsigned int cache_threshold;
 	unsigned char got_token_graph;
 	size_t nr_bytes_received;
 	unsigned int nr_requests;
