@@ -638,12 +638,26 @@ do_fast_mode(char *remote_host)
 	{
 		while (1)
 		{
+			pthread_mutex_lock(&eoc_mtx);
 			if (nr_workers_eoc >= FAST_MODE_NR_WORKERS)
+			{
+				pthread_mutex_unlock(&eoc_mtx);
 				break;
+			}
+			else
+			{
+				pthread_mutex_unlock(&eoc_mtx);
+				usleep(1000);
+				continue;
+			}
 		}
 
+/*
+ * Here there's no need to use the mutex because all the workers
+ * have called pthread_cond_wait(), so there cannot be any
+ * contention.
+ */
 		nr_workers_eoc = 0;
-
 
 		if (NR_EXTANT_WORKERS < FAST_MODE_NR_WORKERS)
 		{
