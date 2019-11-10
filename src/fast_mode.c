@@ -29,6 +29,7 @@ static pthread_once_t once = PTHREAD_ONCE_INIT;
 static pthread_cond_t cache_switch_cond;
 static pthread_mutex_t eoc_mtx;
 static pthread_mutex_t fin_mtx;
+static pthread_mutex_t recon_mtx;
 static volatile int nr_workers_eoc = 0;
 static volatile long unsigned __initialising_thread = 0;
 static volatile int __threads_exit = 0;
@@ -36,6 +37,11 @@ static volatile int nr_draining = 0;
 static volatile int nr_filling = 0;
 static volatile int fill = 1;
 static volatile int NR_EXTANT_WORKERS = FAST_MODE_NR_WORKERS;
+
+static volatile int nr_reconnected = 0;
+static volatile sig_atomic_t __do_reconnect = 0;
+static struct sigaction __old_sigpipe;
+static struct sigaction __new_sigpipe;
 
 static cache_t *filling;
 static cache_t *draining;
@@ -51,6 +57,16 @@ int WDEBUG = 0;
 
 #define WLOG_FILE "./fast_mode_log.txt"
 FILE *wlogfp = NULL;
+
+static void
+catch_sigpipe(int signo)
+{
+	if (SIGPIPE != signo)
+		return;
+
+	__do_reconnect = 1;
+	return;
+}
 
 static void
 wlog(const char *fmt, ...)
@@ -74,7 +90,21 @@ __ctor __fast_mode_init(void)
 	wlogfp = fdopen(open(WLOG_FILE, O_RDWR|O_TRUNC|O_CREAT, S_IRUSR|S_IWUSR), "r+");
 #endif
 
+	clear_struct(&__new_sigpipe);
+	__new_sigpipe.sa_flags = 0;
+	__new_sigpipe.sa_handler = catch_sigpipe;
+	sigemptyset(&__new_sigpipe.sa_mask);
+
+	if (sigaction(SIGPIPE, &__new_sigpipe, &__old_sigpipe) < 0)
+	{
+		fprintf(stderr, "__fast_mode_init: failed to set signal handler for SIGPIPE\n");
+		goto fail;
+	}
+
 	return;
+
+	fail:
+	exit(EXIT_FAILURE);
 }
 
 static void
@@ -84,6 +114,8 @@ __dtor __fast_mode_fini(void)
 	fclose(wlogfp);
 	wlogfp = NULL;
 #endif
+
+	sigaction(SIGPIPE, &__old_sigpipe, NULL);
 
 	return;
 }
@@ -129,6 +161,21 @@ worker_signal_fin(struct worker_thread *wt)
 
 	wt->active = 0;
 
+	return;
+}
+
+/**
+ * worker_signal_recon - signal that thread has done a reconnect after
+ *			signal handler set __do_reconnect to non-zero.
+ */
+static inline void
+worker_signal_recon(void)
+{
+/*
+ * Mutex not locked/unlocked here as should already be locked before
+ * calling this func as we are also protecting __DO_RECONNECT with it.
+ */
+	++nr_reconnected;
 	return;
 }
 
@@ -412,7 +459,7 @@ worker_crawl(void *args)
 				break;
 			default:
 				wlog("[0x%lx] Received erroneous status code %d\n", pthread_self(), status_code);
-				continue;
+				goto check_reconnect;
 		}
 
 		if (fill)
@@ -443,6 +490,26 @@ worker_crawl(void *args)
 
 		wlog("[0x%lx] Archiving page\n", pthread_self());
 		archive_page(http);
+
+		check_reconnect:
+
+		pthread_mutex_lock(&recon_mtx);
+
+		if (__do_reconnect)
+		{
+			http_disconnect(http);
+			http_reconnect(http);
+
+			++nr_reconnected;
+
+			if (nr_reconnected >= FAST_MODE_NR_WORKERS);
+			{
+				__do_reconnect = 0;
+				nr_reconnected = 0;
+			}
+		}
+
+		pthread_mutex_unlock(&recon_mtx);
 	}
 
 	thread_exit:
@@ -551,6 +618,7 @@ do_fast_mode(char *remote_host)
 	pthread_barrier_init(&start_barrier, NULL, FAST_MODE_NR_WORKERS);
 	pthread_mutex_init(&eoc_mtx, NULL);
 	pthread_mutex_init(&fin_mtx, NULL);
+	pthread_mutex_init(&recon_mtx, NULL);
 	pthread_cond_init(&cache_switch_cond, NULL);
 
 	for (i = 0; i < FAST_MODE_NR_WORKERS; ++i)
@@ -575,6 +643,7 @@ do_fast_mode(char *remote_host)
 		}
 
 		nr_workers_eoc = 0;
+
 
 		if (NR_EXTANT_WORKERS < FAST_MODE_NR_WORKERS)
 		{
@@ -649,6 +718,7 @@ do_fast_mode(char *remote_host)
 	pthread_attr_destroy(&attr);
 	pthread_mutex_destroy(&eoc_mtx);
 	pthread_mutex_destroy(&fin_mtx);
+	pthread_mutex_destroy(&recon_mtx);
 	pthread_cond_destroy(&cache_switch_cond);
 	pthread_barrier_destroy(&start_barrier);
 
@@ -664,6 +734,7 @@ do_fast_mode(char *remote_host)
 	pthread_attr_destroy(&attr);
 	pthread_mutex_destroy(&eoc_mtx);
 	pthread_mutex_destroy(&fin_mtx);
+	pthread_mutex_destroy(&recon_mtx);
 	pthread_cond_destroy(&cache_switch_cond);
 	pthread_barrier_destroy(&start_barrier);
 
