@@ -1415,13 +1415,16 @@ crawl(struct http_t *http, struct cache_ctx *cache1, struct cache_ctx *cache2)
 						update_cache1_count(nr_links_sibling);
 					}
 
-					if (nr_links_sibling >= NR_LINKS_THRESHOLD)
+					if (!option_set(OPT_NO_CACHE_THRESH))
 					{
-						fill = 0;
+						if (nr_links_sibling >= cache_threshold(nwctx))
+						{
+							fill = 0;
 /*
  * if cache1 is draining, then it's cache2 that's full, and vice versa.
  */
-						update_cache_status(cache1->state == DRAINING ? 2 : 1, FL_CACHE_STATUS_FULL);
+							update_cache_status(cache1->state == DRAINING ? 2 : 1, FL_CACHE_STATUS_FULL);
+						}
 					}
 				}
 			}
