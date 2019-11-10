@@ -349,9 +349,8 @@ worker_crawl(void *args)
 
 		link = __get_next_link(cache1.state == DRAINING ? &cache1 : &cache2);
 
-		if (!link)
+		if (!link || nr_draining <= 0)
 		{
-			assert(!nr_draining);
 			wlog("[0x%lx] __get_next_link gave me NULL\n", pthread_self());
 
 			cache_lock(filling);
@@ -479,10 +478,13 @@ worker_crawl(void *args)
 			else
 				update_cache2_count(nr_filling);
 
-			if (nr_filling >= NR_LINKS_THRESHOLD)
+			if (!option_set(OPT_NO_CACHE_THRESH))
 			{
-				fill = 0;
-				update_cache_status(cache1.state == FILLING ? 1 : 2, FL_CACHE_STATUS_FULL);
+				if (nr_filling >= o.cache_threshold)
+				{
+					fill = 0;
+					update_cache_status(cache1.state == FILLING ? 1 : 2, FL_CACHE_STATUS_FULL);
+				}
 			}
 
 			cache_unlock(filling);
