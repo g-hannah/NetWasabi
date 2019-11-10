@@ -358,7 +358,7 @@ worker_crawl(void *args)
 
 		if (!link || nr_draining <= 0)
 		{
-			wlog("[0x%lx] __get_next_link gave me NULL\n", pthread_self());
+			wlog("[0x%lx] __get_next_link gave me NULL (nr_draining = %d)\n", pthread_self());
 
 			cache_lock(filling);
 
