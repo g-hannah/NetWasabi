@@ -621,6 +621,8 @@ get_opts(int argc, char *argv[])
 
 	USER_BLACKLIST_NR_TOKENS = 0;
 
+	cache_threshold(nwctx) = CACHE_DEFAULT_THRESHOLD;
+
 	for (i = 1; i < argc; ++i)
 	{
 		while (i < argc && argv[i][0] != '-')
@@ -718,6 +720,7 @@ get_opts(int argc, char *argv[])
 		if (!strcmp("--cache-no-threshold", argv[i]))
 		{
 			set_option(OPT_NO_CACHE_THRESH);
+			assert(option_set(OPT_NO_CACHE_THRESH));
 		}
 		else
 		if (!strcmp("--cache-set-threshold", argv[i]))
