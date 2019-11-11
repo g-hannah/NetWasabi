@@ -15,7 +15,8 @@
 #include "screen_utils.h"
 #include "netwasabi.h"
 
-#define __option_set(wt, o) ((wt)->flags & (o))
+#define __no_threshold(w) ((w)->no_cache_threshold)
+#define __threshold(w) ((w)->cache_threshold)
 
 struct worker_thread
 {
@@ -23,8 +24,8 @@ struct worker_thread
 	int active;
 	int idx;
 	char *main_url;
-	struct netwasabi_ctx nwctx;
-	uint32_t flags;
+	unsigned int cache_threshold;
+	unsigned int no_cache_threshold;
 };
 
 static struct worker_thread workers[FAST_MODE_NR_WORKERS];
@@ -207,7 +208,6 @@ static http_link_t *__get_next_link(struct cache_ctx *ctx)
 		if (!nptr->left && !nptr->right)
 		{
 			wlog("[0x%lx] Found node @ %p%s\n", pthread_self(), nptr, nptr == ctx->root ? "(is root)" : "");
-			wlog("[0x%lx] (parent @ %p ; left @ %p ; right @ %p)\n", pthread_self(), parent, nptr->left, nptr->right);
 			break;
 		}
 
@@ -294,6 +294,7 @@ worker_crawl(void *args)
 	if (__initialising_thread == pthread_self())
 	{
 		wlog("[0x%lx] I am the initialising thread\n", pthread_self());
+		wlog("[0x%lx] cache threshold == %d%s\n", pthread_self(), __threshold(wt), __no_threshold(wt) ? " but disabled" : "");
 
 		http_send_request(http, GET);
 		http_recv_response(http);
@@ -340,8 +341,6 @@ worker_crawl(void *args)
 	if (__threads_exit)
 	{
 		wlog("[0x%lx] __threads_exit == 1 ; jumping to label thread_exit\n", pthread_self());
-		worker_signal_fin(wt);
-		worker_signal_eoc();
 		goto thread_exit;
 	}
 
@@ -366,8 +365,6 @@ worker_crawl(void *args)
  */
 				wlog("[0x%lx] URLs in draining = %d\n", pthread_self(), cache_nr_used(draining));
 				wlog("[0x%lx] Unlocking cache and jumping to thread_exit\n", pthread_self());
-				worker_signal_fin(wt);
-				worker_signal_eoc();
 				cache_unlock(draining);
 				goto thread_exit;
 			}
@@ -474,9 +471,9 @@ worker_crawl(void *args)
 			else
 				update_cache2_count(nr_filling);
 
-			if (!__option_set(wt, OPT_NO_CACHE_THRESH))
+			if (!__no_threshold(wt))
 			{
-				if (nr_filling >= cache_threshold(wt->nwctx))
+				if (nr_filling >= __threshold(wt))
 				{
 					fill = 0;
 					update_cache_status(cache1.state == FILLING ? 1 : 2, FL_CACHE_STATUS_FULL);
@@ -532,6 +529,9 @@ worker_crawl(void *args)
 		http_delete(http);
 	}
 
+	worker_signal_fin(wt);
+	worker_signal_eoc();
+
 	pthread_exit((void *)0);
 
 	thread_fail:
@@ -576,8 +576,10 @@ respawn_dead_threads(void)
  * threshold (if not disabled).
  */
 			workers[i].active = 1;
-			memcpy((void *)&workers[i].nwctx, (void *)&nwctx, sizeof(nwctx));
-			workers[i].flags = runtime_options;
+			workers[i].cache_threshold = 0xffffffff;
+			workers[i].no_cache_threshold = 1;
+
+			__asm__("" : : : "memory");
 
 			if ((err = pthread_create(&workers[i].tid, &attr, worker_crawl, (void *)&workers[i])) != 0)
 			{
@@ -678,6 +680,7 @@ do_fast_mode(char *remote_host)
  */
 		nr_workers_eoc = 0;
 
+		usleep(1000);
 		if (NR_EXTANT_WORKERS < FAST_MODE_NR_WORKERS)
 		{
 			if ((FAST_MODE_NR_WORKERS - NR_EXTANT_WORKERS) == FAST_MODE_NR_WORKERS)
@@ -685,6 +688,7 @@ do_fast_mode(char *remote_host)
 				if (!nr_filling && !nr_draining)
 				{
 					wlog("[main] Caches are empty. Workers have finished. Main thread exiting\n");
+					update_operation_status("Finished crawling site");
 					break;
 				}
 			}
