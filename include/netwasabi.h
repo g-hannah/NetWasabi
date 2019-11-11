@@ -133,6 +133,14 @@ do {\
 #define OPT_SHOW_RES_HEADER 0x4
 #define OPT_ALLOW_XDOMAIN 0x8 /* if not set, ignore URLs that are a different host */
 #define OPT_NO_CACHE_THRESH 0x10 /* No threshold on number of URLs cache can hold */
+#define FAST_MODE 0x100
+
+#define option_set(o) ((o) & runtime_options)
+#define set_option(o) (runtime_options |= (o))
+#define unset_option(o) (runtime_options &= ~(o))
+
+struct netwasabi_ctx nwctx;
+uint32_t runtime_options;
 
 #define CRAWL_DELAY_DEFAULT 3
 #define MAX_CRAWL_DELAY 30
@@ -147,6 +155,8 @@ struct url_types
 	char delim;
 	size_t len;
 };
+
+#define CACHE_DEFAULT_THRESHOLD 500
 
 struct netwasabi_ctx
 {
@@ -223,8 +233,6 @@ int path_max;
 char **user_blacklist;
 int USER_BLACKLIST_NR_TOKENS;
 
-struct netwasabi_ctx nwctx;
-uint32_t runtime_options;
 
 struct winsize winsize;
 struct graph_ctx *allowed;
@@ -270,11 +278,6 @@ pthread_t thread_screen_tid;
 pthread_attr_t thread_screen_attr;
 pthread_mutex_t screen_mutex;
 
-#define FAST_MODE 0x100
-
-#define option_set(o) ((o) & runtime_options)
-#define set_option(o) (runtime_options |= (o))
-#define unset_option(o) (runtime_options &= ~(o))
 
 #define ACTION_ING_STR ">>> "
 #define ACTION_DONE_STR "@@@ "
