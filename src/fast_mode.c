@@ -569,17 +569,7 @@ respawn_dead_threads(void)
 	{
 		if (!workers[i].active)
 		{
-/*
- * Give each thread copy of RUNTIME_OPTIONS to stop simultaneous
- * reads of same global var, and also each worker gets its own
- * struct netwasabi_ctx member to check the user-chosen cache-
- * threshold (if not disabled).
- */
 			workers[i].active = 1;
-			workers[i].cache_threshold = 0xffffffff;
-			workers[i].no_cache_threshold = 1;
-
-			__asm__("" : : : "memory");
 
 			if ((err = pthread_create(&workers[i].tid, &attr, worker_crawl, (void *)&workers[i])) != 0)
 			{
@@ -646,7 +636,18 @@ do_fast_mode(char *remote_host)
 	{
 		workers[i].active = 1;
 		workers[i].idx = i;
-		workers[i].main_url = remote_host;
+		workers[i].main_url = strdup(remote_host); /* give each their own copy of the main URL */
+
+		if (option_set(OPT_NO_CACHE_THRESH))
+		{
+			workers[i].no_cache_threshold = 1;
+			workers[i].cache_threshold = UINT_MAX;
+		}
+		else
+		{
+			workers[i].no_cache_threshold = 0;
+			workers[i].cache_threshold = cache_threshold(nwctx);
+		}
 
 		if ((err = pthread_create(&workers[i].tid, &attr, worker_crawl, (void *)&workers[i])) != 0)
 		{
@@ -754,6 +755,9 @@ do_fast_mode(char *remote_host)
 		pthread_cond_broadcast(&cache_switch_cond);
 	}
 
+	for (i = 0; i < FAST_MODE_NR_WORKERS; ++i)
+		free(workers[i].main_url);
+
 	pthread_attr_destroy(&attr);
 	pthread_mutex_destroy(&eoc_mtx);
 	pthread_mutex_destroy(&fin_mtx);
@@ -769,6 +773,9 @@ do_fast_mode(char *remote_host)
 	return 0;
 
 	fail_release_mem:
+
+	for (i = 0; i < FAST_MODE_NR_WORKERS; ++i)
+		free(workers[i].main_url);
 
 	pthread_attr_destroy(&attr);
 	pthread_mutex_destroy(&eoc_mtx);
