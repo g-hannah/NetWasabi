@@ -615,6 +615,13 @@ do {\
 				save_pointers();
 
 				assert(path.data_len < path_max);
+
+				if (path.data_len >= buf->buf_size)
+				{
+					savep = ++url_end;
+					continue;
+				}
+
 				buf_shift(buf, (off_t)(url_start - buf->buf_head), path.data_len);
 				tail = buf->buf_tail;
 
