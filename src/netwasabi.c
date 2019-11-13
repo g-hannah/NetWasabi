@@ -784,6 +784,9 @@ __url_acceptable(struct http_t *http, struct cache_ctx *fctx, struct cache_ctx *
 	if (url->data_len >= 256)
 		return 0;
 
+	if (strstr(url->buf_head, "mailto"))
+		return 0;
+
 	if (!strncmp("http:", url->buf_head, 5)
 	|| !strncmp("https:", url->buf_head, 6))
 	{
