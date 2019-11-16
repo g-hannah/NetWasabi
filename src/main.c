@@ -380,8 +380,6 @@ main(int argc, char *argv[])
 		goto fail;
 	}
 
-	srand(time(NULL));
-
 	/*
 	 * Must be done here and not in the constructor function
 	 * because the dimensions are not known before main()
@@ -394,8 +392,8 @@ main(int argc, char *argv[])
  */
 	__print_information_layout();
 
-	pthread_attr_setdetachstate(&thread_screen_attr, PTHREAD_CREATE_DETACHED);
-	pthread_create(&thread_screen_tid, &thread_screen_attr, screen_updater_thread, NULL);
+	//pthread_attr_setdetachstate(&thread_screen_attr, PTHREAD_CREATE_DETACHED);
+	//pthread_create(&thread_screen_tid, &thread_screen_attr, screen_updater_thread, NULL);
 
 /*
  * Check for existence of the WR_Reaped directory
@@ -403,7 +401,7 @@ main(int argc, char *argv[])
  */
 	__check_directory();
 
-	if (option_set(FAST_MODE))
+	if (fast_mode(&nwctx))
 	{
 		do_fast_mode(argv[1]);
 		goto out;
@@ -433,7 +431,6 @@ main(int argc, char *argv[])
 		put_error_msg("main: failed to set SIGQUIT handler (%s)", strerror(errno));
 		goto fail;
 	}
-
 
 	struct http_t *http;
 	int status_code;
@@ -467,14 +464,14 @@ main(int argc, char *argv[])
 	/*
 	 * Create a new cache for http_link_t objects.
 	 */
-	cache1.cache = cache_create(
+	nwctx.cache1_ctx.cache = cache_create(
 			"http_link_cache",
 			sizeof(http_link_t),
 			0,
 			http_link_cache_ctor,
 			http_link_cache_dtor);
 
-	cache2.cache = cache_create(
+	nwctx.cache2_ctx.cache = cache_create(
 			"http_link_cache2",
 			sizeof(http_link_t),
 			0,
@@ -534,24 +531,24 @@ main(int argc, char *argv[])
 			goto out_disconnect;
 	}
 
-	parse_links(http, &cache1, &cache2);
-	update_cache1_count(cache_nr_used(cache1.cache));
+	parse_links(http, &nwctx.cache1_ctx, &nwctx.cache2_ctx);
+	update_cache1_count(cache_nr_used(nwctx.cache1_ctx.cache));
 
 	if (!do_not_archive)
 	{
 		archive_page(http);
 	}
 
-	if (!cache_nr_used(cache1.cache))
+	if (!cache_nr_used(nwctx.cache1_ctx.cache))
 	{
 		//update_operation_status("Parsed no URLs from page (already archived)");
 		goto out_disconnect;
 	}
 
-	cache1.state = DRAINING;
-	cache2.state = FILLING;
+	nwctx.cache1_ctx.state = DRAINING;
+	nwctx.cache2_ctx.state = FILLING;
 
-	rv = crawl(http, &cache1, &cache2);
+	rv = crawl(http, &nwctx.cache1_ctx, &nwctx.cache2_ctx);
 
 	if (rv < 0)
 	{
@@ -564,13 +561,13 @@ main(int argc, char *argv[])
 	http_disconnect(http);
 	http_delete(http);
 
-	if (cache_nr_used(cache1.cache) > 0)
-		cache_clear_all(cache1.cache);
-	if (cache_nr_used(cache2.cache) > 0)
-		cache_clear_all(cache2.cache);
+	if (cache_nr_used(nwctx.cache1_ctx.cache) > 0)
+		cache_clear_all(nwctx.cache1_ctx.cache);
+	if (cache_nr_used(nwctx.cache2_ctx.cache) > 0)
+		cache_clear_all(nwctx.cache2_ctx.cache);
 
-	cache_destroy(cache1.cache);
-	cache_destroy(cache2.cache);
+	cache_destroy(nwctx.cache1_ctx.cache);
+	cache_destroy(nwctx.cache2_ctx.cache);
 
 	if (allowed)
 		destroy_graph(allowed);
@@ -592,13 +589,13 @@ main(int argc, char *argv[])
 	http_disconnect(http);
 	http_delete(http);
 
-	if (cache_nr_used(cache1.cache) > 0)
-		cache_clear_all(cache1.cache);
-	if (cache_nr_used(cache2.cache) > 0)
-		cache_clear_all(cache2.cache);
+	if (cache_nr_used(nwctx.cache1_ctx.cache) > 0)
+		cache_clear_all(nwctx.cache1_ctx.cache);
+	if (cache_nr_used(nwctx.cache2_ctx.cache) > 0)
+		cache_clear_all(nwctx.cache2_ctx.cache);
 
-	cache_destroy(cache1.cache);
-	cache_destroy(cache2.cache);
+	cache_destroy(nwctx.cache1_ctx.cache);
+	cache_destroy(nwctx.cache2_ctx.cache);
 
 	if (allowed)
 		destroy_graph(allowed);
