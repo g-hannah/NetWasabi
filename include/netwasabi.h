@@ -199,9 +199,6 @@ struct cache_ctx
 
 struct netwasabi_ctx
 {
-	struct cache_ctx cache1_ctx;
-	struct cache_ctx cache2_ctx;
-
 	struct
 	{
 		unsigned int crawl_delay;

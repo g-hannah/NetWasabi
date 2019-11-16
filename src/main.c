@@ -27,6 +27,8 @@ static int get_opts(int, char *[]) __nonnull((2)) __wur;
  * Global vars.
  */
 struct netwasabi_ctx nwctx = {0};
+struct cache_ctx cache1_ctx = {0};
+struct cache_ctx cache2_ctx = {0};
 
 size_t httplen;
 size_t httpslen;
@@ -464,14 +466,14 @@ main(int argc, char *argv[])
 	/*
 	 * Create a new cache for http_link_t objects.
 	 */
-	nwctx.cache1_ctx.cache = cache_create(
+	cache1_ctx.cache = cache_create(
 			"http_link_cache",
 			sizeof(http_link_t),
 			0,
 			http_link_cache_ctor,
 			http_link_cache_dtor);
 
-	nwctx.cache2_ctx.cache = cache_create(
+	cache2_ctx.cache = cache_create(
 			"http_link_cache2",
 			sizeof(http_link_t),
 			0,
@@ -531,24 +533,24 @@ main(int argc, char *argv[])
 			goto out_disconnect;
 	}
 
-	parse_links(http, &nwctx.cache1_ctx, &nwctx.cache2_ctx);
-	update_cache1_count(cache_nr_used(nwctx.cache1_ctx.cache));
+	parse_links(http, &cache1_ctx, &cache2_ctx);
+	update_cache1_count(cache_nr_used(cache1_ctx.cache));
 
 	if (!do_not_archive)
 	{
 		archive_page(http);
 	}
 
-	if (!cache_nr_used(nwctx.cache1_ctx.cache))
+	if (!cache_nr_used(cache1_ctx.cache))
 	{
 		//update_operation_status("Parsed no URLs from page (already archived)");
 		goto out_disconnect;
 	}
 
-	nwctx.cache1_ctx.state = DRAINING;
-	nwctx.cache2_ctx.state = FILLING;
+	cache1_ctx.state = DRAINING;
+	cache2_ctx.state = FILLING;
 
-	rv = crawl(http, &nwctx.cache1_ctx, &nwctx.cache2_ctx);
+	rv = crawl(http, &cache1_ctx, &cache2_ctx);
 
 	if (rv < 0)
 	{
@@ -561,13 +563,13 @@ main(int argc, char *argv[])
 	http_disconnect(http);
 	http_delete(http);
 
-	if (cache_nr_used(nwctx.cache1_ctx.cache) > 0)
-		cache_clear_all(nwctx.cache1_ctx.cache);
-	if (cache_nr_used(nwctx.cache2_ctx.cache) > 0)
-		cache_clear_all(nwctx.cache2_ctx.cache);
+	if (cache_nr_used(cache1_ctx.cache) > 0)
+		cache_clear_all(cache1_ctx.cache);
+	if (cache_nr_used(cache2_ctx.cache) > 0)
+		cache_clear_all(cache2_ctx.cache);
 
-	cache_destroy(nwctx.cache1_ctx.cache);
-	cache_destroy(nwctx.cache2_ctx.cache);
+	cache_destroy(cache1_ctx.cache);
+	cache_destroy(cache2_ctx.cache);
 
 	if (allowed)
 		destroy_graph(allowed);
@@ -589,13 +591,13 @@ main(int argc, char *argv[])
 	http_disconnect(http);
 	http_delete(http);
 
-	if (cache_nr_used(nwctx.cache1_ctx.cache) > 0)
-		cache_clear_all(nwctx.cache1_ctx.cache);
-	if (cache_nr_used(nwctx.cache2_ctx.cache) > 0)
-		cache_clear_all(nwctx.cache2_ctx.cache);
+	if (cache_nr_used(cache1_ctx.cache) > 0)
+		cache_clear_all(cache1_ctx.cache);
+	if (cache_nr_used(cache2_ctx.cache) > 0)
+		cache_clear_all(cache2_ctx.cache);
 
-	cache_destroy(nwctx.cache1_ctx.cache);
-	cache_destroy(nwctx.cache2_ctx.cache);
+	cache_destroy(cache1_ctx.cache);
+	cache_destroy(cache2_ctx.cache);
 
 	if (allowed)
 		destroy_graph(allowed);
