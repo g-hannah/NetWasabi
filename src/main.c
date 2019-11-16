@@ -27,13 +27,9 @@ static int get_opts(int, char *[]) __nonnull((2)) __wur;
  * Global vars.
  */
 struct netwasabi_ctx nwctx = {0};
-uint32_t runtime_options = 0;
 
 size_t httplen;
 size_t httpslen;
-
-char **user_blacklist;
-int USER_BLACKLIST_NR_TOKENS;
 
 pthread_t thread_screen_tid;
 pthread_attr_t thread_screen_attr;
@@ -355,6 +351,9 @@ __valid_url(char *url)
 	if (!memchr(url, '.', strlen(url)))
 		return 0;
 
+	if (strstr(url, "mailto"))
+		return 0;
+
 	return 1;
 }
 
@@ -619,9 +618,7 @@ get_opts(int argc, char *argv[])
 {
 	int		i;
 
-	USER_BLACKLIST_NR_TOKENS = 0;
-
-	cache_threshold(nwctx) = CACHE_DEFAULT_THRESHOLD;
+	cache_threshold(&nwctx) = CACHE_DEFAULT_THRESHOLD;
 
 	for (i = 1; i < argc; ++i)
 	{
@@ -648,9 +645,9 @@ get_opts(int argc, char *argv[])
 				usage(EXIT_FAILURE);
 			}
 
-			crawl_depth(nwctx) = atoi(argv[i]);
-			assert(crawl_depth(nwctx) > 0);
-			assert(crawl_depth(nwctx) <= INT_MAX);
+			crawl_depth(&nwctx) = atoi(argv[i]);
+			assert(crawl_depth(&nwctx) > 0);
+			assert(crawl_depth(&nwctx) <= INT_MAX);
 		}
 		else
 		if (!strcmp("--crawl-delay", argv[i])
@@ -664,16 +661,17 @@ get_opts(int argc, char *argv[])
 				usage(EXIT_FAILURE);
 			}
 
-			crawl_delay(nwctx) = atoi(argv[i]);
-			assert(crawl_delay(nwctx) >= 0);
-			assert(crawl_delay(nwctx) < MAX_CRAWL_DELAY);
+			crawl_delay(&nwctx) = atoi(argv[i]);
+			assert(crawl_delay(&nwctx) >= 0);
+			assert(crawl_delay(&nwctx) < MAX_CRAWL_DELAY);
 		}
 		else
 		if (!strcmp("--fast-mode", argv[i])
 		|| !strcmp("-fm", argv[i]))
 		{
-			set_option(FAST_MODE);
+			fast_mode_on(&nwctx);
 		}
+#if 0
 		else
 		if (!strcmp("--blacklist", argv[i])
 		|| !strcmp("-B", argv[i]))
@@ -710,11 +708,13 @@ get_opts(int argc, char *argv[])
 
 			--i;
 		}
+#endif
 		else
 		if (!strcmp("--xdomain", argv[i])
 			|| !strcmp("-X", argv[i]))
 		{
-			set_option(OPT_ALLOW_XDOMAIN);
+			//set_option(OPT_ALLOW_XDOMAIN);
+			xdomain_on(&nwctx);
 		}
 		else
 		if (!strcmp("--cache-no-threshold", argv[i]))
@@ -733,8 +733,10 @@ get_opts(int argc, char *argv[])
 				usage(EXIT_FAILURE);
 			}
 
-			cache_threshold(nwctx) = (unsigned int)atoi(argv[i+1]);
+			cache_threshold(&nwctx) = (unsigned int)atoi(argv[i+1]);
+			thresh_on(&nwctx);
 		}
+#if 0
 		else
 		if (!strcmp("-oH", argv[i])
 			|| !strcmp("--req-head", argv[i]))
@@ -747,11 +749,13 @@ get_opts(int argc, char *argv[])
 		{
 			set_option(OPT_SHOW_RES_HEADER);
 		}
+#endif
 		else
 		if (!strcmp("-T", argv[i])
 			|| strcmp("--tls", argv[i]))
 		{
-			set_option(OPT_USE_TLS);
+			//set_option(OPT_USE_TLS);
+			tls_on(&nwctx);
 		}
 		else
 		{
@@ -759,13 +763,13 @@ get_opts(int argc, char *argv[])
 		}
 	}
 
-	if (crawl_delay(nwctx) > 0 && option_set(FAST_MODE))
+	if (crawl_delay(&nwctx) > 0 && fast_mode(&nwctx))
 	{
-			crawl_delay(nwctx) = 0;
+			crawl_delay(&nwctx) = 0;
 	}
 
-	if (!crawl_depth(nwctx))
-		crawl_depth(nwctx) = CRAWL_DEPTH_DEFAULT;
+	if (!crawl_depth(&nwctx))
+		crawl_depth(&nwctx) = CRAWL_DEPTH_DEFAULT;
 
 	return 0;
 }
