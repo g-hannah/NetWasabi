@@ -128,12 +128,6 @@ do {\
 	(type *)((char *)__mptr - offsetof(type, member));\
 })
 
-#define OPT_USE_TLS	0x1
-#define OPT_SHOW_REQ_HEADER 0x2
-#define OPT_SHOW_RES_HEADER 0x4
-#define OPT_ALLOW_XDOMAIN 0x8 /* if not set, ignore URLs that are a different host */
-#define OPT_NO_CACHE_THRESH 0x10 /* No threshold on number of URLs cache can hold */
-#define FAST_MODE 0x100
 
 #define option_set(o) ((o) & runtime_options)
 #define set_option(o) (runtime_options |= (o))
@@ -158,27 +152,31 @@ struct url_types
 
 #define CACHE_DEFAULT_THRESHOLD 500
 
-struct netwasabi_ctx
-{
-	pthread_mutex_t lock;
-	unsigned char trailing_slash;
-	unsigned int crawl_delay;
-	unsigned int crawl_depth;
-	unsigned int cache_threshold;
-	unsigned char got_token_graph;
-	size_t nr_bytes_received;
-	unsigned int nr_requests;
-	unsigned int nr_pages;
-	unsigned int nr_errors;
-};
+#define can_xdomain(n) ((n)->opts.xdomain)
+#define using_tls(n) ((n)->opts.tls)
+#define using_thresh(n) ((n)->opts.thresh)
+#define fast_mode(n) ((n)->opts.fast)
+
+#define stats_nr_bytes(n) ((n)->stats.nr_bytes)
+#define stats_nr_requests(n) ((n)->stats.nr_requests)
+#define stats_nr_archived(n) ((n)->stats.nr_archived)
+#define stats_nr_errors(n) ((n)->stats.nr_errors)
+
+#define crawl_delay(n) ((n)->config.crawl_delay)
+#define crawl_depth(n) ((n)->config.crawl_depth)
+#define cache_thresh(n) ((n)->config.cache_thresh)
+#define have_rgraph(n) ((n)->config.have_rgraph)
+
+#define STATS_ADD_BYTES(n, b) ((n)->stats.nr_bytes += (b))
+#define STATS_INC_REQS(n) ++((n)->stats.nr_requests)
+#define STATS_INC_ARCHIVED(n) ++((n)->stats.nr_archived)
+#define STATS_INC_ERRORS(n) ++((n)->stats.nr_errors)
 
 enum state
 {
 	DRAINING = 0,
-	FILLING = 1
+	FILLING
 };
-
-#define flip_cache_state(c) ((c).state == DRAINING ? (c).state = FILLING : (c).state = DRAINING)
 
 struct cache_ctx
 {
@@ -187,31 +185,39 @@ struct cache_ctx
 	enum state state;
 };
 
-#define keep_trailing_slash(w) ((w).trailing_slash)
-#define trailing_slash_off(w) ((w).trailing_slash &= ~((w).trailing_slash))
-#define trailing_slash_on(w) ((w).trailing_slash = 1)
-#define got_token_graph(w) ((w).got_token_graph)
-#define crawl_delay(w) ((w).crawl_delay)
-#define crawl_depth(w) ((w).crawl_depth)
-#define cache_threshold(o) ((o).cache_threshold)
-#define total_bytes(w) ((w).nr_bytes_received)
-#define total_requests(w) ((w).nr_requests)
-#define total_pages(w) ((w).nr_pages)
-#define total_errors(w) ((w).nr_errors)
+struct netwasabi_ctx
+{
+	struct cache_ctx cache1_ctx;
+	struct cache_ctx cache2_ctx;
 
-#define nwstats_lock(w) (pthread_mutex_lock(&(w).lock))
-#define nwstats_unlock(w) (pthread_mutex_unlock(&(w).lock))
+	struct
+	{
+		unsigned int crawl_delay;
+		unsigned int crawl_depth;
+		unsigned int cache_thresh;
+		unsigned int have_rgraph; /* did we build a token graph with robots.txt? */
+	} config;
 
-#define STATS_INC_ERRORS(w) ++((w).nr_errors)
-#define STATS_INC_PAGES(w) ++((w).nr_pages)
-#define STATS_INC_REQS(w) ++((w).nr_requests)
+	struct
+	{
+		size_t nr_bytes_received;
+		unsigned int nr_requests;
+		unsigned int nr_archived;
+		unsigned int nr_errors;
+		uint16_t depth; /* current depth */
+	} stats;
 
-#define STATS_ADD_BYTES(w, b)\
-do {\
-	nwstats_lock(w);\
-	((w).nr_bytes_received += (b));\
-	nwstats_unlock(w);\
-} while (0)
+	struct
+	{
+		uint16_t xdomain :1,
+		uint16_t tls :1,
+		uint16_t thresh :1,
+		uint16_t fast :1,
+		uint16_t t_slash :1;
+	} opts;
+};
+
+#define flip_cache_state(c) ((c).state == DRAINING ? (c).state = FILLING : (c).state = DRAINING)
 
 #define NR_URL_TYPES 11
 
@@ -219,20 +225,11 @@ do {\
  * Global vars
  */
 
-int nr_reaped;
-int current_depth;
 int url_cnt;
 
-struct cache_ctx cache1;
-struct cache_ctx cache2;
-
 /* Defined in main */
-
 struct url_types url_types[NR_URL_TYPES];
 int path_max;
-char **user_blacklist;
-int USER_BLACKLIST_NR_TOKENS;
-
 
 struct winsize winsize;
 struct graph_ctx *allowed;
@@ -273,18 +270,11 @@ int crawl(struct http_t *, struct cache_ctx *, struct cache_ctx *) __nonnull((1,
 
 #define TOKEN_MAX 64
 
-uint32_t runtime_options;
 pthread_t thread_screen_tid;
 pthread_attr_t thread_screen_attr;
 pthread_mutex_t screen_mutex;
 
-
 #define ACTION_ING_STR ">>> "
-#define ACTION_DONE_STR "@@@ "
-#define ATTENTION_STR "!!! "
-#define STATISTICS_STR "+++ "
-
-#define FL_RESET 0x1
 
 /*
  * For paths that are forbidden as
