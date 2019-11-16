@@ -128,6 +128,11 @@ do {\
 	(type *)((char *)__mptr - offsetof(type, member));\
 })
 
+#define OPT_ALLOW_XDOMAIN 0x1
+#define OPT_USE_TLS 0x2
+#define OPT_FAST_MODE 0x4
+#define OPT_CACHE_THRESHOLD 0x8
+#define OPT_CRAWL_DELAY 0x10
 
 #define option_set(o) ((o) & runtime_options)
 #define set_option(o) (runtime_options |= (o))
@@ -152,11 +157,6 @@ struct url_types
 
 #define CACHE_DEFAULT_THRESHOLD 500
 
-#define can_xdomain(n) ((n)->opts.xdomain)
-#define using_tls(n) ((n)->opts.tls)
-#define using_thresh(n) ((n)->opts.thresh)
-#define fast_mode(n) ((n)->opts.fast)
-
 #define stats_nr_bytes(n) ((n)->stats.nr_bytes)
 #define stats_nr_requests(n) ((n)->stats.nr_requests)
 #define stats_nr_archived(n) ((n)->stats.nr_archived)
@@ -171,18 +171,6 @@ struct url_types
 #define STATS_INC_REQS(n) ++((n)->stats.nr_requests)
 #define STATS_INC_ARCHIVED(n) ++((n)->stats.nr_archived)
 #define STATS_INC_ERRORS(n) ++((n)->stats.nr_errors)
-
-#define xdomain_on(n) ((n)->opts.xdomain = 1)
-#define tls_on(n) ((n)->opts.tls = 1)
-#define thresh_on(n) ((n)->opts.thresh = 1)
-#define fast_mode_on(n) ((n)->opts.fast = 1)
-#define tslash_on(n) ((n)->opts.tslash = 1)
-
-#define xdomain_off(n) ((n)->opts.xdomain = 0)
-#define tls_off(n) ((n)->opts.tls = 0)
-#define thresh_off(n) ((n)->opts.thresh = 0)
-#define fast_mode_off(n) ((n)->opts.fast = 0)
-#define tslash_off(n) ((n)->opts.tslash = 0)
 
 enum state
 {
@@ -215,15 +203,6 @@ struct netwasabi_ctx
 		unsigned int nr_errors;
 		uint16_t depth; /* current depth */
 	} stats;
-
-	struct
-	{
-		uint16_t xdomain :1,
-		uint16_t tls :1,
-		uint16_t thresh :1,
-		uint16_t fast :1,
-		uint16_t t_slash :1;
-	} opts;
 };
 
 #define flip_cache_state(c) ((c).state == DRAINING ? (c).state = FILLING : (c).state = DRAINING)
