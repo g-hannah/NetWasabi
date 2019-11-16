@@ -15,8 +15,11 @@
 #include "screen_utils.h"
 #include "netwasabi.h"
 
-#define __no_threshold(w) ((w)->no_cache_threshold)
-#define __threshold(w) ((w)->cache_threshold)
+#define __option_set(w, o) ((w)->runtime_opts & (o))
+#define __set_option(w, o) ((w)->runtime_opts |= (o))
+#define __unset_option(w, o) ((w)->runtime_opts &= ~(o))
+
+#define __threshold(w) ((w)->cache_thresh)
 
 struct worker_thread
 {
@@ -24,8 +27,8 @@ struct worker_thread
 	int active;
 	int idx;
 	char *main_url;
-	unsigned int cache_threshold;
-	unsigned int no_cache_threshold;
+	uint32_t runtime_opts;
+	unsigned int cache_thresh;
 };
 
 static struct worker_thread workers[FAST_MODE_NR_WORKERS];
@@ -293,9 +296,6 @@ worker_crawl(void *args)
 
 	if (__initialising_thread == pthread_self())
 	{
-		wlog("[0x%lx] I am the initialising thread\n", pthread_self());
-		wlog("[0x%lx] cache threshold == %d%s\n", pthread_self(), __threshold(wt), __no_threshold(wt) ? " but disabled" : "");
-
 		http_send_request(http, GET);
 		http_recv_response(http);
 
@@ -454,6 +454,10 @@ worker_crawl(void *args)
 				goto check_reconnect;
 		}
 
+/*
+ * The global volatile FILL variable controls whether
+ * we are still filling the FILLING cache or not.
+ */
 		if (fill)
 		{
 			if (parse_links(http, cache1.state == FILLING ? &cache1 : &cache2, cache1.state == DRAINING ? &cache1 : &cache2) < 0)
@@ -471,7 +475,7 @@ worker_crawl(void *args)
 			else
 				update_cache2_count(nr_filling);
 
-			if (!__no_threshold(wt))
+			if (__option_set(wt, OPT_CACHE_THRESHOLD))
 			{
 				if (nr_filling >= __threshold(wt))
 				{
@@ -570,6 +574,10 @@ respawn_dead_threads(void)
 		if (!workers[i].active)
 		{
 			workers[i].active = 1;
+			if (option_set(OPT_CACHE_THRESHOLD))
+				workers[i].cache_thresh = nwctx.config.cache_thresh;
+			else
+				workers[i].cache_thresh = UINT_MAX;
 
 			if ((err = pthread_create(&workers[i].tid, &attr, worker_crawl, (void *)&workers[i])) != 0)
 			{
@@ -637,17 +645,12 @@ do_fast_mode(char *remote_host)
 		workers[i].active = 1;
 		workers[i].idx = i;
 		workers[i].main_url = strdup(remote_host); /* give each their own copy of the main URL */
+		workers[i].runtime_opts = runtime_opts;
 
-		if (option_set(OPT_NO_CACHE_THRESH))
-		{
-			workers[i].no_cache_threshold = 1;
-			workers[i].cache_threshold = UINT_MAX;
-		}
+		if (option_set(OPT_CACHE_THRESHOLD))
+			workers[i].cache_thresh = nwctx.config.cache_thresh;
 		else
-		{
-			workers[i].no_cache_threshold = 0;
-			workers[i].cache_threshold = cache_threshold(nwctx);
-		}
+			workers[i].cache_thresh = UINT_MAX;
 
 		if ((err = pthread_create(&workers[i].tid, &attr, worker_crawl, (void *)&workers[i])) != 0)
 		{
