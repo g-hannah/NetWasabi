@@ -204,7 +204,7 @@ make_full_url(struct http_t *http, buf_t *in, buf_t *out)
 		}
 	}
 
-	if (!keep_trailing_slash(nwctx))
+	if (!keep_tslash(&nwctx))
 	{
 		if (*(out->buf_tail - 1) == '/')
 			buf_snip(out, (size_t)1);
