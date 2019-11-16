@@ -172,6 +172,10 @@ struct url_types
 #define STATS_INC_ARCHIVED(n) ++((n)->stats.nr_archived)
 #define STATS_INC_ERRORS(n) ++((n)->stats.nr_errors)
 
+#define keep_tslash(n) ((n)->config.tslash)
+#define tslash_on(n) ((n)->config.tslash = 1)
+#define tslash_off(n) ((n)->config.tslash = 0)
+
 enum state
 {
 	DRAINING = 0,
@@ -193,11 +197,12 @@ struct netwasabi_ctx
 		unsigned int crawl_depth;
 		unsigned int cache_thresh;
 		unsigned int have_rgraph; /* did we build a token graph with robots.txt? */
+		unsigned int tslash;
 	} config;
 
 	struct
 	{
-		size_t nr_bytes_received;
+		size_t nr_bytes;
 		unsigned int nr_requests;
 		unsigned int nr_archived;
 		unsigned int nr_errors;
@@ -263,6 +268,7 @@ pthread_attr_t thread_screen_attr;
 pthread_mutex_t screen_mutex;
 
 #define ACTION_ING_STR ">>> "
+#define ACTION_DONE_STR "@@@ "
 
 /*
  * For paths that are forbidden as
