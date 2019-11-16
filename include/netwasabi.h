@@ -172,6 +172,18 @@ struct url_types
 #define STATS_INC_ARCHIVED(n) ++((n)->stats.nr_archived)
 #define STATS_INC_ERRORS(n) ++((n)->stats.nr_errors)
 
+#define xdomain_on(n) ((n)->opts.xdomain = 1)
+#define tls_on(n) ((n)->opts.tls = 1)
+#define thresh_on(n) ((n)->opts.thresh = 1)
+#define fast_mode_on(n) ((n)->opts.fast = 1)
+#define tslash_on(n) ((n)->opts.tslash = 1)
+
+#define xdomain_off(n) ((n)->opts.xdomain = 0)
+#define tls_off(n) ((n)->opts.tls = 0)
+#define thresh_off(n) ((n)->opts.thresh = 0)
+#define fast_mode_off(n) ((n)->opts.fast = 0)
+#define tslash_off(n) ((n)->opts.tslash = 0)
+
 enum state
 {
 	DRAINING = 0,
