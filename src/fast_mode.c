@@ -15,9 +15,9 @@
 #include "screen_utils.h"
 #include "netwasabi.h"
 
-#define __option_set(w, o) ((w)->runtime_opts & (o))
-#define __set_option(w, o) ((w)->runtime_opts |= (o))
-#define __unset_option(w, o) ((w)->runtime_opts &= ~(o))
+#define __option_set(w, o) ((w)->runtime_options & (o))
+#define __set_option(w, o) ((w)->runtime_options |= (o))
+#define __unset_option(w, o) ((w)->runtime_options &= ~(o))
 
 #define __threshold(w) ((w)->cache_thresh)
 
@@ -27,7 +27,7 @@ struct worker_thread
 	int active;
 	int idx;
 	char *main_url;
-	uint32_t runtime_opts;
+	uint32_t runtime_options;
 	unsigned int cache_thresh;
 };
 
@@ -574,6 +574,8 @@ respawn_dead_threads(void)
 		if (!workers[i].active)
 		{
 			workers[i].active = 1;
+			workers[i].runtime_options = runtime_options;
+
 			if (option_set(OPT_CACHE_THRESHOLD))
 				workers[i].cache_thresh = nwctx.config.cache_thresh;
 			else
@@ -645,7 +647,7 @@ do_fast_mode(char *remote_host)
 		workers[i].active = 1;
 		workers[i].idx = i;
 		workers[i].main_url = strdup(remote_host); /* give each their own copy of the main URL */
-		workers[i].runtime_opts = runtime_opts;
+		workers[i].runtime_options = runtime_options;
 
 		if (option_set(OPT_CACHE_THRESHOLD))
 			workers[i].cache_thresh = nwctx.config.cache_thresh;
