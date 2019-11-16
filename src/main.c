@@ -205,7 +205,7 @@ __print_information_layout(void)
 		COL_END);
 
 #define COL_HEADINGS COL_DARKORANGE
-if (!FAST_MODE)
+if (!option_set(OPT_FAST_MODE))
 {
 	fprintf(stderr,
 	" ==========================================================================================\n"
@@ -220,7 +220,7 @@ if (!FAST_MODE)
 	" ==========================================================================================\n\n",
 	COL_LIGHTGREY, COL_END,
 	COL_HEADINGS, COL_END, (int)0, COL_HEADINGS, COL_END, (int)0, COL_HEADINGS, COL_END, (size_t)0,
-	COL_HEADINGS, COL_END, crawl_delay(nwctx), COL_HEADINGS, COL_END, 0,
+	COL_HEADINGS, COL_END, crawl_delay(&nwctx), COL_HEADINGS, COL_END, 0,
 	COL_DARKGREEN, "(filling)", COL_END, COL_LIGHTGREY, "(empty)", COL_END);
 }
 else
@@ -403,7 +403,7 @@ main(int argc, char *argv[])
  */
 	__check_directory();
 
-	if (fast_mode(&nwctx))
+	if (option_set(OPT_FAST_MODE))
 	{
 		do_fast_mode(argv[1]);
 		goto out;
@@ -617,7 +617,7 @@ get_opts(int argc, char *argv[])
 {
 	int		i;
 
-	cache_threshold(&nwctx) = CACHE_DEFAULT_THRESHOLD;
+	cache_thresh(&nwctx) = CACHE_DEFAULT_THRESHOLD;
 
 	for (i = 1; i < argc; ++i)
 	{
@@ -668,7 +668,8 @@ get_opts(int argc, char *argv[])
 		if (!strcmp("--fast-mode", argv[i])
 		|| !strcmp("-fm", argv[i]))
 		{
-			fast_mode_on(&nwctx);
+			set_option(OPT_FAST_MODE);
+			assert(option_set(OPT_FAST_MODE));
 		}
 #if 0
 		else
@@ -712,14 +713,13 @@ get_opts(int argc, char *argv[])
 		if (!strcmp("--xdomain", argv[i])
 			|| !strcmp("-X", argv[i]))
 		{
-			//set_option(OPT_ALLOW_XDOMAIN);
-			xdomain_on(&nwctx);
+			set_option(OPT_ALLOW_XDOMAIN);
 		}
 		else
 		if (!strcmp("--cache-no-threshold", argv[i]))
 		{
-			set_option(OPT_NO_CACHE_THRESH);
-			assert(option_set(OPT_NO_CACHE_THRESH));
+			unset_option(OPT_CACHE_THRESHOLD);
+			assert(!option_set(OPT_CACHE_THRESHOLD));
 		}
 		else
 		if (!strcmp("--cache-set-threshold", argv[i]))
@@ -732,8 +732,8 @@ get_opts(int argc, char *argv[])
 				usage(EXIT_FAILURE);
 			}
 
-			cache_threshold(&nwctx) = (unsigned int)atoi(argv[i+1]);
-			thresh_on(&nwctx);
+			cache_thresh(&nwctx) = (unsigned int)atoi(argv[i+1]);
+			set_option(OPT_CACHE_THRESHOLD);
 		}
 #if 0
 		else
@@ -753,8 +753,7 @@ get_opts(int argc, char *argv[])
 		if (!strcmp("-T", argv[i])
 			|| strcmp("--tls", argv[i]))
 		{
-			//set_option(OPT_USE_TLS);
-			tls_on(&nwctx);
+			set_option(OPT_USE_TLS);
 		}
 		else
 		{
@@ -762,7 +761,7 @@ get_opts(int argc, char *argv[])
 		}
 	}
 
-	if (crawl_delay(&nwctx) > 0 && fast_mode(&nwctx))
+	if (crawl_delay(&nwctx) > 0 && option_set(OPT_FAST_MODE))
 	{
 			crawl_delay(&nwctx) = 0;
 	}

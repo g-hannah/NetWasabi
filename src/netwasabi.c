@@ -1198,8 +1198,8 @@ do_request(struct http_t *http)
 		goto fail;
 	}
 
-	STATS_ADD_BYTES(nwctx, bytes);
-	update_bytes(total_bytes(nwctx));
+	STATS_ADD_BYTES(&nwctx, bytes);
+	update_bytes(stats_nr_bytes(&nwctx));
 
 	status_code = http->code;
 	update_status_code(status_code);
@@ -1248,7 +1248,7 @@ crawl(struct http_t *http, struct cache_ctx *cache1, struct cache_ctx *cache2)
 	size_t len;
 	http_link_t *link;
 
-	trailing_slash_off(nwctx);
+	tslash_off(&nwctx);
 
 	cache1->state = DRAINING;
 	cache2->state = FILLING;
@@ -1328,7 +1328,7 @@ crawl(struct http_t *http, struct cache_ctx *cache1, struct cache_ctx *cache2)
  * otherwise it's bonjour la segmentation fault (usually).
  */
 			BLOCK_SIGNAL(SIGINT);
-			sleep(crawl_delay(nwctx));
+			sleep(crawl_delay(&nwctx));
 			UNBLOCK_SIGNAL(SIGINT);
 
 			http_check_host(http);
@@ -1425,9 +1425,9 @@ crawl(struct http_t *http, struct cache_ctx *cache1, struct cache_ctx *cache2)
 						update_cache1_count(nr_links_sibling);
 					}
 
-					if (!option_set(OPT_NO_CACHE_THRESH))
+					if (option_set(OPT_CACHE_THRESHOLD))
 					{
-						if (nr_links_sibling >= cache_threshold(nwctx))
+						if (nr_links_sibling >= cache_thresh(&nwctx))
 						{
 							fill = 0;
 /*
@@ -1465,7 +1465,7 @@ crawl(struct http_t *http, struct cache_ctx *cache1, struct cache_ctx *cache2)
 
 			clear_error_msg();
 
-			trailing_slash_off(nwctx);
+			tslash_off(&nwctx);
 		} /* for (i = 0; i < nr_links; ++i) */
 
 		++current_depth;
@@ -1488,7 +1488,7 @@ crawl(struct http_t *http, struct cache_ctx *cache1, struct cache_ctx *cache2)
 			cache2->state = DRAINING;
 		}
 
-		if (current_depth >= crawl_depth(nwctx))
+		if (current_depth >= crawl_depth(&nwctx))
 		{
 			update_operation_status("Reached maximum crawl depth");
 			break;
