@@ -48,6 +48,8 @@ _log(char *fmt, ...)
  */
 struct __http_t
 {
+	struct http_t http;
+#if 0
 	char *host;
 	char *page;
 	char *full_url;
@@ -57,6 +59,7 @@ struct __http_t
 	int code;
 	int redirected; /* non-zero if redirected via Location header field */
 	char *red_url; /* the URL that was redirected */
+#endif
 
 	cache_t *headers;
 	cache_t *cookies;
@@ -769,7 +772,7 @@ __http_set_new_location(struct http_t *http)
 	}
 
 	assert(location->vlen < HTTP_URL_MAX);
-	strcpy(__http->full_url, location->value);
+	strcpy(http->full_url, location->value);
 
 	_log("Got new location: %s\n", location->value);
 
@@ -1537,6 +1540,7 @@ static int
 __http_init_obj(struct __http_t *__http)
 {
 	char __http_cache_name[64];
+	struct http_t *http;
 
 	sprintf(__http_cache_name, "http_header_cache-0x%lx", pthread_self());
 
@@ -1567,38 +1571,40 @@ __http_init_obj(struct __http_t *__http)
 
 	_log("Created coookies cache %s\n", __http_cache_name);
 
-	__http->host = calloc(HTTP_HOST_MAX+1, 1);
-	__http->conn.host_ipv4 = calloc(__HTTP_ALIGN_SIZE(INET_ADDRSTRLEN+1), 1);
-	__http->primary_host = calloc(HTTP_HOST_MAX+1, 1);
-	__http->page = calloc(HTTP_URL_MAX+1, 1);
-	__http->full_url = calloc(HTTP_URL_MAX+1, 1);
-	__http->red_url = calloc(HTTP_URL_MAX+1, 1);
+	http = (struct http_t *)__http;
 
-	if (buf_init(&__http->conn.read_buf, HTTP_DEFAULT_READ_BUF_SIZE) < 0)
+	http->host = calloc(HTTP_HOST_MAX+1, 1);
+	http->conn.host_ipv4 = calloc(__HTTP_ALIGN_SIZE(INET_ADDRSTRLEN+1), 1);
+	http->primary_host = calloc(HTTP_HOST_MAX+1, 1);
+	http->page = calloc(HTTP_URL_MAX+1, 1);
+	http->full_url = calloc(HTTP_URL_MAX+1, 1);
+	http->red_url = calloc(HTTP_URL_MAX+1, 1);
+
+	if (buf_init(&http->conn.read_buf, HTTP_DEFAULT_READ_BUF_SIZE) < 0)
 	{
 		fprintf(stderr, "__http_init_obj: failed to initialise read buf\n");
 		goto fail_destroy_cache;
 	}
 
-	if (buf_init(&__http->conn.write_buf, HTTP_DEFAULT_WRITE_BUF_SIZE) < 0)
+	if (buf_init(&http->conn.write_buf, HTTP_DEFAULT_WRITE_BUF_SIZE) < 0)
 	{
 		fprintf(stderr, "__http_init_obj: failed to initialise write buf\n");
 		goto fail_release_mem;
 	}
 
-	assert(__http->host);
-	assert(__http->conn.host_ipv4);
-	assert(__http->primary_host);
-	assert(__http->page);
-	assert(__http->full_url);
-	assert(__http->red_url);
+	assert(http->host);
+	assert(http->conn.host_ipv4);
+	assert(http->primary_host);
+	assert(http->page);
+	assert(http->full_url);
+	assert(http->red_url);
 
-	__http->redirected = 0;
+	http->redirected = 0;
 
 	return 0;
 
 	fail_release_mem:
-	buf_destroy(&__http->conn.read_buf);
+	buf_destroy(&http->conn.read_buf);
 
 	fail_destroy_cache:
 	cache_destroy(__http->headers);
@@ -1638,12 +1644,12 @@ http_delete(struct http_t *http)
 
 	struct __http_t *__http = (struct __http_t *)http;
 
-	free(__http->host);
-	free(__http->primary_host);
-	free(__http->conn.host_ipv4);
-	free(__http->page);
-	free(__http->full_url);
-	free(__http->red_url);
+	free(http->host);
+	free(http->primary_host);
+	free(http->conn.host_ipv4);
+	free(http->page);
+	free(http->full_url);
+	free(http->red_url);
 
 	cache_clear_all(__http->headers);
 	cache_destroy(__http->headers);
@@ -1651,8 +1657,8 @@ http_delete(struct http_t *http)
 	cache_clear_all(__http->cookies);
 	cache_destroy(__http->cookies);
 
-	buf_destroy(&__http->conn.read_buf);
-	buf_destroy(&__http->conn.write_buf);
+	buf_destroy(&http->conn.read_buf);
+	buf_destroy(&http->conn.write_buf);
 
 	_log("Deleted HTTP object\n");
 
