@@ -67,6 +67,12 @@ int WDEBUG = 0;
 #define WLOG_FILE "./fast_mode_log.txt"
 FILE *wlogfp = NULL;
 
+/**
+ * A worker may write to a broken pipe after the
+ * remote server resets the connection (possible
+ * due to high volume of parallel requests). So
+ * get all workers to disconnect and reconnect.
+ */
 static void
 catch_sigpipe(int signo)
 {
@@ -131,6 +137,12 @@ __dtor __fast_mode_fini(void)
 	return;
 }
 
+/**
+ * Initialise the shared variables and save
+ * the thread id of the worker that called
+ * the function for error checking and such
+ * by the worker after returning.
+ */
 static void
 init_worker_environ(void)
 {
