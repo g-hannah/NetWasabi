@@ -1,5 +1,5 @@
 CC := gcc
-CFLAGS := -Wall -Werror
+CFLAGS := -Wall -Werror -D_FORTIFY_SOURCE=2 -fstack-protector-all --param ssp-buffer-size=4 -Wl,-z,relro
 DEBUG := 0
 
 INCLUDE_DIR := ../include
