@@ -5,7 +5,7 @@
 #include "malloc.h"
 
 void *
-wr_malloc(size_t size)
+nw_malloc(size_t size)
 {
 	if (size == 0)
 		size = 1;
@@ -18,7 +18,7 @@ wr_malloc(size_t size)
 }
 
 void *
-wr_zmalloc(size_t size)
+nw_zmalloc(size_t size)
 {
 	if (size == 0)
 		size = 1;
@@ -33,7 +33,7 @@ wr_zmalloc(size_t size)
 }
 
 void *
-wr_calloc(int nr, size_t size)
+nw_calloc(int nr, size_t size)
 {
 	void *mem = calloc(nr, size);
 
@@ -44,7 +44,7 @@ wr_calloc(int nr, size_t size)
 }
 
 void *
-wr_realloc(void *old_ptr, size_t size)
+nw_realloc(void *old_ptr, size_t size)
 {
 	old_ptr = realloc(old_ptr, size);
 
@@ -54,7 +54,7 @@ wr_realloc(void *old_ptr, size_t size)
 }
 
 char *
-wr_strdup(const char *str)
+nw_strdup(const char *str)
 {
 	char *dup_str = strdup(str);
 
