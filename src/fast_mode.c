@@ -525,7 +525,7 @@ worker_crawl(void *args)
 
 			++nr_reconnected;
 
-			if (nr_reconnected >= FAST_MODE_NR_WORKERS);
+			if (nr_reconnected >= FAST_MODE_NR_WORKERS)
 			{
 				__do_reconnect = 0;
 				nr_reconnected = 0;
