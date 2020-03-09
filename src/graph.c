@@ -41,7 +41,7 @@ graph_ctx_new(struct graph_ctx **g)
 {
 	assert(g);
 
-	*g = wr_malloc(sizeof(struct graph_ctx));
+	*g = nw_malloc(sizeof(struct graph_ctx));
 
 	if (!(*g))
 		return NULL;
@@ -49,7 +49,7 @@ graph_ctx_new(struct graph_ctx **g)
 	(*g)->graph_root = NULL;
 	(*g)->nr_nodes = 0;
 	
-	(*g)->matrix = wr_calloc(GRAPH_MATRIX_DEFAULT_SIZE, sizeof(int *));
+	(*g)->matrix = nw_calloc(GRAPH_MATRIX_DEFAULT_SIZE, sizeof(int *));
 	if (!(*g)->matrix)
 		goto fail_destroy_graph;
 
@@ -59,7 +59,7 @@ graph_ctx_new(struct graph_ctx **g)
 	for (i = 0; i < GRAPH_MATRIX_DEFAULT_SIZE; ++i)
 	{
 		(*g)->matrix[i] = NULL;
-		(*g)->matrix[i] = wr_calloc(GRAPH_MATRIX_DEFAULT_SIZE, sizeof(int));
+		(*g)->matrix[i] = nw_calloc(GRAPH_MATRIX_DEFAULT_SIZE, sizeof(int));
 
 		if (!(*g)->matrix[i])
 			goto fail_destroy_graph;
@@ -98,7 +98,7 @@ graph_node_init(struct graph_node **gn, size_t nr_members, size_t member_size)
 {
 	assert(gn);
 
-	*gn = wr_malloc(sizeof(struct graph_node));
+	*gn = nw_malloc(sizeof(struct graph_node));
 
 	if (!(*gn))
 		return NULL;
@@ -106,7 +106,7 @@ graph_node_init(struct graph_node **gn, size_t nr_members, size_t member_size)
 	(*gn)->left = NULL;
 	(*gn)->right = NULL;
 
-	(*gn)->data = wr_calloc(nr_members+1, member_size);
+	(*gn)->data = nw_calloc(nr_members+1, member_size);
 
 	if (!(*gn)->data)
 		goto fail_destroy_node;
