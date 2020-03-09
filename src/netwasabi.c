@@ -395,10 +395,13 @@ clear_error_msg(void)
 void
 deconstruct_btree(http_link_t *root, cache_t *cache)
 {
-	if (!root)
+#pragma GCC diagnostic push
+#pragma GCC diagnostic ignored "-Wnonnull-compare"
+	if (root == (http_link_t *)NULL)
 	{
 		return;
 	}
+#pragma GCC diagnostic pop
 
 	assert((char *)root >= (char *)cache->cache && ((char *)root - (char *)cache->cache) < cache->cache_size);
 
