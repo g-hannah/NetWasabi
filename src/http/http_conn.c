@@ -50,7 +50,7 @@ __init_openssl(void)
 	SSL_library_init();
 	SSL_load_error_strings();
 	OpenSSL_add_all_algorithms();
-	OPENSSL_config(NULL);
+	//OPENSSL_config(NULL);
 	ERR_load_crypto_strings();
 }
 
@@ -118,7 +118,7 @@ http_connect(struct http_t *http)
  * pthread_once() to do it once only.
  */
 		pthread_once(&__ossl_init_once, __init_openssl);
-		http->conn.ssl_ctx = SSL_CTX_new(TLSv1_2_client_method());
+		http->conn.ssl_ctx = SSL_CTX_new(TLS_client_method());
 		http_tls(http) = SSL_new(http->conn.ssl_ctx);
 
 		SSL_set_fd(http_tls(http), http_socket(http)); /* Set the socket for reading/writing */
@@ -225,7 +225,7 @@ http_reconnect(struct http_t *http)
 
 	if (option_set(OPT_USE_TLS))
 	{
-		http->conn.ssl_ctx = SSL_CTX_new(TLSv1_2_client_method());
+		http->conn.ssl_ctx = SSL_CTX_new(TLS_client_method());
 		http_tls(http) = SSL_new(http->conn.ssl_ctx);
 
 		SSL_set_fd(http_tls(http), http_socket(http)); /* Set the socket for reading/writing */
