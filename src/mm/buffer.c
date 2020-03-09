@@ -837,9 +837,9 @@ buf_dup(buf_t *copy)
 {
 	assert(copy);
 
-	buf_t *new = wr_malloc(sizeof(buf_t));
+	buf_t *new = nw_malloc(sizeof(buf_t));
 
-	new->data = wr_calloc(copy->buf_size, 1);
+	new->data = nw_calloc(copy->buf_size, 1);
 	memcpy(new->data, copy->data, copy->buf_size);
 	new->buf_end = (new->data + copy->buf_size);
 	new->buf_head = (new->data + (copy->buf_head - copy->data));

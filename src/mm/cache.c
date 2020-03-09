@@ -2,6 +2,7 @@
 #include <pthread.h>
 #include <stdio.h>
 #include <stdlib.h>
+#include <string.h>
 #include "cache.h"
 #include "http.h"
 #include "malloc.h"
@@ -293,16 +294,16 @@ cache_create(char *name,
 	cache_t	*cachep = malloc(sizeof(cache_t));
 	memset(cachep, 0, sizeof(*cachep));
 
-	cachep->name = wr_calloc(CACHE_MAX_NAME, 1);
+	cachep->name = nw_calloc(CACHE_MAX_NAME, 1);
 	strcpy(cachep->name, name);
 
-	cachep->cache = wr_calloc(CACHE_SIZE, 1);
+	cachep->cache = nw_calloc(CACHE_SIZE, 1);
 	cachep->objsize = size;
 
-	cachep->assigned_list = wr_calloc(capacity, sizeof(struct cache_obj_ctx));
+	cachep->assigned_list = nw_calloc(capacity, sizeof(struct cache_obj_ctx));
 	cachep->nr_assigned = 0;
 
-	cachep->free_bitmap = wr_calloc(bitmap_size, 1);
+	cachep->free_bitmap = nw_calloc(bitmap_size, 1);
 
 	if (ctor)
 	{
@@ -485,7 +486,7 @@ cache_alloc(cache_t *cachep, void *ptr_addr)
 			COL_RED, (added_capacity * sizeof(struct cache_obj_ctx)), COL_END);
 #endif
 
-		cachep->assigned_list = wr_realloc(cachep->assigned_list, (new_capacity * sizeof(struct cache_obj_ctx)));
+		cachep->assigned_list = nw_realloc(cachep->assigned_list, (new_capacity * sizeof(struct cache_obj_ctx)));
 		assert(cachep->assigned_list);
 
 		if (__owner_is_in_cache(cachep, owner_addr))
@@ -498,12 +499,12 @@ cache_alloc(cache_t *cachep, void *ptr_addr)
 #ifdef DEBUG
 		fprintf(stderr, "%sCalling realloc() for ->cache%s\n", COL_RED, COL_END);
 #endif
-		cachep->cache = wr_realloc(cachep->cache, new_size);
+		cachep->cache = nw_realloc(cachep->cache, new_size);
 		assert(cachep->cache);
 #ifdef DEBUG
 		fprintf(stderr, "%sCalling realloc() for ->free_bitmap%s\n", COL_RED, COL_END);
 #endif
-		cachep->free_bitmap = wr_realloc(cachep->free_bitmap, new_bitmap_size);
+		cachep->free_bitmap = nw_realloc(cachep->free_bitmap, new_bitmap_size);
 		assert(cachep->free_bitmap);
 
 		cachep->nr_free += added_capacity;
@@ -562,6 +563,7 @@ cache_dealloc(cache_t *cachep, void *slot, void *ptr_addr)
 {
 	assert(cachep);
 	assert(slot);
+	assert(ptr_addr);
 
 	int obj_idx;
 	int nr_assigned = cachep->nr_assigned;
@@ -574,8 +576,8 @@ cache_dealloc(cache_t *cachep, void *slot, void *ptr_addr)
 			obj_idx, cachep->name);
 */
 
-	if (ptr_addr)
-	{
+	//if ((void *)ptr_addr != NULL)
+	//{
 		CACHE_REMOVE_PTR(cachep, ptr_addr);
 		assert(cachep->nr_assigned < nr_assigned);
 
@@ -585,7 +587,7 @@ cache_dealloc(cache_t *cachep, void *slot, void *ptr_addr)
 				cachep->name, nr_assigned, cachep->nr_assigned,
 				cachep->capacity);
 		}
-	}
+	//}
 
 	CACHE_INC_FREE(cachep);
 	__cache_mark_unused(cachep, obj_idx);
