@@ -256,7 +256,7 @@ catch_signal(int signo)
 }
 
 static void
-__check_directory(void)
+check_directory(void)
 {
 	char *home = getenv("HOME");
 	buf_t tmp;
@@ -343,9 +343,12 @@ __get_robots(connection_t *conn)
 #endif
 
 static int
-__valid_url(char *url)
+valid_url(char *url)
 {
 	assert(url);
+
+	if (strlen(url) >= HTTP_URL_MAX)
+		return 0;
 
 	if (!strstr(url, "http://") && !strstr(url, "https://"))
 		return 0;
@@ -376,7 +379,7 @@ main(int argc, char *argv[])
 		goto fail;
 	}
 
-	if (!__valid_url(argv[1]))
+	if (!valid_url(argv[1]))
 	{
 		fprintf(stderr, "\"%s\" is not a valid URL\n", argv[1]);
 		goto fail;
@@ -401,7 +404,7 @@ main(int argc, char *argv[])
  * Check for existence of the WR_Reaped directory
  * in the user's home directory.
  */
-	__check_directory();
+	check_directory();
 
 	if (option_set(OPT_FAST_MODE))
 	{
