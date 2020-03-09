@@ -34,10 +34,11 @@
 #define HTTP_HNAME_MAX 64 /* Header name */
 #define HTTP_HOST_MAX 256
 
-#define HTTP_VERSION				"1.1"
-#define HTTP_USER_AGENT			"Mozilla/5.0 (X11; Ubuntu; Linux x86_64; rv:68.0) Gecko/20100101 Firefox/68.0"
-#define HTTP_ACCEPT					"text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8"
-#define HTTP_EOH_SENTINEL		"\r\n\r\n"
+#define HTTP_VERSION		"1.1"
+#define HTTP_USER_AGENT		"Mozilla/5.0 (X11; Ubuntu; Linux x86_64; rv:68.0) Gecko/20100101 Firefox/68.0"
+#define HTTP_ACCEPT		"text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8"
+#define HTTP_EOH_SENTINEL	"\r\n\r\n"
+#define HTTP_EOL		"\r\n"
 
 #define HTTP_DEFAULT_READ_BUF_SIZE	32768
 #define HTTP_DEFAULT_WRITE_BUF_SIZE	4096
@@ -72,7 +73,7 @@ do {\
 	___p_t_r;\
 })
 
-#define __HTTP_ALIGN_SIZE(s) (((s) + 0xf) & ~(0xf))
+#define HTTP_ALIGN_SIZE(s) (((s) + 0xf) & ~(0xf))
 
 typedef struct http_link_t
 {
@@ -99,6 +100,20 @@ typedef struct http_header_t
 	size_t nsize; /* Amount of memory allocated for name */
 	size_t vsize; /* Amount of memory allocated for value */
 } http_header_t;
+
+struct http_field
+{
+	char *name;
+	char *value;
+	size_t nlen;
+	size_t vlen;
+	struct http_field *next;
+};
+
+struct http_header
+{
+	struct http_field *field;
+};
 
 #define http_socket(h) ((h)->conn.sock)
 #define http_tls(h) ((h)->conn.ssl)
