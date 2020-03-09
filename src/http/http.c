@@ -25,6 +25,9 @@ int _DEBUG = 1;
 int _DEBUG = 0;
 #endif
 
+#define CREATION_FLAGS O_RDWR|O_CREAT|O_TRUNC
+#define CREATION_MODE S_IRUSR|S_IWUSR
+
 static void
 _log(char *fmt, ...)
 {
@@ -98,10 +101,10 @@ http_header_cache_ctor(void *hh)
 	http_header_t *ch = (http_header_t *)hh;
 	clear_struct(ch);
 
-	if (!(ch->name = wr_calloc(HTTP_HNAME_MAX+1, 1)))
+	if (!(ch->name = nw_calloc(HTTP_HNAME_MAX+1, 1)))
 		goto fail;
 
-	if (!(ch->value = wr_calloc(HTTP_COOKIE_MAX+1, 1)))
+	if (!(ch->value = nw_calloc(HTTP_COOKIE_MAX+1, 1)))
 		goto fail;
 
 	ch->nsize = HTTP_HNAME_MAX+1;
@@ -143,7 +146,7 @@ http_link_cache_ctor(void *http_link)
 	http_link_t *hl = (http_link_t *)http_link;
 	clear_struct(hl);
 
-	hl->url = wr_calloc(HTTP_URL_MAX+1, 1);
+	hl->url = nw_calloc(HTTP_URL_MAX+1, 1);
 
 	if (!hl->url)
 		return -1;
@@ -1366,6 +1369,100 @@ http_check_header(buf_t *buf, const char *name, off_t off, off_t *ret_off)
 	return 0;
 }
 
+/*
+#define HTTP_STATUS(b) \
+({ \
+	char *__p;\
+	char *__q;\
+	char *__eoh = HTTP_EOH((b));\
+	int __st = 0;\
+	__p = (b)->buf_head;\
+	__q = memchr(__p, ' ', (__eoh - __p));\
+	if (__q){\
+		__p = ++__q;\
+		__q = memchr(__p, ' ', (__eoh - __p));\
+		if (__q){\
+			__st = (int)strtoul(__p, &__q, 10);\
+		}\
+	}\
+	__st;\
+})
+
+int
+http_parse_header(buf_t *buf, struct http_header *head)
+{
+	assert(buf);
+	assert(head);
+
+	head->next = NULL;
+	head->status = -1;
+
+	char *eoh = HTTP_EOH(buf);
+	struct http_field *f = NULL;
+
+	if (!eoh)
+		return -1;
+
+	head->status = HTTP_STATUS(buf);
+	if (!head->status)
+		return -1;
+
+	char *p = NULL;
+	char *q = NULL;
+
+	q = buf->buf_head;
+	p = memchr(q, '\r', (eoh - q));
+
+	if (!p)
+		return -1;
+
+	++p;
+
+	head->field = nw_malloc(sizeof(struct http_field));
+	if (!head->field)
+		return -1;
+
+	f = head->field;
+
+	while (1)
+	{
+		q = memchr(p, ':', (eoh - p));
+		if (!q)
+			break;
+
+		f = nw_malloc(sizeof(struct http_field));
+		if (!f)
+			goto fail;
+
+		f->nlen = (q - p);
+		f->name = nw_calloc(f->nlen+1, 1);
+		if (!f->name)
+			goto fail;
+
+		memcpy(f->name, p, f->nlen);
+		f->name[f->nlen] = 0;
+
+		p = ++q;
+		if (*p == ' ')
+			++p;
+
+		q = memchr(p, '\r', (eoh - p));
+		if (!q)
+			goto fail;
+
+		f->vlen = (q - p);
+		f->value = nw_calloc(f->vlen+1, 1);
+		if (!f->value)
+			goto fail;
+
+		memcpy(f->value, p, f->vlen);
+		f->value[f->vlen] = 0;
+
+		f->next = NULL;
+	}
+}
+*/
+
 /**
  * http_get_header - find and return a line in an HTTP header
  * @buf: the buffer containing the HTTP header
@@ -1574,7 +1671,7 @@ __http_init_obj(struct __http_t *__http)
 	http = (struct http_t *)__http;
 
 	http->host = calloc(HTTP_HOST_MAX+1, 1);
-	http->conn.host_ipv4 = calloc(__HTTP_ALIGN_SIZE(INET_ADDRSTRLEN+1), 1);
+	http->conn.host_ipv4 = calloc(HTTP_ALIGN_SIZE(INET_ADDRSTRLEN+1), 1);
 	http->primary_host = calloc(HTTP_HOST_MAX+1, 1);
 	http->page = calloc(HTTP_URL_MAX+1, 1);
 	http->full_url = calloc(HTTP_URL_MAX+1, 1);
