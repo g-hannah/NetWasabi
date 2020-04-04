@@ -5,12 +5,21 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <sys/stat.h>
+//#include <pthread.h>
 #include <unistd.h>
 #include "buffer.h"
 #include "cache.h"
 #include "http.h"
 #include "malloc.h"
 #include "netwasabi.h"
+
+/*
+ * TODO
+ *
+ * Gracefully handle 3xx/4xx/5xx codes.
+ * (follow redirects automatically)
+ *
+ */
 
 #define HTTP_SMALL_READ_BLOCK 8
 #define HTTP_MAX_WAIT_TIME 6
@@ -64,6 +73,15 @@ struct __http_t
 	char *red_url; /* the URL that was redirected */
 #endif
 
+/*
+ * This is private data only
+ * accessable within this file.
+ *
+ * Every HTTP object created
+ * has its own cache of cookies
+ * and headers, which allows
+ * multithreading.
+ */
 	cache_t *headers;
 	cache_t *cookies;
 	http_header_t *__ptr;
@@ -260,6 +278,8 @@ __http_check_cookies(struct http_t *http)
 	return -1;
 }
 
+#define HTTP_HEADER_BUFSIZE 8192
+
 int
 http_build_request_header(struct http_t *http, enum request http_request)
 {
@@ -267,7 +287,15 @@ http_build_request_header(struct http_t *http, enum request http_request)
 
 	buf_t *buf = &http->conn.write_buf;
 	buf_t tmp;
-	static char header_buf[4096];
+	/*
+	 * Cannot use static memory since we
+	 * need to be thread-safe.
+	 */
+	//static char header_buf[4096];
+	char *header_buf = nw_calloc(HTTP_HEADER_BUFSIZE);
+
+	if (NULL == header_buf)
+		return -1;
 
 	buf_init(&tmp, HTTP_URL_MAX);
 
@@ -329,6 +357,9 @@ http_build_request_header(struct http_t *http, enum request http_request)
 	}
 
 	buf_append(buf, header_buf);
+
+	free(header_buf);
+	header_buf = NULL;
 
 /*
  * Append any cached cookies to the request header.
