@@ -509,6 +509,12 @@ __read_bytes(struct http_t *http, size_t toread)
 	buf_t *buf = &http->conn.read_buf;
 	register int cycles = 0;
 
+/*
+ * XXX
+ *
+ * CYCLES_MAX is our crude way of
+ * deciding we have timed out.
+ */
 	while (r)
 	{
 		++cycles;
@@ -534,6 +540,18 @@ __read_bytes(struct http_t *http, size_t toread)
 
 #define HTTP_MAX_CHUNK_STR 10
 
+/*
+ * In chunked transfer encoding, the data is sent in chunks
+ * with each chunk being preceded with the number of bytes
+ * of the chunk (this is used for pages that are created
+ * dynamically and therefore the HTTP server cannot send
+ * a Content-Length header.
+ *
+ * The data is encoding thus:
+ *
+ * \r\n[CHUNKSIZE]\r\n...DATA...\r\n[CHUNKSIZE]\r\n...DATA...\r\n0\r\n
+ *
+ */
 static void
 __http_read_until_next_chunk_size(struct http_t *http, buf_t *buf, char **cur_pos)
 {
@@ -545,6 +563,21 @@ __http_read_until_next_chunk_size(struct http_t *http, buf_t *buf, char **cur_po
 	off_t cur_pos_off = (*cur_pos - buf->buf_head);
 	char *q;
 	char *tail = buf->buf_tail;
+
+/*
+ * We want to produce the following state:
+ *
+ *        \r\n[CHUNKSIZE]\r\n
+ *        ^
+ *     CUR_POS
+ *
+ * We may already have this in our buffer
+ * and therefore simply need to point
+ * CUR_POS accordingly.
+ *
+ * Otherwise, do small reads until
+ * we have the metadata.
+ */
 
 	if (*cur_pos < tail)
 	{
@@ -560,6 +593,17 @@ __http_read_until_next_chunk_size(struct http_t *http, buf_t *buf, char **cur_po
 				while (*q != 0x0d && q < tail)
 					++q;
 
+			/*
+			 * Then we don't need to do
+			 * anymore reads. We have already
+			 * got \r\n[CHUNKSIZE]\r\n in the
+			 * buffer.
+			 *
+			 * Adjust CUR_POS to point to the
+			 * carriage return immediately after
+			 * the final byte of the previous
+			 * chunk.
+			 */
 				if (q != tail)
 				{
 					*cur_pos -= 2;
@@ -569,6 +613,12 @@ __http_read_until_next_chunk_size(struct http_t *http, buf_t *buf, char **cur_po
 		}
 	}
 
+/*
+ * We enter this function having pointed CUR_POS
+ * to START_OF_PREVIOUS_CHUNK + PREVIOUS_CHUNK_SIZE.
+ * We need at least two bytes here to get the \r\n
+ * at the start of the metadata.
+ */
 	__read_bytes(http, 2);
 	*cur_pos = (buf->buf_head + cur_pos_off);
 	tail = buf->buf_tail;
@@ -583,7 +633,7 @@ __http_read_until_next_chunk_size(struct http_t *http, buf_t *buf, char **cur_po
 		q = memchr(*cur_pos, 0x0a, (tail - *cur_pos));
 		if (q)
 		{
-			*cur_pos -= 2; /* point it back to START_OF_CHUNK_DATA + CHUNK_SIZE */
+			*cur_pos -= 2;
 			break;
 		}
 	}
