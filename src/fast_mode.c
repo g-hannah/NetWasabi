@@ -274,7 +274,7 @@ worker_crawl(void *args)
 
 	main_url = wt->main_url;
 
-	if (!(http = http_new()))
+	if (!(http = http_new((uint64_t)pthread_self())))
 	{
 		put_error_msg("failed to get new HTTP object");
 		goto thread_fail;
