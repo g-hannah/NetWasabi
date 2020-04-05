@@ -2,10 +2,10 @@
 #include <arpa/inet.h>
 #include <errno.h>
 #include <fcntl.h>
+#include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <sys/stat.h>
-//#include <pthread.h>
 #include <unistd.h>
 #include "buffer.h"
 #include "cache.h"
@@ -18,6 +18,11 @@
  *
  * Gracefully handle 3xx/4xx/5xx codes.
  * (follow redirects automatically)
+ *
+ * Make the dead link cache global.
+ *
+ * Upgrade to handle HTTP 2.0
+ *
  *
  */
 
@@ -109,7 +114,71 @@ http_dead_link_cache_dtor(void *dlObj)
 	dl->timestamp = 0;
 	dl->times_seen = 0;
 
+	return;
+}
+
+/**
+ * Check if a URL has been cached in the dead URL cache.
+ * @http The HTTP object in which the cache resides
+ * @URL The URL whose existence we check for in the cache.
+ */
+static int
+HTTP_is_dead_link(struct http_t *http, const char *URL)
+{
+	assert(http);
+	assert(URL);
+
+	struct __http_t *__http = (struct __http_t *)http;
+	http_dead_link_t *dl = (http_dead_link_t *)__http->dead_links->data;
+	int idx = 0;
+	int objUsed = 0;
+	size_t URL_len = strlen(URL);
+
+	while (1)
+	{
+		while ((objUsed = cache_obj_used(__http->dead_links, (void *)dl)) == 0)
+			++dl;
+
+		if (objUsed < 0)
+			break;
+
+		if (!memcmp((void *)dl->URL, (void *)URL, URL_len))
+		{
+			++dl->times_seen;
+			return 1;
+		}
+	}
+
 	return 0;
+}
+
+/**
+ * Cache a dead link.
+ *
+ * @http The HTTP object in which the cache resides
+ * @URL The URL to cache
+ * @code The HTTP code that was received for the link (e.g., 404)
+ */
+static void
+HTTP_cache_dead_link(struct http_t *http, const char *URL, int code)
+{
+	assert(http);
+	assert(URL);
+	assert(strlen(URL) < HTTP_URL_MAX);
+
+	struct __http_t *__http = (struct __http_t *)http;
+	http_dead_link_t *dl = NULL;
+
+	dl = cache_alloc(__http->dead_links, &__http->dlPtr);
+	if (NULL == __http->dlPtr)
+		goto fail;
+
+	strcpy(dl->URL, URL);
+	dl->code = code;
+	dl->timestamp = time(NULL);
+	++dl->times_seen;
+
+	return;
 }
 
 /*
@@ -144,6 +213,7 @@ struct __http_t
 	cache_t *cookies;
 	cache_t dead_links;
 	http_header_t *__ptr;
+	http_dead_link_t *dlPtr;
 };
 
 static void
@@ -961,6 +1031,10 @@ __http_set_new_location(struct http_t *http)
 	}
 
 	assert(location->vlen < HTTP_URL_MAX);
+
+	if (!location->value[0])
+		return;
+
 	strcpy(http->full_url, location->value);
 
 	_log("Got new location: %s\n", location->value);
@@ -985,7 +1059,7 @@ __http_set_new_location(struct http_t *http)
 
 	return 0;
 
-	fail_dealloc:
+fail_dealloc:
 	cache_dealloc(__http->headers, location, &location);
 
 	return -1;
@@ -1248,7 +1322,7 @@ __retry:
 	}
 	else
 	{
-		read_again:
+	read_again:
 
 		bytes = 0;
 		p = NULL;
@@ -1274,13 +1348,13 @@ __retry:
 		}
 	}
 
-	out_dealloc:
+out_dealloc:
 	cache_dealloc(__http->headers, (void *)content_len, &content_len);
 	cache_dealloc(__http->headers, (void *)transfer_enc, &transfer_enc);
 
 	return total_bytes;
 
-	fail_dealloc:
+fail_dealloc:
 	if (content_len)
 	{
 		cache_dealloc(__http->headers, (void *)content_len, &content_len);
@@ -1291,7 +1365,7 @@ __retry:
 		cache_dealloc(__http->headers, (void *)transfer_enc, &transfer_enc);
 	}
 
-	fail:
+fail:
 	return -1;
 }
 
@@ -1770,7 +1844,7 @@ http_check_host(struct http_t *http)
 {
 	assert(http);
 
-	static char old_host[HTTP_HNAME_MAX];
+	char old_host[HTTP_HNAME_MAX];
 	struct __http_t *__http = (struct __http_t *)http;
 
 	if (!http->full_url[0])
@@ -1796,7 +1870,7 @@ http_connection_closed(struct http_t *http)
 {
 	assert(http);
 
-	http_header_t *connection;
+	http_header_t *connection = NULL;
 	buf_t *buf = &http->conn.read_buf;
 	int rv = 0;
 	struct __http_t *__http = (struct __http_t *)http;
@@ -1821,16 +1895,15 @@ http_connection_closed(struct http_t *http)
 }
 
 static int
-__http_init_obj(struct __http_t *__http)
+__http_init_obj(struct __http_t *__http, uint64_t id)
 {
 	char __http_cache_name[64];
-	char http_obj_id[4];
 	struct http_t *http;
 
-	HTTP_get_random_bytes(http_obj_id, 4);
-
-	sprintf(__http_cache_name, "http_header_cache-0x%x", http_obj_id);
-
+/*
+ * HTTP header object cache.
+ */
+	sprintf(__http_cache_name, "http_header_cache-0x%lx", id);
 	if (!(__http->headers = cache_create(
 			__http_cache_name,
 			sizeof(http_header_t),
@@ -1844,7 +1917,10 @@ __http_init_obj(struct __http_t *__http)
 
 	_log("Created header cache %s\n", __http_cache_name);
 
-	sprintf(__http_cache_name, "http_cookie_cache-0x%x", http_obj_id);
+/*
+ * HTTP cookie object cache.
+ */
+	sprintf(__http_cache_name, "http_cookie_cache-0x%lx", id);
 	if (!(__http->cookies = cache_create(
 			__http_cache_name,
 			sizeof(http_header_t),
@@ -1858,13 +1934,22 @@ __http_init_obj(struct __http_t *__http)
 
 	_log("Created cookies cache %s\n", __http_cache_name);
 
-	sprintf(__http_cache_name, "http_dead_link_cache-0x%x", http_obj_id);
+/*
+ * Dead link object cache.
+ *
+ * XXX
+ *
+ *	This should be a global cache so
+ *	that all threads can see and share
+ *	any dead links they found on a page.
+ */
+	sprintf(__http_cache_name, "http_dead_link_cache-0x%lx", id);
 	if (!(__http->dead_links = cache_create(
 			__http_cache_name,
 			sizeof(http_dead_link_t),
 			0,
-			HTTP_link_object_ctor,
-			HTTP_link_object_dtor)));
+			http_dead_link_cache_ctor,
+			http_dead_link_cache_dtor)));
 
 	_log("Created dead link cache %s\n", __http_cache_name);
 
@@ -1911,7 +1996,7 @@ __http_init_obj(struct __http_t *__http)
 }
 
 struct http_t *
-http_new(void)
+http_new(uint64_t id)
 {
 	struct __http_t *__http = malloc(sizeof(struct __http_t));
 
@@ -1921,7 +2006,7 @@ http_new(void)
 		goto fail;
 	}
 
-	if (__http_init_obj(__http) < 0)
+	if (__http_init_obj(__http, id) < 0)
 	{
 		fprintf(stderr, "http_new: failed to initialise HTTP object\n");
 		goto fail;
@@ -1953,6 +2038,9 @@ http_delete(struct http_t *http)
 
 	cache_clear_all(__http->cookies);
 	cache_destroy(__http->cookies);
+
+	cache_clear_all(__http->dead_links);
+	cache_destroy(__http->dead_links);
 
 	buf_destroy(&http->conn.read_buf);
 	buf_destroy(&http->conn.write_buf);
