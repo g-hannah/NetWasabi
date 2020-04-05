@@ -55,6 +55,64 @@ _log(char *fmt, ...)
 }
 
 /*
+ * Cache dead links so that we can avoid
+ * wasting network bandwith requesting
+ * them again when we see their URL in
+ * another page on the site.
+ */
+typedef struct HTTP_dead_link
+{
+	char *URL;
+	int HTTP_code;
+	time_t timestamp;
+	int times_seen;
+} http_dead_link_t;
+
+/**
+ * Constructor for dead link cache objects.
+ */
+static int
+http_dead_link_cache_ctor(void *dlObj)
+{
+	assert(dlObj);
+
+	http_dead_link_t *dl = (http_dead_link_t *)dlObj;
+
+	dl->URL = nw_calloc(HTTP_URL_MAX, 1);
+	dl->HTTP_code = 0;
+	dl->timestamp = 0;
+	dl->times_seen = 0;
+
+	if (NULL == dl->URL)
+		return -1;
+
+	return 0;
+}
+
+/**
+ * Destructor for dead linke cache objects.
+ */
+static void
+http_dead_link_cache_dtor(void *dlObj)
+{
+	assert(dlObj);
+
+	http_dead_link_t *dl = (http_dead_link_t *)dlObj;
+
+	if (NULL != dl->URL)
+	{
+		free(dl->URL);
+		dl->URL = NULL;
+	}
+
+	dl->HTTP_code = 0;
+	dl->timestamp = 0;
+	dl->times_seen = 0;
+
+	return 0;
+}
+
+/*
  * User gets struct http_t which does not
  * include the caches.
  */
@@ -84,6 +142,7 @@ struct __http_t
  */
 	cache_t *headers;
 	cache_t *cookies;
+	cache_t dead_links;
 	http_header_t *__ptr;
 };
 
@@ -229,6 +288,33 @@ __http_print_response_hdr(struct http_t *http)
 }
 #endif
 #endif
+
+#define SOURCE_RANDOMNESS "/dev/urandom"
+static void
+HTTP_get_random_bytes(char *dest, int nr)
+{
+	assert(dest);
+
+	int fd = -1;
+
+	if ((fd = open(SOURCE_RANDOMNESS, O_RDONLY)) < 0)
+		goto use_rand;
+
+	if (read(fd, dest, nr) != nr)
+		goto use_rand;
+
+	close(fd);
+	fd = -1;
+
+	return;
+
+use_rand:
+	close(fd);
+	fd = -1;
+	*(uint32_t *)dest = (rand() & 0xffffffff);
+
+	return;
+}
 
 /**
  * __http_check_cookies - check for Set-Cookie header fields in response header
@@ -618,6 +704,11 @@ __http_read_until_next_chunk_size(struct http_t *http, buf_t *buf, char **cur_po
  * to START_OF_PREVIOUS_CHUNK + PREVIOUS_CHUNK_SIZE.
  * We need at least two bytes here to get the \r\n
  * at the start of the metadata.
+ *
+ * NB - everytime we do a read, the location of
+ * our buffer on the heap may change due to a
+ * transparent realloc(). So we need to re-point
+ * TAIL and *CUR_POS afterwards.
  */
 	__read_bytes(http, 2);
 	*cur_pos = (buf->buf_head + cur_pos_off);
@@ -641,6 +732,20 @@ __http_read_until_next_chunk_size(struct http_t *http, buf_t *buf, char **cur_po
 	return;
 }
 
+/**
+ * Receive an unknown amount of data from the
+ * webserver (dynamically created page which
+ * therefore had no Content-Length header).
+ * This is common for example with pages that
+ * use a script in a CGI bin and so the length
+ * of the output data is variable.
+ *
+ * Data is sent in chunks, with each chunk
+ * preceded by metadata indicating the size
+ * of the chunk of data to receive.
+ *
+ * Ends with sequence \r\n0\r\n
+ */
 static size_t
 __http_do_chunked_recv(struct http_t *http)
 {
@@ -845,7 +950,7 @@ __http_set_new_location(struct http_t *http)
 
 	if (!(location = (http_header_t *)cache_alloc(__http->headers, &location)))
 	{
-		fprintf(stderr, "__http_set_new_location: failed to obtain HTTP header cache object\n");
+		_log("__http_set_new_location: failed to obtain HTTP header cache object\n");
 		goto fail_dealloc;
 	}
 
@@ -984,7 +1089,8 @@ http_recv_response(struct http_t *http)
  * Jump back to here to resend a request after dealing with
  * a 3xx URL redirect and resending the request.
  */
-	__retry:
+__retry:
+
 	buf_clear(&http->conn.read_buf);
 	assert(http->conn.read_buf.data_len == 0);
 
@@ -1009,7 +1115,7 @@ http_recv_response(struct http_t *http)
 	http_status_code = http_status_code_int(buf);
 	_log("got status code %d\n", http_status_code);
 
-	if (http_status_code != HTTP_OK)
+	if (HTTP_OK != http_status_code)
 	{
 		char *__eoh = HTTP_EOH(&http->conn.read_buf);
 		if (__eoh)
@@ -1718,9 +1824,12 @@ static int
 __http_init_obj(struct __http_t *__http)
 {
 	char __http_cache_name[64];
+	char http_obj_id[4];
 	struct http_t *http;
 
-	sprintf(__http_cache_name, "http_header_cache-0x%lx", pthread_self());
+	HTTP_get_random_bytes(http_obj_id, 4);
+
+	sprintf(__http_cache_name, "http_header_cache-0x%x", http_obj_id);
 
 	if (!(__http->headers = cache_create(
 			__http_cache_name,
@@ -1735,7 +1844,7 @@ __http_init_obj(struct __http_t *__http)
 
 	_log("Created header cache %s\n", __http_cache_name);
 
-	sprintf(__http_cache_name, "http_cookie_cache-0x%lx", pthread_self());
+	sprintf(__http_cache_name, "http_cookie_cache-0x%x", http_obj_id);
 	if (!(__http->cookies = cache_create(
 			__http_cache_name,
 			sizeof(http_header_t),
@@ -1747,7 +1856,17 @@ __http_init_obj(struct __http_t *__http)
 		goto fail_destroy_cache;
 	}
 
-	_log("Created coookies cache %s\n", __http_cache_name);
+	_log("Created cookies cache %s\n", __http_cache_name);
+
+	sprintf(__http_cache_name, "http_dead_link_cache-0x%x", http_obj_id);
+	if (!(__http->dead_links = cache_create(
+			__http_cache_name,
+			sizeof(http_dead_link_t),
+			0,
+			HTTP_link_object_ctor,
+			HTTP_link_object_dtor)));
+
+	_log("Created dead link cache %s\n", __http_cache_name);
 
 	http = (struct http_t *)__http;
 
