@@ -23,11 +23,154 @@
  *
  * Upgrade to handle HTTP 2.0
  *
+ * Embed HTTP_methods structure within HTTP object
+ * which will allow us to be dynamic and use various
+ * versions of the HTTP protocol.
  *
  */
 
+#define HTTP_SKIP_HOST_PART(PTR, URL)\
+do {\
+	char *____s_p = NULL;\
+	char *____e_p = NULL;\
+	if (!strncmp("http", (URL), 4))\
+	{\
+		(PTR) = (URL) + strlen("http://");\
+		if ((*PTR) == '/')\
+			++(PTR);\
+			____e_p = ((URL) + strlen((URL)));\
+			____s_p = memchr((PTR), '/', (____e_p - (PTR)));\
+			if (____s_p)\
+				(PTR) = ____s_p;\
+	}\
+	else\
+	{\
+		(PTR) = (URL);\
+	}\
+} while (0)
+
+#define HTTP_private(h) (struct HTTP_private *)(h)
+
 #define HTTP_SMALL_READ_BLOCK 8
 #define HTTP_MAX_WAIT_TIME 6
+
+#define CREATION_FLAGS O_RDWR|O_CREAT|O_TRUNC
+#define CREATION_MODE S_IRUSR|S_IWUSR
+
+/*
+ * Forward declarations
+ */
+typedef struct HTTP_dead_link http_dead_link_t;
+typedef struct HTTP_redirected http_redirected_t;
+
+/*
+int http_status_code_int(buf_t *) __nonnull((1)) __wur;
+ssize_t http_response_header_len(buf_t *) __nonnull((1)) __wur;
+
+const char *http_status_code_string(int) __wur;
+
+void http_check_host(struct http_t *) __nonnull((1));
+int http_connection_closed(struct http_t *) __nonnull((1)) __wur;
+*/
+
+void http_check_host(struct http_t *) __nonnull((1));
+int http_connection_closed(struct http_t *) __nonnull((1)) __wur;
+
+struct HTTP_methods Methods_v1_1 = {
+	.send_request = http_send_request_1_1,
+	.recv_response = http_recv_response_1_1,
+	.build_header = http_build_request_header_1_1,
+	.append_header = http_append_header_1_1,
+	.check_header = http_check_header,
+	.fetch_header = http_fetch_header,
+	.URL_parse_host = http_url_parse_host,
+	.URL_parse_page = http_url_parse_page
+};
+
+struct HTTP_methods Methods_v2_0;
+
+/*
+ * User gets struct http_t which does not
+ * include the caches.
+ */
+struct HTTP_private
+{
+	struct http_t http;
+/*
+ * This is private data only
+ * accessable within this file.
+ *
+ * Every HTTP object created
+ * has its own cache of cookies
+ * and headers, which allows
+ * multithreading.
+ */
+	cache_t *headers;
+	cache_t *cookies;
+	cache_t dead_links;
+/*
+ * The following are used to pass their addresses
+ * to cache_alloc().
+ */
+	http_header_t *hfPtr; // header field object pointer
+	http_dead_link_t *dlPtr; // dead link object pointer
+	http_redirected_t *rlPtr; // redirected link object pointer
+};
+
+/*
+ * Cache dead links so that we can avoid
+ * wasting network bandwith requesting
+ * them again when we see their URL in
+ * another page on the site.
+ */
+struct HTTP_dead_link
+{
+	char *URL;
+	int HTTP_code;
+	time_t timestamp;
+	int times_seen;
+};
+
+/*
+ * Cache redirected URLs so that we can obtain
+ * their current URL if we stumble upon another
+ * URL on the site that would elicit a redirect.
+ *
+ * XXX
+ *
+ *	After a session, we should save these
+ *	mappings in a compressed file in the
+ *	event that we crawl the same site
+ *	at a future date, sparing bandwidth
+ *	wastage.
+ */
+struct HTTP_redirected
+{
+	char *originalURL; // The URL that elicits an HTTP redirect
+	char *currentURL; // The URL found in the Location header field
+	time_t when; // When we first encountered the original URL
+};
+
+static void
+__ctor HTTP_init(void)
+{
+#ifdef DEBUG
+	hlogfp = fdopen(open(LOG_FILE, O_RDWR|O_TRUNC|O_CREAT, S_IRUSR|S_IWUSR), "r+");
+	assert(hlogfp);
+	_log("Opened log file\n");
+#endif
+	return;
+}
+
+static void
+__dtor private_fini(void)
+{
+#ifdef DEBUG
+	fclose(hlogfp);
+	hlogfp = NULL;
+#endif
+	return;
+}
 
 FILE *hlogfp = NULL;
 
@@ -38,9 +181,6 @@ int _DEBUG = 1;
 #else
 int _DEBUG = 0;
 #endif
-
-#define CREATION_FLAGS O_RDWR|O_CREAT|O_TRUNC
-#define CREATION_MODE S_IRUSR|S_IWUSR
 
 static void
 _log(char *fmt, ...)
@@ -58,20 +198,6 @@ _log(char *fmt, ...)
 
 	return;
 }
-
-/*
- * Cache dead links so that we can avoid
- * wasting network bandwith requesting
- * them again when we see their URL in
- * another page on the site.
- */
-typedef struct HTTP_dead_link
-{
-	char *URL;
-	int HTTP_code;
-	time_t timestamp;
-	int times_seen;
-} http_dead_link_t;
 
 /**
  * Constructor for dead link cache objects.
@@ -117,39 +243,78 @@ http_dead_link_cache_dtor(void *dlObj)
 	return;
 }
 
-/**
- * Check if a URL has been cached in the dead URL cache.
- * @http The HTTP object in which the cache resides
- * @URL The URL whose existence we check for in the cache.
- */
 static int
-HTTP_is_dead_link(struct http_t *http, const char *URL)
+http_redirected_cache_ctor(void *rlObj)
+{
+	assert(rlObj);
+
+	http_redirected_t *rl = (http_redirected_t *)rlObj;
+
+	rl->fromURL = calloc(HTTP_URL_MAX, 1);
+	rl->toURL = calloc(HTTP_URL_MAX, 1);
+
+	if (!rl->fromURL !! !rl->toURL)
+		goto fail_dealloc;
+
+	rl->when = 0;
+
+	return 0;
+
+fail_dealloc:
+
+	if (NULL != rl->fromURL)
+		free(rl->fromURL);
+	if (NULL != rl->toURL)
+		free(rl->toURL);
+
+	return -1;
+}
+
+static void
+http_redirected_cache_dtor(void *rlObj)
+{
+	assert(rlObj);
+
+	http_redirected_t *rl = (http_redirected_t *)rlObj;
+
+	if (NULL != rl->fromURL)
+		free(rl->fromURL);
+	if (NULL != rl->toURL)
+		free(rl->toURL);
+
+	rl->when = 0;
+
+	return;
+}
+
+/**
+ * Search the dead link cache for a URL.
+ *
+ * @http The HTTP object containing the URL.
+ */
+static http_dead_link_t *
+HTTP_search_dead_link(struct http_t *http)
 {
 	assert(http);
-	assert(URL);
 
-	struct __http_t *__http = (struct __http_t *)http;
-	http_dead_link_t *dl = (http_dead_link_t *)__http->dead_links->data;
-	int idx = 0;
+	struct http_dead_link_t *dead = NULL;
+	struct HTTP_private *private = HTTP_private(http);
 	int objUsed = 0;
-	size_t URL_len = strlen(URL);
+	size_t URL_len = strlen(http->URL);
 
 	while (1)
 	{
-		while ((objUsed = cache_obj_used(__http->dead_links, (void *)dl)) == 0)
-			++dl;
+		while ((objUsed = cache_obj_used(private->dead_links, (void *)dead)) != 0)
+			++dead;
 
 		if (objUsed < 0)
 			break;
 
-		if (!memcmp((void *)dl->URL, (void *)URL, URL_len))
-		{
-			++dl->times_seen;
-			return 1;
-		}
+		if (!memcmp((void *)dead->URL, (void *)http->URL, URL_len))
+			return dead; 
 	}
 
-	return 0;
+	return NULL;
 }
 
 /**
@@ -166,11 +331,11 @@ HTTP_cache_dead_link(struct http_t *http, const char *URL, int code)
 	assert(URL);
 	assert(strlen(URL) < HTTP_URL_MAX);
 
-	struct __http_t *__http = (struct __http_t *)http;
+	struct HTTP_private *private = (struct HTTP_private *)http;
 	http_dead_link_t *dl = NULL;
 
-	dl = cache_alloc(__http->dead_links, &__http->dlPtr);
-	if (NULL == __http->dlPtr)
+	dl = cache_alloc(private->dead_links, &private->dlPtr);
+	if (NULL == private->dlPtr)
 		goto fail;
 
 	strcpy(dl->URL, URL);
@@ -178,62 +343,6 @@ HTTP_cache_dead_link(struct http_t *http, const char *URL, int code)
 	dl->timestamp = time(NULL);
 	++dl->times_seen;
 
-	return;
-}
-
-/*
- * User gets struct http_t which does not
- * include the caches.
- */
-struct __http_t
-{
-	struct http_t http;
-#if 0
-	char *host;
-	char *page;
-	char *full_url;
-	char *primary_host;
-	struct conn conn;
-	enum request req_type;
-	int code;
-	int redirected; /* non-zero if redirected via Location header field */
-	char *red_url; /* the URL that was redirected */
-#endif
-
-/*
- * This is private data only
- * accessable within this file.
- *
- * Every HTTP object created
- * has its own cache of cookies
- * and headers, which allows
- * multithreading.
- */
-	cache_t *headers;
-	cache_t *cookies;
-	cache_t dead_links;
-	http_header_t *__ptr;
-	http_dead_link_t *dlPtr;
-};
-
-static void
-__ctor __http_init(void)
-{
-#ifdef DEBUG
-	hlogfp = fdopen(open(LOG_FILE, O_RDWR|O_TRUNC|O_CREAT, S_IRUSR|S_IWUSR), "r+");
-	assert(hlogfp);
-	_log("Opened log file\n");
-#endif
-	return;
-}
-
-static void
-__dtor __http_fini(void)
-{
-#ifdef DEBUG
-	fclose(hlogfp);
-	hlogfp = NULL;
-#endif
 	return;
 }
 
@@ -326,13 +435,13 @@ http_link_cache_dtor(void *http_link)
 #if 0
 #ifdef DEBUG
 static void
-__http_print_request_hdr(struct http_t *http)
+private_print_request_hdr(struct http_t *http)
 {
 	char *eoh = HTTP_EOH(&http->conn.write_buf);
 
 	if (!eoh)
 	{
-		fprintf(stderr, "__http_print_request_hdr: failed to find end of header\n");
+		fprintf(stderr, "private_print_request_hdr: failed to find end of header\n");
 		return;
 	}
 
@@ -342,13 +451,13 @@ __http_print_request_hdr(struct http_t *http)
 }
 
 static void
-__http_print_response_hdr(struct http_t *http)
+private_print_response_hdr(struct http_t *http)
 {
 	char *eoh = HTTP_EOH(&http->conn.read_buf);
 
 	if (!eoh)
 	{
-		fprintf(stderr, "__http_print_response_hdr: failed to find end of header\n");
+		fprintf(stderr, "private_print_response_hdr: failed to find end of header\n");
 		return;
 	}
 
@@ -387,37 +496,37 @@ use_rand:
 }
 
 /**
- * __http_check_cookies - check for Set-Cookie header fields in response header
+ * check_cookies - check for Set-Cookie header fields in response header
  *			and clear all old cookies if there are new ones specified.
  *
  * @buf: the receive buffer
  * @http: the HTTP object containing the cookie object cache
  */
 static int
-__http_check_cookies(struct http_t *http)
+check_cookies(struct http_t *http)
 {
 	assert(http);
 
 	buf_t *buf = &http->conn.read_buf;
-	struct __http_t *__http = (struct __http_t *)http;
+	struct HTTP_private *private = (struct HTTP_private *)http;
 
 	if (strstr(buf->buf_head, "Set-Cookie"))
 	{
 		off_t off = 0;
 
-		cache_clear_all(__http->cookies);
+		cache_clear_all(private->cookies);
 
 		while (http_check_header(buf, "Set-Cookie", off, &off))
 		{
-			if (!(__http->__ptr = (http_header_t *)cache_alloc(__http->cookies, &__http->__ptr)))
+			if (!(private->hfPtr = (http_header_t *)cache_alloc(private->cookies, &private->hfPtr)))
 			{
-				fprintf(stderr, "__http_check_cookies: failed to allocate HTTP header cache object\n");
+				fprintf(stderr, "private_check_cookies: failed to allocate HTTP header cache object\n");
 				goto fail;
 			}
 
-			if (!(http_fetch_header(buf, "Set-Cookie", __http->__ptr, off)))
+			if (!(http_fetch_header(buf, "Set-Cookie", private->hfPtr, off)))
 			{
-				fprintf(stderr, "__http_check_cookies: failed to extract Set-Cookie header field\n");
+				fprintf(stderr, "private_check_cookies: failed to extract Set-Cookie header field\n");
 				goto fail_dealloc;
 			}
 
@@ -428,7 +537,7 @@ __http_check_cookies(struct http_t *http)
 	return 0;
 
 	fail_dealloc:
-	cache_clear_all(__http->cookies);
+	cache_clear_all(private->cookies);
 
 	fail:
 	return -1;
@@ -436,8 +545,14 @@ __http_check_cookies(struct http_t *http)
 
 #define HTTP_HEADER_BUFSIZE 8192
 
+/**
+ * HTTP 1.1
+ * Build a request header
+ *
+ * @http HTTP object.
+ */
 int
-http_build_request_header(struct http_t *http, enum request http_request)
+http_build_request_header_1_1(struct http_t *http)
 {
 	assert(http);
 
@@ -448,13 +563,12 @@ http_build_request_header(struct http_t *http, enum request http_request)
 	 * need to be thread-safe.
 	 */
 	//static char header_buf[4096];
-	char *header_buf = nw_calloc(HTTP_HEADER_BUFSIZE);
+	char *header_buf = calloc(HTTP_HEADER_BUFSIZE, 1);
 
 	if (NULL == header_buf)
 		return -1;
 
 	buf_init(&tmp, HTTP_URL_MAX);
-
 /*
  * RFC 7230:
  *
@@ -478,8 +592,10 @@ http_build_request_header(struct http_t *http, enum request http_request)
  * correct encoding present in the Location header.
  */
 
-	if (HEAD == http_request)
+	switch(http->verb)
 	{
+		case HEAD:
+
 		buf_append(&tmp, "https://");
 		buf_append(&tmp, http->host);
 		buf_append(&tmp, http->page);
@@ -491,9 +607,11 @@ http_build_request_header(struct http_t *http, enum request http_request)
 			tmp.buf_head, HTTP_VERSION,
 			http->host,
 			HTTP_USER_AGENT, HTTP_EOH_SENTINEL);
-	}
-	else
-	{
+		break;
+
+		default:
+		case GET:
+
 		buf_append(&tmp, http->host);
 
 		if (*(tmp.buf_tail - 1) == '/')
@@ -505,7 +623,7 @@ http_build_request_header(struct http_t *http, enum request http_request)
 			"Accept: %s\r\n"
 			"Host: %s\r\n"
 			"Connection: keep-alive%s",
-			http->full_url, HTTP_VERSION,
+			http->URL, HTTP_VERSION,
 			HTTP_USER_AGENT,
 			HTTP_ACCEPT,
 			tmp.buf_head,
@@ -520,17 +638,17 @@ http_build_request_header(struct http_t *http, enum request http_request)
 /*
  * Append any cached cookies to the request header.
  */
-	int __nr_cookies = cache_nr_used(((struct __http_t *)http)->cookies);
+	int nrCookies = cache_nr_used(((struct HTTP_private *)http)->cookies);
 
-	if (__nr_cookies)
+	if (nrCookies)
 	{
-		struct http_header_t *__c = (struct http_header_t *)((struct __http_t *)http)->cookies->cache;
+		struct http_header_t *cookieObj = (struct http_header_t *)((struct HTTP_private *)http)->cookies->cache;
 		int i;
 
-		for (i = 0; i < __nr_cookies; ++i)
+		for (i = 0; i < nrCookies; ++i)
 		{
-			http_append_header(buf, __c);
-			++__c;
+			http->ops->append_header(buf, cookieObj);
+			++nrCookies;
 		}
 	}
 
@@ -539,16 +657,27 @@ http_build_request_header(struct http_t *http, enum request http_request)
 	return 0;
 }
 
-int
-http_send_request(struct http_t *http, enum request http_request)
+static int
+http_send_request_1_1(struct http_t *http)
 {
 	assert(http);
+
+	struct HTTP_private *private = (struct HTTP_private *)http;
+	http_dead_link_t *dead = NULL;
+
+/*
+ * Link is dead, so return the HTTP code from dead link object.
+ */
+	if ((dead = HTTP_search_dead_link(private->dead_links, http->URL))
+	{
+		http->code = dead->code;
+		return 0;
+	}
 
 	buf_t *buf = &http->conn.write_buf;
 
 	buf_clear(buf);
-
-	http_build_request_header(http, http_request);
+	build_request_header_1_1(http);
 
 	if (option_set(OPT_USE_TLS))
 	{
@@ -567,8 +696,6 @@ http_send_request(struct http_t *http, enum request http_request)
 		}
 	}
 
-	http->req_type = http_request;
-
 	return 0;
 
 	fail:
@@ -578,7 +705,7 @@ http_send_request(struct http_t *http, enum request http_request)
 #define CYCLES_MAX 100000000
 
 static int
-__http_read_until_eoh(struct http_t *http, char **p)
+read_until_eoh(struct http_t *http, char **p)
 {
 	assert(http);
 
@@ -655,7 +782,7 @@ __dump_buf(buf_t *buf)
 #endif
 
 static ssize_t
-__read_bytes(struct http_t *http, size_t toread)
+read_bytes(struct http_t *http, size_t toread)
 {
 	assert(http);
 	assert(toread > 0);
@@ -709,7 +836,7 @@ __read_bytes(struct http_t *http, size_t toread)
  *
  */
 static void
-__http_read_until_next_chunk_size(struct http_t *http, buf_t *buf, char **cur_pos)
+private_read_until_next_chunk_size(struct http_t *http, buf_t *buf, char **cur_pos)
 {
 	assert(http);
 	assert(buf);
@@ -780,7 +907,7 @@ __http_read_until_next_chunk_size(struct http_t *http, buf_t *buf, char **cur_po
  * transparent realloc(). So we need to re-point
  * TAIL and *CUR_POS afterwards.
  */
-	__read_bytes(http, 2);
+	read_bytes(http, 2);
 	*cur_pos = (buf->buf_head + cur_pos_off);
 	tail = buf->buf_tail;
 	*cur_pos += 2;
@@ -788,7 +915,7 @@ __http_read_until_next_chunk_size(struct http_t *http, buf_t *buf, char **cur_po
 
 	while (1)
 	{
-		__read_bytes(http, 1);
+		read_bytes(http, 1);
 		tail = buf->buf_tail;
 		*cur_pos = (buf->buf_head + cur_pos_off);
 		q = memchr(*cur_pos, 0x0a, (tail - *cur_pos));
@@ -803,6 +930,8 @@ __http_read_until_next_chunk_size(struct http_t *http, buf_t *buf, char **cur_po
 }
 
 /**
+ * Obsolete from HTTP 2.0
+ *
  * Receive an unknown amount of data from the
  * webserver (dynamically created page which
  * therefore had no Content-Length header).
@@ -815,9 +944,10 @@ __http_read_until_next_chunk_size(struct http_t *http, buf_t *buf, char **cur_po
  * of the chunk of data to receive.
  *
  * Ends with sequence \r\n0\r\n
+ *
  */
 static size_t
-__http_do_chunked_recv(struct http_t *http)
+do_chunked_recv(struct http_t *http)
 {
 	assert(http);
 
@@ -845,17 +975,17 @@ __http_do_chunked_recv(struct http_t *http)
 
 	while (!p)
 	{
-		total_bytes += __read_bytes(http, 1);
+		total_bytes += read_bytes(http, 1);
 		p = HTTP_EOH(buf);
 	}
 
 	if (!p)
 	{
-		fprintf(stderr, "__http_do_chunked_recv: failed to find end of header sentinel\n");
+		fprintf(stderr, "do_chunked_recv: failed to find end of header sentinel\n");
 		return -1;
 	}
 
-	__http_read_until_next_chunk_size(http, buf, &p);
+	private_read_until_next_chunk_size(http, buf, &p);
 
 	while (1)
 	{
@@ -978,14 +1108,14 @@ __http_do_chunked_recv(struct http_t *http)
 		if (overread >= chunk_size)
 		{
 			p = (e + save_size);
-			__http_read_until_next_chunk_size(http, buf, &p);
+			private_read_until_next_chunk_size(http, buf, &p);
 		}
 		else
 		{
 			chunk_size -= overread;
 		}
 
-		__read_bytes(http, chunk_size);
+		read_bytes(http, chunk_size);
 
 #if 0
 /*
@@ -1003,28 +1133,34 @@ __http_do_chunked_recv(struct http_t *http)
  * \r is/will be in the "\r\nchunk_size\r\n" sequence.
  */
 		p = (buf->buf_head + chunk_offset + save_size);
-		__http_read_until_next_chunk_size(http, buf, &p);
+		private_read_until_next_chunk_size(http, buf, &p);
 	}
 
 	_log("Returning %lu from %s\n", total_bytes, __func__);
 	return total_bytes;
 }
 
+/**
+ * Extract the Location header field from header
+ * and set the PAGE and HOST values in http object.
+ *
+ * @http The HTTP object
+ */
 static int
-__http_set_new_location(struct http_t *http)
+set_new_location(struct http_t *http)
 {
 	assert(http);
 
-	struct __http_t *__http = (struct __http_t *)http;
+	struct HTTP_private *private = (struct HTTP_private *)http;
 	http_header_t *location = NULL;
 
-	if (!(location = (http_header_t *)cache_alloc(__http->headers, &location)))
+	if (!(location = (http_header_t *)cache_alloc(private->headers, &location)))
 	{
-		_log("__http_set_new_location: failed to obtain HTTP header cache object\n");
+		_log("set_new_location: failed to obtain HTTP header cache object\n");
 		goto fail_dealloc;
 	}
 
-	if (!http_fetch_header(&http->conn.read_buf, "Location", location, (off_t)0))
+	if (!http->ops->fetch_header(&http->conn.read_buf, "Location", location, (off_t)0))
 	{
 		_log("%s: failed to find HTTP header field \"Location\"\n", __func__);
 		goto fail_dealloc;
@@ -1033,9 +1169,9 @@ __http_set_new_location(struct http_t *http)
 	assert(location->vlen < HTTP_URL_MAX);
 
 	if (!location->value[0])
-		return;
+		return 0;
 
-	strcpy(http->full_url, location->value);
+	strcpy(http->URL, location->value);
 
 	_log("Got new location: %s\n", location->value);
 
@@ -1055,12 +1191,12 @@ __http_set_new_location(struct http_t *http)
 
 	_log("Extracted page: %s\n", http->page);
 
-	cache_dealloc(__http->headers, location, &location);
+	cache_dealloc(private->headers, location, &location);
 
 	return 0;
 
 fail_dealloc:
-	cache_dealloc(__http->headers, location, &location);
+	cache_dealloc(private->headers, location, &location);
 
 	return -1;
 }
@@ -1115,10 +1251,10 @@ http_set_ssl_non_blocking(struct http_t *http)
 
 /**
  * http_recv_response - receive HTTP response.
- * @http: HTTP object
+ * @http HTTP object
  */
 int
-http_recv_response(struct http_t *http)
+http_recv_response_1_1(struct http_t *http)
 {
 	assert(http);
 
@@ -1132,7 +1268,7 @@ http_recv_response(struct http_t *http)
 	http_header_t *content_len = NULL;
 	http_header_t *transfer_enc = NULL;
 	buf_t *buf = &http->conn.read_buf;
-	struct __http_t *__http = (struct __http_t *)http;
+	struct HTTP_private *private = (struct HTTP_private *)http;
 
 /*
  * Set the (ssl) socket to non-blocking.
@@ -1143,7 +1279,14 @@ http_recv_response(struct http_t *http)
 	if (!http->conn.ssl_nonblocking)
 		http_set_ssl_non_blocking(http);
 
-	content_len = (http_header_t *)cache_alloc(__http->headers, &content_len);
+/*
+ * XXX
+ *
+ *	We should really parse the header fields
+ *	that we are interested in and set various
+ *	flags based upon the information.
+ */
+	content_len = (http_header_t *)cache_alloc(private->headers, &content_len);
 
 	if (!content_len)
 	{
@@ -1151,7 +1294,7 @@ http_recv_response(struct http_t *http)
 		goto fail;
 	}
 
-	transfer_enc = (http_header_t *)cache_alloc(__http->headers, &transfer_enc);
+	transfer_enc = (http_header_t *)cache_alloc(private->headers, &transfer_enc);
 
 	if (!transfer_enc)
 	{
@@ -1168,11 +1311,11 @@ __retry:
 	buf_clear(&http->conn.read_buf);
 	assert(http->conn.read_buf.data_len == 0);
 
-	rv = __http_read_until_eoh(http, &p);
+	rv = read_until_eoh(http, &p);
 
 	if (rv < 0 || HTTP_OPERATION_TIMEOUT == rv)
 	{
-		_log("__http_read_until_eoh() returned %d\n", rv);
+		_log("read_until_eoh() returned %d\n", rv);
 		goto fail_dealloc;
 	}
 
@@ -1184,7 +1327,7 @@ __retry:
  * clear all current cookie objects from the cache and extract
  * the new one(s) from the header and cache them.
  */
-	__http_check_cookies(http);
+	private_check_cookies(http);
 
 	http_status_code = http_status_code_int(buf);
 	_log("got status code %d\n", http_status_code);
@@ -1218,7 +1361,7 @@ __retry:
  * a local copy of the page but use the _redirected_ URL, then we will
  * ask for the old URL in the future if we come across it.
  *
- * Set redirected flag to non-zero, and save the current URL in RED_URL
+ * Set redirected flag to non-zero, and save the current URL in REDIRECTEDURL
  * so that when archiving, we can archive using RED_URL. That way, in
  * future when we are checking if we have already archived a URL, we will
  * correctly see that we have (assuming future URLs for this page are
@@ -1229,11 +1372,11 @@ __retry:
  * to the label __RETRY.
  */
 			http->redirected = 1;
-			strcpy(http->red_url, http->full_url);
+			strcpy(http->redirectedURL, http->URL);
 
-			if (__http_set_new_location(http) < 0)
+			if (set_new_location(http) < 0)
 			{
-				_log("__http_set_new_location() returned < 0\n");
+				_log("set_new__location() returned < 0\n");
 				goto fail_dealloc;
 			}
 
@@ -1275,9 +1418,9 @@ __retry:
 	{
 		if (!strncmp("chunked", transfer_enc->value, transfer_enc->vlen))
 		{
-			if (__http_do_chunked_recv(http) == -1)
+			if (do_chunked_recv(http) == -1)
 			{
-				_log("__http_do_chunked_recv() returned -1\n");
+				_log("do_chunked_recv() returned -1\n");
 				goto fail_dealloc;
 			}
 
@@ -1349,26 +1492,31 @@ __retry:
 	}
 
 out_dealloc:
-	cache_dealloc(__http->headers, (void *)content_len, &content_len);
-	cache_dealloc(__http->headers, (void *)transfer_enc, &transfer_enc);
+	cache_dealloc(private->headers, (void *)content_len, &content_len);
+	cache_dealloc(private->headers, (void *)transfer_enc, &transfer_enc);
 
 	return total_bytes;
 
 fail_dealloc:
 	if (content_len)
 	{
-		cache_dealloc(__http->headers, (void *)content_len, &content_len);
+		cache_dealloc(private->headers, (void *)content_len, &content_len);
 	}
 
 	if (transfer_enc)
 	{
-		cache_dealloc(__http->headers, (void *)transfer_enc, &transfer_enc);
+		cache_dealloc(private->headers, (void *)transfer_enc, &transfer_enc);
 	}
 
 fail:
 	return -1;
 }
 
+/**
+ * Return the HTTP code in the response header (200, 404...)
+ *
+ * @buf The buffer holding the web server's response.
+ */
 int
 http_status_code_int(buf_t *buf)
 {
@@ -1500,7 +1648,7 @@ http_response_header_len(buf_t *buf)
 }
 
 char *
-http_parse_host(char *url, char *host)
+http_url_parse_host(char *url, char *host)
 {
 	char *p;
 	size_t url_len = strlen(url);
@@ -1549,7 +1697,7 @@ http_parse_host(char *url, char *host)
 }
 
 char *
-http_parse_page(char *url, char *page)
+http_url_parse_page(char *url, char *page)
 {
 	char *p;
 	char *q;
@@ -1608,8 +1756,8 @@ http_parse_page(char *url, char *page)
  * @off: the offset from within the header to start search
  * @ret_off: offset where header found returned here
  */
-int
-http_check_header(buf_t *buf, const char *name, off_t off, off_t *ret_off)
+static int
+http_check_header_1_1(buf_t *buf, const char *name, off_t off, off_t *ret_off)
 {
 	assert(buf);
 	assert(name);
@@ -1729,8 +1877,8 @@ http_parse_header(buf_t *buf, struct http_header *head)
  * @buf: the buffer containing the HTTP header
  * @name: the name of the header (e.g., "Set-Cookie")
  */
-char *
-http_fetch_header(buf_t *buf, const char *name, http_header_t *hh, off_t whence)
+static char *
+http_fetch_header_1_1(buf_t *buf, const char *name, http_header_t *hh, off_t whence)
 {
 	assert(buf);
 	assert(name);
@@ -1798,8 +1946,15 @@ http_fetch_header(buf_t *buf, const char *name, http_header_t *hh, off_t whence)
 	return hh->value;
 }
 
+/**
+ * Append a new header field to the request
+ * header in the buffer.
+ *
+ * @buf The buffer holding the outgoing request header.
+ * @hh The header field object.
+ */
 int
-http_append_header(buf_t *buf, http_header_t *hh)
+http_append_header_1_1(buf_t *buf, http_header_t *hh)
 {
 	assert(buf);
 	assert(hh);
@@ -1811,7 +1966,7 @@ http_append_header(buf_t *buf, http_header_t *hh)
 
 	if (!eoh)
 	{
-		fprintf(stderr, "http_append_header: failed to find end of header\n");
+		_log("http_append_header: failed to find end of header");
 		errno = EPROTO;
 		return -1;
 	}
@@ -1839,32 +1994,43 @@ http_append_header(buf_t *buf, http_header_t *hh)
 	return 0;
 }
 
+/**
+ * The URL for which the next request is to be
+ * made may be on a different server. We would
+ * need establish a new connection in that case.
+ */
 void
 http_check_host(struct http_t *http)
 {
 	assert(http);
 
 	char old_host[HTTP_HNAME_MAX];
-	struct __http_t *__http = (struct __http_t *)http;
+	struct HTTP_private *private = (struct HTTP_private *)http;
 
-	if (!http->full_url[0])
+	if (!http->URL[0])
 		return;
 
 	assert(strlen(http->host) < HTTP_HNAME_MAX);
 	strcpy(old_host, http->host);
-	http_parse_host(http->full_url, http->host);
+	http->ops->URL_parse_host(http->URL, http->host);
 
 	if (strcmp(http->host, old_host))
 	{
-		if (cache_nr_used(__http->cookies) > 0)
-			cache_clear_all(__http->cookies);
+		if (cache_nr_used(private->cookies) > 0)
+			cache_clear_all(private->cookies);
 
 		http_reconnect(http);
 	}
 
 	return;
 }
+*/
 
+/**
+ * Check if the HTTP connection has been closed.
+ *
+ * XXX - Not sure about this function.
+ */
 int
 http_connection_closed(struct http_t *http)
 {
@@ -1872,67 +2038,67 @@ http_connection_closed(struct http_t *http)
 
 	http_header_t *connection = NULL;
 	buf_t *buf = &http->conn.read_buf;
-	int rv = 0;
-	struct __http_t *__http = (struct __http_t *)http;
+	int retVal = 0;
+	struct HTTP_private *private = (struct HTTP_private *)http;
 
 	//fprintf(stderr, "allocating header obj in CONNECTION @ %p\n", &connection);
 
-	connection = cache_alloc(__http->headers, &connection);
+	connection = cache_alloc(private->headers, &connection);
 	assert(connection);
 
-	http_fetch_header(buf, "Connection", connection, (off_t)0);
+	http->ops->fetch_header(buf, "Connection", connection, (off_t)0);
 
 	if (connection->value[0])
 	{
 		if (!strcasecmp("close", connection->value))
-			rv = 1;
+			retVal = 1;
 	}
 
 	//fprintf(stderr, "deallocting header obj CONNECTION @ %p\n", &connection);
 
-	cache_dealloc(__http->headers, connection, &connection);
-	return rv;
+	cache_dealloc(private->headers, connection, &connection);
+	return retVal;
 }
 
 static int
-__http_init_obj(struct __http_t *__http, uint64_t id)
+HTTP_init_obj(struct HTTP_private *private, uint64_t id)
 {
-	char __http_cache_name[64];
+	char cache_name[64];
 	struct http_t *http;
 
 /*
  * HTTP header object cache.
  */
-	sprintf(__http_cache_name, "http_header_cache-0x%lx", id);
-	if (!(__http->headers = cache_create(
-			__http_cache_name,
+	sprintf(cache_name, "http_header_cache-0x%lx", id);
+	if (!(private->headers = cache_create(
+			cache_name,
 			sizeof(http_header_t),
 			0,
 			http_header_cache_ctor,
 			http_header_cache_dtor)))
 	{
-		fprintf(stderr, "__http_init_obj: failed to create cache for HTTP header objects\n");
+		fprintf(stderr, "private_init_obj: failed to create cache for HTTP header objects\n");
 		goto fail;
 	}
 
-	_log("Created header cache %s\n", __http_cache_name);
+	_log("Created header cache %s\n", cache_name);
 
 /*
  * HTTP cookie object cache.
  */
-	sprintf(__http_cache_name, "http_cookie_cache-0x%lx", id);
-	if (!(__http->cookies = cache_create(
-			__http_cache_name,
+	sprintf(cache_name, "http_cookie_cache-0x%lx", id);
+	if (!(private->cookies = cache_create(
+			cache_name,
 			sizeof(http_header_t),
 			0,
 			http_header_cache_ctor,
 			http_header_cache_dtor)))
 	{
-		fprintf(stderr, "__http_init_obj: failed to create cache for HTTP cookie objects\n");
+		fprintf(stderr, "private_init_obj: failed to create cache for HTTP cookie objects\n");
 		goto fail_destroy_cache;
 	}
 
-	_log("Created cookies cache %s\n", __http_cache_name);
+	_log("Created cookies cache %s\n", cache_name);
 
 /*
  * Dead link object cache.
@@ -1943,34 +2109,50 @@ __http_init_obj(struct __http_t *__http, uint64_t id)
  *	that all threads can see and share
  *	any dead links they found on a page.
  */
-	sprintf(__http_cache_name, "http_dead_link_cache-0x%lx", id);
-	if (!(__http->dead_links = cache_create(
-			__http_cache_name,
+	sprintf(_cache_name, "http_dead_link_cache-0x%lx", id);
+	if (!(private->dead_links = cache_create(
+			cache_name,
 			sizeof(http_dead_link_t),
 			0,
 			http_dead_link_cache_ctor,
 			http_dead_link_cache_dtor)));
 
-	_log("Created dead link cache %s\n", __http_cache_name);
+	_log("Created dead link cache %s\n", cache_name);
 
-	http = (struct http_t *)__http;
+/*
+ * Redirected links cache
+ *
+ * XXX - Should also be shared by threads.
+ */
+	sprintf(cache_name, "http_redirected_link_cache-0x%lx", id);
+	if (!(private->redirected = cache_create(
+			cache_name,
+			sizeof(http_redirected_t),
+			0,
+			http_redirected_cache_ctor,
+			http_redirected_cache_dtor)));
+
+	_log("Created redirected link cache %s\n", cache_name);
+
+	http = (struct http_t *)private;
 
 	http->host = calloc(HTTP_HOST_MAX+1, 1);
 	http->conn.host_ipv4 = calloc(HTTP_ALIGN_SIZE(INET_ADDRSTRLEN+1), 1);
 	http->primary_host = calloc(HTTP_HOST_MAX+1, 1);
 	http->page = calloc(HTTP_URL_MAX+1, 1);
-	http->full_url = calloc(HTTP_URL_MAX+1, 1);
-	http->red_url = calloc(HTTP_URL_MAX+1, 1);
+	http->URL = calloc(HTTP_URL_MAX+1, 1);
+	http->redirectedURL = calloc(HTTP_URL_MAX+1, 1);
+	http->redirected = 0;
 
 	if (buf_init(&http->conn.read_buf, HTTP_DEFAULT_READ_BUF_SIZE) < 0)
 	{
-		fprintf(stderr, "__http_init_obj: failed to initialise read buf\n");
+		fprintf(stderr, "private_init_obj: failed to initialise read buf\n");
 		goto fail_destroy_cache;
 	}
 
 	if (buf_init(&http->conn.write_buf, HTTP_DEFAULT_WRITE_BUF_SIZE) < 0)
 	{
-		fprintf(stderr, "__http_init_obj: failed to initialise write buf\n");
+		fprintf(stderr, "private_init_obj: failed to initialise write buf\n");
 		goto fail_release_mem;
 	}
 
@@ -1978,69 +2160,80 @@ __http_init_obj(struct __http_t *__http, uint64_t id)
 	assert(http->conn.host_ipv4);
 	assert(http->primary_host);
 	assert(http->page);
-	assert(http->full_url);
-	assert(http->red_url);
-
-	http->redirected = 0;
+	assert(http->URL);
+	assert(http->redirectedURL);
 
 	return 0;
 
-	fail_release_mem:
+fail_release_mem:
+
 	buf_destroy(&http->conn.read_buf);
 
-	fail_destroy_cache:
-	cache_destroy(__http->headers);
+fail_destroy_cache:
 
-	fail:
+	cache_destroy(private->headers);
+	cache_destroy(private->cookies);
+	cache_destroy(private->dead_links);
+	cache_destroy(private->redirected);
+
+fail:
 	return -1;
 }
 
+/**
+ * Create a new HTTP object instance.
+ *
+ * @id The id to identify the object (e.g., thread ID)
+ */
 struct http_t *
-http_new(uint64_t id)
+HTTP_new(uint64_t id)
 {
-	struct __http_t *__http = malloc(sizeof(struct __http_t));
+	struct HTTP_private *private = malloc(sizeof(struct HTTP_private));
 
-	if (!__http)
+	if (!private)
 	{
 		fprintf(stderr, "http_new: failed to allocate memory for new HTTP object\n");
 		goto fail;
 	}
 
-	if (__http_init_obj(__http, id) < 0)
+	if (private_init_obj(private, id) < 0)
 	{
 		fprintf(stderr, "http_new: failed to initialise HTTP object\n");
 		goto fail;
 	}
 
-	_log("Created HTTP object @ %p\n", __http);
-	return (struct http_t *)__http;
+	_log("Created HTTP object @ %p\n", private);
+	return (struct http_t *)private;
 
-	fail:
+fail:
 	return NULL;
 }
 
 void
-http_delete(struct http_t *http)
+HTTP_delete(struct http_t *http)
 {
 	assert(http);
 
-	struct __http_t *__http = (struct __http_t *)http;
+	struct HTTP_private *private = (struct HTTP_private *)http;
 
 	free(http->host);
+	free(http->page);
 	free(http->primary_host);
 	free(http->conn.host_ipv4);
-	free(http->page);
-	free(http->full_url);
-	free(http->red_url);
+	free(http->URL);
+	//free(http->redirectedURL);
 
-	cache_clear_all(__http->headers);
-	cache_destroy(__http->headers);
+	cache_clear_all(private->headers);
+	cache_destroy(private->headers);
 
-	cache_clear_all(__http->cookies);
-	cache_destroy(__http->cookies);
+	cache_clear_all(private->cookies);
+	cache_destroy(private->cookies);
 
-	cache_clear_all(__http->dead_links);
-	cache_destroy(__http->dead_links);
+	cache_clear_all(private->dead_links);
+	cache_destroy(private->dead_links);
+
+	cache_clear_all(private->redirected);
+	cache_destroy(private->redirected);
 
 	buf_destroy(&http->conn.read_buf);
 	buf_destroy(&http->conn.write_buf);
