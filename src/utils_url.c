@@ -160,7 +160,7 @@ make_full_url(struct http_t *http, buf_t *in, buf_t *out)
 		p += 2;
 		buf_append(out, p);
 
-		http_parse_page(out->buf_head, tmp_page);
+		http->ops->URL_parse_page(out->buf_head, tmp_page);
 
 		if (*(out->buf_tail - 1) == '/')
 			buf_snip(out, (size_t)1);
@@ -217,6 +217,7 @@ make_full_url(struct http_t *http, buf_t *in, buf_t *out)
 int
 make_local_url(struct http_t *http, buf_t *url, buf_t *path)
 {
+	assert(http);
 	assert(url);
 	assert(path);
 
@@ -226,7 +227,7 @@ make_local_url(struct http_t *http, buf_t *url, buf_t *path)
 	buf_t tmp_full;
 
 	buf_init(&tmp_full, HTTP_URL_MAX);
-	http_parse_page(url->buf_head, tmp_page);
+	http->ops->URL_parse_page(url->buf_head, tmp_page);
 
 	if (strncmp("http:", url->buf_head, 5) && strncmp("https:", url->buf_head, 6))
 	{
@@ -272,9 +273,9 @@ is_xdomain(struct http_t *http, buf_t *url)
 	assert(http);
 	assert(url);
 
-	static char tmp_host[1024];
+	char tmp_host[1024];
 
-	http_parse_host(url->buf_head, tmp_host);
+	http->ops->URL_parse_host(url->buf_head, tmp_host);
 
 	return strcmp(tmp_host, http->primary_host);
 }
@@ -282,16 +283,18 @@ is_xdomain(struct http_t *http, buf_t *url)
 int
 local_archive_exists(char *link)
 {
+	assert(link);
+
 	buf_t tmp;
 	int exists = 0;
 	char *home;
-	static char tmp_page[1024];
-	static char tmp_host[1024];
+	char tmp_page[1024];
+	char tmp_host[1024];
 
 	buf_init(&tmp, path_max);
 
-	http_parse_host(link, tmp_host);
-	http_parse_page(link, tmp_page);
+	http->ops->URL_parse_host(link, tmp_host);
+	http->ops->URL_parse_page(link, tmp_page);
 
 	home = getenv("HOME");
 	buf_append(&tmp, home);
