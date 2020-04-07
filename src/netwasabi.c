@@ -10,6 +10,7 @@
 #include "buffer.h"
 #include "cache.h"
 #include "http.h"
+#include "malloc.h"
 #include "robots.h"
 #include "screen_utils.h"
 #include "utils_url.h"
@@ -25,6 +26,7 @@ int __DEBUG = 0;
 
 FILE *logfp = NULL;
 
+/*
 static void
 LOG(const char *fmt, ...)
 {
@@ -39,6 +41,7 @@ LOG(const char *fmt, ...)
 
 	return;
 }
+*/
 
 static void
 __ctor __dbg_init(void)
@@ -62,6 +65,42 @@ __dtor __dbg_fini(void)
 	fclose(logfp);
 	logfp = NULL;
 
+	return;
+}
+
+int
+http_link_cache_ctor(void *http_link)
+{
+	http_link_t *hl = (http_link_t *)http_link;
+	clear_struct(hl);
+
+	hl->URL = nw_calloc(HTTP_URL_MAX+1, 1);
+
+	if (!hl->URL)
+		return -1;
+
+	memset(hl->URL, 0, HTTP_URL_MAX+1);
+
+	hl->left = NULL;
+	hl->right = NULL;
+
+	return 0;
+}
+
+void
+http_link_cache_dtor(void *http_link)
+{
+	assert(http_link);
+
+	http_link_t *hl = (http_link_t *)http_link;
+
+	if (hl->URL)
+	{
+		free(hl->URL);
+		hl->URL = NULL;
+	}
+
+	clear_struct(hl);
 	return;
 }
 
@@ -421,6 +460,15 @@ deconstruct_btree(http_link_t *root, cache_t *cache)
 	return;
 }
 
+/**
+ * Ensure local directories exist on the local machine
+ * for given URLs. Start from the name of the NETWASABI
+ * directory and move towards the end of the URL, creating
+ * if necessary directories that do not yet exist.
+ *
+ * @http Our HTTP object
+ * @filename The pathname of the document to be archived.
+ */
 int
 check_local_dirs(struct http_t *http, buf_t *filename)
 {
@@ -462,7 +510,7 @@ check_local_dirs(struct http_t *http, buf_t *filename)
 	p = ++e;
 
 /*
- * e.g. /home/johndoe/WR_Reaped/favourite-site.com/categories/best-rated
+ * e.g. /home/johndoe/${NETWASABI_DIR}/favourite-site.com/categories/best-rated
  *                              ^start here, work along to end, checking
  * creating a directory for each part if necessary.
  */
@@ -493,6 +541,10 @@ check_local_dirs(struct http_t *http, buf_t *filename)
 	return 0;
 }
 
+/**
+ * Transform embedded URLs in HTML into local
+ * URLs (i.e., file:///path_to_archived_html_document)
+ */
 void
 replace_with_local_urls(struct http_t *http, buf_t *buf)
 {
@@ -668,6 +720,8 @@ __url_parseable(char *url)
 int
 archive_page(struct http_t *http)
 {
+	assert(http);
+
 	int fd = -1;
 	buf_t *buf = &http_rbuf(http);
 	buf_t tmp;
@@ -685,26 +739,13 @@ archive_page(struct http_t *http)
 
 	buf_collapse(buf, (off_t)0, (p - buf->buf_head));
 
-	if (__url_parseable(http->full_url))
+	if (__url_parseable(http->URL))
 		replace_with_local_urls(http, buf);
 
 	buf_init(&tmp, HTTP_URL_MAX);
 	buf_init(&local_url, 1024);
 
-/*
- * Make the local path name using the _old_ URL
- * so we avoid asking for it again in the future.
- */
-	if (http->redirected)
-	{
-		buf_append(&tmp, http->red_url);
-		http->redirected = 0;
-		http->red_url[0] = 0;
-	}
-	else
-	{
-		buf_append(&tmp, http->full_url);
-	}
+	buf_append(&tmp, http->URL);
 
 	make_local_url(http, &tmp, &local_url);
 
@@ -808,7 +849,7 @@ __url_acceptable(struct http_t *http, struct cache_ctx *fctx, struct cache_ctx *
 #endif
 	}
 
-	if (local_archive_exists(url->buf_head))
+	if (local_archive_exists(http, url->buf_head))
 	{
 		++nr_already;
 		return 0;
@@ -837,13 +878,13 @@ __url_acceptable(struct http_t *http, struct cache_ctx *fctx, struct cache_ctx *
 		cache_lock(dctx->cache);
 
 		int cmp = 0;
-		http_link_t *nptr = dctx->root;
+		http_link_t *nodePtr = dctx->root;
 
-		while (nptr)
+		while (nodePtr)
 		{
-			cmp = memcmp((void *)url->buf_head, (void *)nptr->url, url->data_len);
+			cmp = memcmp((void *)url->buf_head, (void *)nodePtr->URL, url->data_len);
 
-			if (url->buf_head[0] && nptr->url[0] && !cmp)
+			if (url->buf_head[0] && nodePtr->URL[0] && !cmp)
 			{
 				++nr_twins;
 				cache_unlock(dctx->cache);
@@ -852,14 +893,14 @@ __url_acceptable(struct http_t *http, struct cache_ctx *fctx, struct cache_ctx *
 			else
 			if (cmp < 0)
 			{
-				nptr = nptr->left;
+				nodePtr = nodePtr->left;
 			}
 			else
 			{
-				nptr = nptr->right;
+				nodePtr = nodePtr->right;
 			}
 
-			if (!nptr)
+			if (!nodePtr)
 				break;
 		}
 
@@ -870,7 +911,8 @@ __url_acceptable(struct http_t *http, struct cache_ctx *fctx, struct cache_ctx *
 }
 
 /**
- * __insert_link - insert a URL into the current "filling" cache
+ * Insert a URL into the current "filling" cache.
+ *
  * @fctx: context holding cache pointer and binary tree root
  * @url: url to add to cache
  */
@@ -887,8 +929,8 @@ __insert_link(struct cache_ctx *fctx, buf_t *url)
 		http_link_t *r;
 		r = (http_link_t *)cache_alloc(fctx->cache, &fctx->root);
 
-		strncpy(r->url, url->buf_head, url->data_len);
-		r->url[url->data_len] = 0;
+		strncpy(r->URL, url->buf_head, url->data_len);
+		r->URL[url->data_len] = 0;
 
 		r->left = NULL;
 		r->right = NULL;
@@ -913,22 +955,22 @@ __insert_link(struct cache_ctx *fctx, buf_t *url)
  * to iteratively insert nodes into the tree.
  */
 
-	http_link_t *nptr;
+	http_link_t *nodePtr;
 	int cmp;
-	off_t nptr_offset;
-	void *nptr_stack = &nptr;
+	off_t nodePtr_offset;
+	void *nodePtr_stack = &nodePtr;
 	http_link_t *new_addr;
 	http_link_t *parent;
 	http_link_t *gparent;
 
-	nptr = fctx->root;
+	nodePtr = fctx->root;
 	parent = gparent = NULL;
 
 	while (1)
 	{
-		cmp = memcmp((void *)url->buf_head, (void *)nptr->url, url->data_len);
+		cmp = memcmp((void *)url->buf_head, (void *)nodePtr->URL, url->data_len);
 
-		if (nptr->url[0] && !cmp)
+		if (nodePtr->URL[0] && !cmp)
 		{
 			++nr_dups;
 			--nr_urls_call;
@@ -937,7 +979,7 @@ __insert_link(struct cache_ctx *fctx, buf_t *url)
 		else
 		if (cmp < 0)
 		{
-			if (!nptr->left)
+			if (!nodePtr->left)
 			{
 /*
  * Our binary tree is an overlay on the cache. So every pointer we're dealing
@@ -951,59 +993,59 @@ __insert_link(struct cache_ctx *fctx, buf_t *url)
  *
  * (NPTR_STACK is pointing to the stack address of our local NPTR var).
  */
-				nptr_offset = (off_t)((char *)nptr - (char *)fctx->cache->cache);
-				new_addr = (http_link_t *)cache_alloc(fctx->cache, &nptr->left);
-				*((unsigned long *)nptr_stack) = (unsigned long)((char *)fctx->cache->cache + nptr_offset);
+				nodePtr_offset = (off_t)((char *)nodePtr - (char *)fctx->cache->cache);
+				new_addr = (http_link_t *)cache_alloc(fctx->cache, &nodePtr->left);
+				*((unsigned long *)nodePtr_stack) = (unsigned long)((char *)fctx->cache->cache + nodePtr_offset);
 
-				assert((char *)nptr >= (char *)fctx->cache->cache && ((char *)nptr - (char *)fctx->cache->cache) < fctx->cache->cache_size);
+				assert((char *)nodePtr >= (char *)fctx->cache->cache && ((char *)nodePtr - (char *)fctx->cache->cache) < fctx->cache->cache_size);
 				assert(new_addr);
 
-				nptr->left = new_addr;
+				nodePtr->left = new_addr;
 
-				strncpy(nptr->left->url, url->buf_head, url->data_len);
-				nptr->left->url[url->data_len] = 0;
+				strncpy(nodePtr->left->URL, url->buf_head, url->data_len);
+				nodePtr->left->URL[url->data_len] = 0;
 
-				nptr->left->left = NULL;
-				nptr->left->right = NULL;
+				nodePtr->left->left = NULL;
+				nodePtr->left->right = NULL;
 
 				break;
 			}
 			else
 			{
 				gparent = parent;
-				parent = nptr;
-				nptr = nptr->left;
-				assert(nptr != parent && nptr != gparent);
+				parent = nodePtr;
+				nodePtr = nodePtr->left;
+				assert(nodePtr != parent && nodePtr != gparent);
 				continue;
 			}
 		}
 		else
 		{
-			if (!nptr->right)
+			if (!nodePtr->right)
 			{
-				nptr_offset = (off_t)((char *)nptr - (char *)fctx->cache->cache);
-				new_addr = cache_alloc(fctx->cache, &nptr->right);
-				*((unsigned long *)nptr_stack) = (unsigned long)((char *)fctx->cache->cache + nptr_offset);
+				nodePtr_offset = (off_t)((char *)nodePtr - (char *)fctx->cache->cache);
+				new_addr = cache_alloc(fctx->cache, &nodePtr->right);
+				*((unsigned long *)nodePtr_stack) = (unsigned long)((char *)fctx->cache->cache + nodePtr_offset);
 
-				assert((char *)nptr >= (char *)fctx->cache->cache && ((char *)nptr - (char *)fctx->cache->cache) < fctx->cache->cache_size);
+				assert((char *)nodePtr >= (char *)fctx->cache->cache && ((char *)nodePtr - (char *)fctx->cache->cache) < fctx->cache->cache_size);
 				assert(new_addr);
 
-				nptr->right = new_addr;
+				nodePtr->right = new_addr;
 
-				strncpy(nptr->right->url, url->buf_head, url->data_len);
-				nptr->right->url[url->data_len] = 0;
+				strncpy(nodePtr->right->URL, url->buf_head, url->data_len);
+				nodePtr->right->URL[url->data_len] = 0;
 
-				nptr->right->left = NULL;
-				nptr->right->right = NULL;
+				nodePtr->right->left = NULL;
+				nodePtr->right->right = NULL;
 
 				break;
 			}
 			else
 			{
 				gparent = parent;
-				parent = nptr;
-				nptr = nptr->right;
-				assert(nptr != parent && nptr != gparent);
+				parent = nodePtr;
+				nodePtr = nodePtr->right;
+				assert(nodePtr != parent && nodePtr != gparent);
 				continue;
 			}
 		}
@@ -1015,8 +1057,9 @@ __insert_link(struct cache_ctx *fctx, buf_t *url)
 }
 
 /**
- * parse_links - parse links from page and store in URL cache within fctx
- *			checking for duplicate URLs in URL cache within dctx.
+ * Parse links from page and store in URL cache within fctx
+ * checking for duplicate URLs in URL cache within dctx.
+ *
  * @http: our HTTP object with remote host info
  * @fctx: context of cache we are filling
  * @dctx: context of cache within which we are checking for duplicates
@@ -1035,13 +1078,13 @@ parse_links(struct http_t *http, struct cache_ctx *fctx, struct cache_ctx *dctx)
 	size_t url_len = 0;
 	buf_t *buf = &http_rbuf(http);
 	buf_t url;
-	buf_t full_url;
+	buf_t URL;
 	buf_t path;
 
 	if (buf_init(&url, HTTP_URL_MAX) < 0)
 		goto fail;
 
-	if (buf_init(&full_url, HTTP_URL_MAX) < 0)
+	if (buf_init(&URL, HTTP_URL_MAX) < 0)
 		goto fail_destroy_bufs;
 
 	if (buf_init(&path, path_max) < 0)
@@ -1057,7 +1100,7 @@ parse_links(struct http_t *http, struct cache_ctx *fctx, struct cache_ctx *dctx)
 	while (1)
 	{
 		buf_clear(&url);
-		buf_clear(&full_url);
+		buf_clear(&URL);
 		buf_clear(&path);
 
 		p = strstr(savep, url_types[url_type_idx].string);
@@ -1100,15 +1143,15 @@ parse_links(struct http_t *http, struct cache_ctx *fctx, struct cache_ctx *dctx)
 		assert(url_len < HTTP_URL_MAX);
 
 		buf_append_ex(&url, savep, url_len);
-		make_full_url(http, &url, &full_url);
+		make_full_url(http, &url, &URL);
 
-		if (!__url_acceptable(http, fctx, dctx, &full_url))
+		if (!__url_acceptable(http, fctx, dctx, &URL))
 		{
 			savep = ++p;
 			continue;
 		}
 
-		if (__insert_link(fctx, &full_url) < 0)
+		if (__insert_link(fctx, &URL) < 0)
 			goto fail_destroy_bufs;
 
 		savep = ++p;
@@ -1116,20 +1159,28 @@ parse_links(struct http_t *http, struct cache_ctx *fctx, struct cache_ctx *dctx)
 	}
 
 	buf_destroy(&url);
-	buf_destroy(&full_url);
+	buf_destroy(&URL);
 	buf_destroy(&path);
 
 	return nr_urls_call;
 
 	fail_destroy_bufs:
 	buf_destroy(&url);
-	buf_destroy(&full_url);
+	buf_destroy(&URL);
 	buf_destroy(&path);
 
 	fail:
 	return -1;
 }
 
+/*
+ XXX	The idea here was to send a HEAD
+	and then a GET, to save bandwith.
+	But something tells me that actually
+	this is probably a waste of bandwith.
+
+	Just send a GET and deal with the
+	result (200, 3XX, 4XX, 5XX).
 int
 do_request(struct http_t *http)
 {
@@ -1147,9 +1198,8 @@ do_request(struct http_t *http)
 	buf_clear(&http_rbuf(http));
 	buf_clear(&http_wbuf(http));
 
-	/*
-	 * Save bandwidth: send HEAD first.
-	 */
+	//Save bandwidth: send HEAD first.
+
 	LOG("sending HEAD request\n");
 	if (http_send_request(http, HEAD) < 0)
 	{
@@ -1177,7 +1227,7 @@ do_request(struct http_t *http)
 			return status_code;
 	}
 
-	if (local_archive_exists(http->full_url))
+	if (local_archive_exists(http->URL))
 		return HTTP_ALREADY_EXISTS;
 
 	if (http_connection_closed(http))
@@ -1228,13 +1278,19 @@ do_request(struct http_t *http)
 
 	return -1;
 }
+*/
 
 /**
- * reap - archive the pages in the link cache,
- *    choose one at random and return that choice. That will be
- *    our next page from which to parse links.
- * @fctx->cache: the cache of parsed links
- * @conn: our struct with connection context
+ * GET pages for URLs in the caches. One cache will be
+ * getting drained while the other is being filled.
+ * Parse URLs from each downloaded page and cache them
+ * in the current FILLING cache. Save a local copy
+ * of the page. Once a DRAINING cache has emptied,
+ * we switch the role of the caches and continue.
+ *
+ * @http Our HTTP object
+ * @cache1 One of the caches holding parsed URLs
+ * @caceh2 Sibling cache holding parsed URLs
  */
 int
 crawl(struct http_t *http, struct cache_ctx *cache1, struct cache_ctx *cache2)
@@ -1312,7 +1368,7 @@ crawl(struct http_t *http, struct cache_ctx *cache1, struct cache_ctx *cache2)
 		{
 			buf_clear(&http_wbuf(http));
 
-			len = strlen(link->url);
+			len = link->URL_len;
 
 			if (!len)
 			{
@@ -1321,9 +1377,9 @@ crawl(struct http_t *http, struct cache_ctx *cache1, struct cache_ctx *cache2)
 			}
 
 			assert(len < HTTP_URL_MAX);
-			strcpy(http->full_url, link->url);
+			strcpy(http->URL, link->URL);
 
-			if (!http_parse_page(http->full_url, http->page))
+			if (!http->ops->URL_parse_page(http->URL, http->page))
 				continue;
 
 /*
@@ -1335,30 +1391,27 @@ crawl(struct http_t *http, struct cache_ctx *cache1, struct cache_ctx *cache2)
 			UNBLOCK_SIGNAL(SIGINT);
 
 			http_check_host(http);
-			update_current_url(http->full_url);
+			update_current_url(http->URL);
 
-			status_code = do_request(http);
+			//status_code = do_request(http);
+
+			status_code = http->ops->send_request(http);
 			update_status_code(status_code);
 
 			if (status_code < 0)
 				goto fail;
 
 			++(link->nr_requests);
+/*
+	XXX - All of this is taken care of in the HTTP module, as it should be!
 
 			switch((unsigned int)status_code)
 			{
 				case HTTP_OK:
 				case HTTP_GONE:
-				case HTTP_NOT_FOUND: /* don't want to keep requesting the link and getting 404, so just archive it */
+				case HTTP_NOT_FOUND: // don't want to keep requesting the link and getting 404, so just archive it
 					break;
-#if 0
-				case HTTP_FOUND:
-				case HTTP_MOVED_PERMANENTLY:
-				case HTTP_SEE_OTHER:
-					handle_redirect(http);
-					goto send_request;
-					break;
-#endif
+
 				case HTTP_BAD_REQUEST:
 
 					buf_clear(&http_wbuf(http));
@@ -1401,6 +1454,7 @@ crawl(struct http_t *http, struct cache_ctx *cache1, struct cache_ctx *cache2)
 					put_error_msg("Unknown HTTP status code returned (%d)", status_code);
 					goto next;
 			}
+*/
 
 /*
  * If we haven't yet reached the threshold of URLs in the
@@ -1410,7 +1464,7 @@ crawl(struct http_t *http, struct cache_ctx *cache1, struct cache_ctx *cache2)
  */
 			if (fill)
 			{
-				if (__url_parseable(http->full_url))
+				if (__url_parseable(http->URL))
 				{
 					if (cache1->state == DRAINING)
 					{
@@ -1444,7 +1498,7 @@ crawl(struct http_t *http, struct cache_ctx *cache1, struct cache_ctx *cache2)
 
 			archive_page(http);
 
-			next:
+		//next:
 			++link;
 			--url_cnt;
 

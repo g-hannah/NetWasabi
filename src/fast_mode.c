@@ -12,6 +12,7 @@
 #include "cache.h"
 #include "fast_mode.h"
 #include "http.h"
+#include "malloc.h"
 #include "screen_utils.h"
 #include "netwasabi.h"
 
@@ -66,6 +67,42 @@ int WDEBUG = 0;
 
 #define WLOG_FILE "./fast_mode_log.txt"
 FILE *wlogfp = NULL;
+
+static int
+http_link_cache_ctor(void *http_link)
+{
+	http_link_t *hl = (http_link_t *)http_link;
+	clear_struct(hl);
+
+	hl->URL = nw_calloc(HTTP_URL_MAX+1, 1);
+
+	if (!hl->URL)
+		return -1;
+
+	memset(hl->URL, 0, HTTP_URL_MAX+1);
+
+	hl->left = NULL;
+	hl->right = NULL;
+
+	return 0;
+}
+
+static void
+http_link_cache_dtor(void *http_link)
+{
+	assert(http_link);
+
+	http_link_t *hl = (http_link_t *)http_link;
+
+	if (hl->URL)
+	{
+		free(hl->URL);
+		hl->URL = NULL;
+	}
+
+	clear_struct(hl);
+	return;
+}
 
 /**
  * A worker may write to a broken pipe after the
@@ -280,12 +317,12 @@ worker_crawl(void *args)
 		goto thread_fail;
 	}
 
-	strcpy(http->full_url, main_url);
+	strcpy(http->URL, main_url);
 
-	if (!http_parse_host(http->full_url, http->host))
+	if (!http->ops->URL_parse_host(http->URL, http->host))
 		goto thread_fail;
 
-	if (!http_parse_page(http->full_url, http->page))
+	if (!http->ops->URL_parse_page(http->URL, http->page))
 		goto thread_fail;
 
 	strcpy(http->primary_host, http->host);
@@ -308,10 +345,10 @@ worker_crawl(void *args)
 
 	if (__initialising_thread == pthread_self())
 	{
-		http_send_request(http, GET);
-		http_recv_response(http);
+		http->ops->send_request(http);
+		http->ops->recv_response(http);
 
-		status_code = http_status_code_int(&http->conn.read_buf);
+		status_code = http->code;
 
 		if (HTTP_OK != status_code)
 		{
@@ -409,19 +446,23 @@ worker_crawl(void *args)
 		}
 		else
 		{
-			wlog("[0x%lx] Got \"%s\" from cache\n", pthread_self(), link->url);
+			wlog("[0x%lx] Got \"%s\" from cache\n", pthread_self(), link->URL);
 			cache_unlock(draining);
 		}
 
-		strcpy(http->full_url, link->url);
-		http_parse_host(link->url, http->host);
-		http_parse_page(link->url, http->page);
+		strcpy(http->URL, link->URL);
+
+		http->ops->URL_parse_host(link->URL, http->host);
+		http->ops->URL_parse_page(link->URL, http->page);
 
 		wlog("[0x%lx] Calling do_request()\n", pthread_self());
-		status_code = do_request(http);
+		//status_code = do_request(http);
 
-		update_current_url(link->url);
+		http->ops->send_request(http);
+		http->ops->recv_response(http);
 
+		update_current_url(link->URL);
+/*
 		switch((unsigned int)status_code)
 		{
 			case HTTP_OK:
@@ -465,6 +506,7 @@ worker_crawl(void *args)
 				wlog("[0x%lx] Received erroneous status code %d\n", pthread_self(), status_code);
 				goto check_reconnect;
 		}
+*/
 
 /*
  * The global volatile FILL variable controls whether
@@ -474,7 +516,7 @@ worker_crawl(void *args)
 		{
 			if (parse_links(http, cache1.state == FILLING ? &cache1 : &cache2, cache1.state == DRAINING ? &cache1 : &cache2) < 0)
 			{
-				wlog("[0x%lx] Failed to parse URLs from %s\n", pthread_self(), link->url);
+				wlog("[0x%lx] Failed to parse URLs from %s\n", pthread_self(), link->URL);
 				put_error_msg("0x%lx: failed to parse URLs from page", pthread_self());
 			}
 
@@ -512,7 +554,7 @@ worker_crawl(void *args)
 
 		cache_unlock(draining);
 
-		check_reconnect:
+	//check_reconnect:
 
 		pthread_mutex_lock(&recon_mtx);
 

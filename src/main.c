@@ -86,6 +86,42 @@ __dtor __wr_fini(void)
 	pthread_mutex_destroy(&screen_mutex);
 }
 
+static int
+http_link_cache_ctor(void *http_link)
+{
+	http_link_t *hl = (http_link_t *)http_link;
+	clear_struct(hl);
+
+	hl->URL = nw_calloc(HTTP_URL_MAX+1, 1);
+
+	if (!hl->URL)
+		return -1;
+
+	memset(hl->URL, 0, HTTP_URL_MAX+1);
+
+	hl->left = NULL;
+	hl->right = NULL;
+
+	return 0;
+}
+
+static void
+http_link_cache_dtor(void *http_link)
+{
+	assert(http_link);
+
+	http_link_t *hl = (http_link_t *)http_link;
+
+	if (hl->URL)
+	{
+		free(hl->URL);
+		hl->URL = NULL;
+	}
+
+	clear_struct(hl);
+	return;
+}
+
 #define THREAD_SLEEP_TIME_USEC 500000
 void *
 screen_updater_thread(void *arg)
@@ -438,14 +474,15 @@ main(int argc, char *argv[])
 	}
 
 	struct http_t *http;
-	int status_code;
-	int do_not_archive = 0;
+	//int status_code;
+	//int do_not_archive = 0;
 	int rv;
 	size_t url_len;
 	buf_t *rbuf = NULL;
 	buf_t *wbuf = NULL;
 
-	if (!(http = http_new()))
+#define MAIN_THREAD_ID 0x445248544e49414dul
+	if (!(http = http_new(MAIN_THREAD_ID)))
 	{
 		fprintf(stderr, "main: failed to obtain new HTTP object\n");
 		goto fail;
@@ -453,10 +490,10 @@ main(int argc, char *argv[])
 
 	url_len = strlen(argv[1]);
 	assert(url_len < HTTP_URL_MAX);
-	strcpy(http->full_url, argv[1]);
+	strcpy(http->URL, argv[1]);
 
-	http_parse_host(argv[1], http->host);
-	http_parse_page(argv[1], http->page);
+	http->ops->URL_parse_host(argv[1], http->host);
+	http->ops->URL_parse_page(argv[1], http->page);
 
 	strcpy(http->primary_host, http->host);
 
@@ -504,21 +541,26 @@ main(int argc, char *argv[])
 	buf_clear(rbuf);
 	buf_clear(wbuf);
 
-	update_current_url(http->full_url);
+	update_current_url(http->URL);
 
-	status_code = do_request(http);
-	update_status_code(status_code);
+	http->ops->send_request(http);
+	//status_code = do_request(http);
+	update_status_code(http->code);
 
-	switch(status_code)
+	if (HTTP_OK != http->code)
+		goto out_disconnect;
+
+/*
+	switch((unsigned int)http->code)
 	{
 		case HTTP_OK:
 			break;
 		case HTTP_ALREADY_EXISTS:
 			do_not_archive = 1;
-/*
- * It already exists, but we would like to get it anyway
- * and extract URLs from it and start crawling from there.
- */
+//
+// It already exists, but we would like to get it anyway
+// and extract URLs from it and start crawling from there.
+//
 			http_send_request(http, GET);
 			status_code = http_recv_response(http);
 			update_status_code(status_code);
@@ -535,14 +577,18 @@ main(int argc, char *argv[])
 			update_status_code(status_code);
 			goto out_disconnect;
 	}
+*/
 
 	parse_links(http, &cache1_ctx, &cache2_ctx);
 	update_cache1_count(cache_nr_used(cache1_ctx.cache));
+	archive_page(http); // This should check for existence...
 
+#if 0
 	if (!do_not_archive)
 	{
 		archive_page(http);
 	}
+#endif
 
 	if (!cache_nr_used(cache1_ctx.cache))
 	{
