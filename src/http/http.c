@@ -40,6 +40,11 @@
  * and save it temporarily in a struct).
  */
 
+#define HTTP_VERSION_1_0 0x10000000u
+#define HTTP_VERSION_1_1 0x10100000u
+#define HTTP_VERSION_2_0 0x20000000u
+#define HTTP_DEFAULT_VERSION HTTP_VERSION_1_1
+
 /*
  * Definitions related to HTTP 2.0
  *
@@ -54,7 +59,7 @@
 
 struct HTTP_frame
 {
-	uint32_t len:24,
+	uint32_t len:24;
 	uint32_t type:8;
 	uint8_t flags;
 	uint32_t streamId;
@@ -97,32 +102,6 @@ typedef struct HTTP_dead_link http_dead_link_t;
 typedef struct HTTP_redirected http_redirected_t;
 
 /*
-int http_status_code_int(buf_t *) __nonnull((1)) __wur;
-ssize_t http_response_header_len(buf_t *) __nonnull((1)) __wur;
-
-const char *http_status_code_string(int) __wur;
-
-void http_check_host(struct http_t *) __nonnull((1));
-int http_connection_closed(struct http_t *) __nonnull((1)) __wur;
-*/
-
-void http_check_host(struct http_t *) __nonnull((1));
-int http_connection_closed(struct http_t *) __nonnull((1)) __wur;
-
-struct HTTP_methods Methods_v1_1 = {
-	.send_request = http_send_request_1_1,
-	.recv_response = http_recv_response_1_1,
-	.build_header = http_build_request_header_1_1,
-	.append_header = http_append_header_1_1,
-	.check_header = http_check_header,
-	.fetch_header = http_fetch_header,
-	.URL_parse_host = http_url_parse_host,
-	.URL_parse_page = http_url_parse_page
-};
-
-struct HTTP_methods Methods_v2_0;
-
-/*
  * User gets struct http_t which does not
  * include the caches.
  */
@@ -140,7 +119,8 @@ struct HTTP_private
  */
 	cache_t *headers;
 	cache_t *cookies;
-	cache_t dead_links;
+	cache_t *deadLinks;
+	cache_t *redirectedLinks;
 /*
  * The following are used to pass their addresses
  * to cache_alloc().
@@ -151,6 +131,51 @@ struct HTTP_private
 };
 
 /*
+int http_status_code_int(buf_t *) __nonnull((1)) __wur;
+ssize_t http_response_header_len(buf_t *) __nonnull((1)) __wur;
+
+const char *http_status_code_string(int) __wur;
+
+void http_check_host(struct http_t *) __nonnull((1));
+int http_connection_closed(struct http_t *) __nonnull((1)) __wur;
+*/
+
+void http_check_host(struct http_t *) __nonnull((1));
+int http_connection_closed(struct http_t *) __nonnull((1)) __wur;
+
+static int send_request_1_1(struct http_t *);
+static int recv_response_1_1(struct http_t *);
+static int build_request_header_1_1(struct http_t *);
+static int append_header_1_1(buf_t *, http_header_t *);
+static int check_header_1_1(buf_t *, const char *, off_t, off_t *);
+static char *fetch_header_1_1(buf_t *, const char *, http_header_t *, off_t);
+static char *URL_parse_host(char *, char *);
+static char *URL_parse_page(char *, char *);
+static const char *code_as_string(struct http_t *);
+
+static void HTTP_cache_redirected_link(struct http_t *, const char *, const char *);
+static http_dead_link_t *HTTP_search_dead_link(struct HTTP_private *);
+static void HTTP_cache_dead_link(struct http_t *, const char *, int);
+
+static int http_status_code_int(buf_t *) __nonnull((1));
+
+struct HTTP_methods Methods_v1_1 = {
+	.send_request = send_request_1_1,
+	.recv_response = recv_response_1_1,
+	.build_header = build_request_header_1_1,
+	.append_header = append_header_1_1,
+	.check_header = check_header_1_1,
+	.fetch_header = fetch_header_1_1,
+	.URL_parse_host = URL_parse_host,
+	.URL_parse_page = URL_parse_page,
+	.code_as_string = code_as_string
+};
+
+//struct HTTP_methods Methods_v2_0;
+
+
+
+/*
  * Cache dead links so that we can avoid
  * wasting network bandwith requesting
  * them again when we see their URL in
@@ -159,7 +184,7 @@ struct HTTP_private
 struct HTTP_dead_link
 {
 	char *URL;
-	int HTTP_code;
+	int code;
 	time_t timestamp;
 	int times_seen;
 };
@@ -243,7 +268,7 @@ http_dead_link_cache_ctor(void *dlObj)
 	http_dead_link_t *dl = (http_dead_link_t *)dlObj;
 
 	dl->URL = nw_calloc(HTTP_URL_MAX, 1);
-	dl->HTTP_code = 0;
+	dl->code = 0;
 	dl->timestamp = 0;
 	dl->times_seen = 0;
 
@@ -269,7 +294,7 @@ http_dead_link_cache_dtor(void *dlObj)
 		dl->URL = NULL;
 	}
 
-	dl->HTTP_code = 0;
+	dl->code = 0;
 	dl->timestamp = 0;
 	dl->times_seen = 0;
 
@@ -286,7 +311,7 @@ http_redirected_cache_ctor(void *rlObj)
 	rl->fromURL = calloc(HTTP_URL_MAX, 1);
 	rl->toURL = calloc(HTTP_URL_MAX, 1);
 
-	if (!rl->fromURL !! !rl->toURL)
+	if (!rl->fromURL || !rl->toURL)
 		goto fail_dealloc;
 
 	rl->when = 0;
@@ -325,87 +350,30 @@ http_redirected_cache_dtor(void *rlObj)
  *
  * @http The HTTP object containing the URL.
  */
-static http_dead_link_t *
-HTTP_search_dead_link(struct http_t *http)
+http_dead_link_t *
+HTTP_search_dead_link(struct HTTP_private *private)
 {
-	assert(http);
+	assert(private);
 
-	struct http_dead_link_t *dead = NULL;
-	struct HTTP_private *private = HTTP_private(http);
+	http_dead_link_t *dead = NULL;
 	int objUsed = 0;
-	size_t URL_len = strlen(http->URL);
+	size_t URL_len = strlen(((struct http_t *)private)->URL);
+
+	dead = (http_dead_link_t *)private->deadLinks->cache;
 
 	while (1)
 	{
-		while ((objUsed = cache_obj_used(private->dead_links, (void *)dead)) != 0)
+		while ((objUsed = cache_obj_used(private->deadLinks, (void *)dead)) != 0)
 			++dead;
 
 		if (objUsed < 0)
 			break;
 
-		if (!memcmp((void *)dead->URL, (void *)http->URL, URL_len))
+		if (!memcmp((void *)dead->URL, (void *)((struct http_t *)private)->URL, URL_len))
 			return dead; 
 	}
 
 	return NULL;
-}
-
-/**
- * Cache a dead link.
- *
- * @http The HTTP object in which the cache resides
- * @URL The URL to cache
- * @code The HTTP code that was received for the link (e.g., 404)
- */
-static void
-HTTP_cache_dead_link(struct http_t *http, const char *URL, int code)
-{
-	assert(http);
-	assert(URL);
-	assert(strlen(URL) < HTTP_URL_MAX);
-
-	struct HTTP_private *private = (struct HTTP_private *)http;
-	http_dead_link_t *dl = NULL;
-
-	dl = cache_alloc(private->dead_links, &private->dlPtr);
-	if (NULL == private->dlPtr)
-		goto fail;
-
-	strcpy(dl->URL, URL);
-	dl->code = code;
-	dl->timestamp = time(NULL);
-	++dl->times_seen;
-
-	return;
-
-fail:
-	_log("failed to obtain cache object for dead link");
-	return;
-}
-
-static void
-HTTP_cache_redirected(struct http_t *http, const char *from, const char *to)
-{
-	assert(http);
-	assert(from);
-	assert(to);
-
-	struct HTTP_private *private = HTTP_private(http);
-	http_redirected_t *rl = cache_alloc(private->redirected, private->rlPtr);
-
-	if (NULL == rl)
-		goto fail;
-
-	size_t fromLen = strlen(from);
-	size_t toLen = strlen(to);
-
-	memcpy((void *)rl->fromURL, (void *)from, fromLen < HTTP_URL_MAX ? fromLen : HTTP_URL_MAX);
-	memcpy((void *)rl->toURL, (void *)to, toLen < HTTP_URL_MAX ? toLen : HTTP_URL_MAX);
-	rl->when = time(NULL);
-
-fail:
-	_log("failed to obtain cache object for redirected link");
-	return;
 }
 
 /**
@@ -494,42 +462,65 @@ http_link_cache_dtor(void *http_link)
 	return;
 }
 
-#if 0
-#ifdef DEBUG
-static void
-private_print_request_hdr(struct http_t *http)
+/**
+ * Cache a dead link.
+ *
+ * @http The HTTP object in which the cache resides
+ * @URL The URL to cache
+ * @code The HTTP code that was received for the link (e.g., 404)
+ */
+void
+HTTP_cache_dead_link(struct http_t *http, const char *URL, int code)
 {
-	char *eoh = HTTP_EOH(&http->conn.write_buf);
+	assert(http);
+	assert(URL);
+	assert(strlen(URL) < HTTP_URL_MAX);
 
-	if (!eoh)
-	{
-		fprintf(stderr, "private_print_request_hdr: failed to find end of header\n");
-		return;
-	}
+	struct HTTP_private *private = (struct HTTP_private *)http;
+	http_dead_link_t *dl = NULL;
 
-	fprintf(stderr, "%s%.*s%s", COL_RED, (int)(eoh - http_wbuf(http).buf_head), http_wbuf(http).buf_head, COL_END);
+	dl = cache_alloc(private->deadLinks, &private->dlPtr);
+	if (NULL == private->dlPtr)
+		goto fail;
 
+	strcpy(dl->URL, URL);
+	dl->code = code;
+	dl->timestamp = time(NULL);
+	++dl->times_seen;
+
+	return;
+
+fail:
+	_log("failed to obtain cache object for dead link");
 	return;
 }
 
-static void
-private_print_response_hdr(struct http_t *http)
+void
+HTTP_cache_redirected_link(struct http_t *http, const char *from, const char *to)
 {
-	char *eoh = HTTP_EOH(&http->conn.read_buf);
+	assert(http);
+	assert(from);
+	assert(to);
 
-	if (!eoh)
-	{
-		fprintf(stderr, "private_print_response_hdr: failed to find end of header\n");
-		return;
-	}
+	struct HTTP_private *private = HTTP_private(http);
+	http_redirected_t *rl = cache_alloc(private->redirectedLinks, private->rlPtr);
 
-	fprintf(stderr, "%s%.*s%s", COL_RED, (int)(eoh - http_rbuf(http).buf_head), http_rbuf(http).buf_head, COL_END);
+	if (NULL == rl)
+		goto fail;
 
+	size_t fromLen = strlen(from);
+	size_t toLen = strlen(to);
+
+	memcpy((void *)rl->fromURL, (void *)from, fromLen < HTTP_URL_MAX ? fromLen : HTTP_URL_MAX);
+	memcpy((void *)rl->toURL, (void *)to, toLen < HTTP_URL_MAX ? toLen : HTTP_URL_MAX);
+	rl->when = time(NULL);
+
+fail:
+	_log("failed to obtain cache object for redirected link");
 	return;
 }
-#endif
-#endif
 
+/*
 #define SOURCE_RANDOMNESS "/dev/urandom"
 static void
 HTTP_get_random_bytes(char *dest, int nr)
@@ -556,6 +547,7 @@ use_rand:
 
 	return;
 }
+*/
 
 /**
  * check_cookies - check for Set-Cookie header fields in response header
@@ -578,7 +570,7 @@ check_cookies(struct http_t *http)
 
 		cache_clear_all(private->cookies);
 
-		while (http_check_header(buf, "Set-Cookie", off, &off))
+		while (http->ops->check_header(buf, "Set-Cookie", off, &off))
 		{
 			if (!(private->hfPtr = (http_header_t *)cache_alloc(private->cookies, &private->hfPtr)))
 			{
@@ -586,7 +578,7 @@ check_cookies(struct http_t *http)
 				goto fail;
 			}
 
-			if (!(http_fetch_header(buf, "Set-Cookie", private->hfPtr, off)))
+			if (!(http->ops->fetch_header(buf, "Set-Cookie", private->hfPtr, off)))
 			{
 				fprintf(stderr, "private_check_cookies: failed to extract Set-Cookie header field\n");
 				goto fail_dealloc;
@@ -614,7 +606,7 @@ check_cookies(struct http_t *http)
  * @http HTTP object.
  */
 int
-http_build_request_header_1_1(struct http_t *http)
+build_request_header_1_1(struct http_t *http)
 {
 	assert(http);
 
@@ -719,8 +711,8 @@ http_build_request_header_1_1(struct http_t *http)
 	return 0;
 }
 
-static int
-http_send_request_1_1(struct http_t *http)
+int
+send_request_1_1(struct http_t *http)
 {
 	assert(http);
 
@@ -730,7 +722,7 @@ http_send_request_1_1(struct http_t *http)
 /*
  * Link is dead, so return the HTTP code from dead link object.
  */
-	if ((dead = HTTP_search_dead_link(private->dead_links, http->URL))
+	if ((dead = HTTP_search_dead_link(private)))
 	{
 		http->code = dead->code;
 		return 0;
@@ -747,7 +739,7 @@ http_send_request_1_1(struct http_t *http)
 	{
 		if (buf_write_tls(http->conn.ssl, buf) == -1)
 		{
-			fprintf(stderr, "http_send_request: failed to write to SSL socket (%s)\n", strerror(errno));
+			fprintf(stderr, "send_request: failed to write to SSL socket (%s)\n", strerror(errno));
 			goto fail;
 		}
 	}
@@ -762,7 +754,7 @@ http_send_request_1_1(struct http_t *http)
 
 	return 0;
 
-	fail:
+fail:
 	return -1;
 }
 
@@ -1239,7 +1231,7 @@ set_new_location(struct http_t *http)
 
 	_log("Got new location: %s\n", location->value);
 
-	if (!http_parse_host(location->value, http->host))
+	if (!http->ops->URL_parse_host(location->value, http->host))
 	{
 		_log("%s: failed to parse HOST from URL\n", __func__);
 		goto fail_dealloc;
@@ -1247,7 +1239,7 @@ set_new_location(struct http_t *http)
 
 	_log("Extracted host: %s\n", http->host);
 
-	if (!http_parse_page(location->value, http->page))
+	if (!http->ops->URL_parse_page(location->value, http->page))
 	{
 		_log("%s: failed to parse page from URL\n", __func__);
 		goto fail_dealloc;
@@ -1314,11 +1306,11 @@ http_set_ssl_non_blocking(struct http_t *http)
 }
 
 /**
- * http_recv_response - receive HTTP response.
+ * recv_response_1_1 - receive HTTP response.
  * @http HTTP object
  */
 int
-http_recv_response_1_1(struct http_t *http)
+recv_response_1_1(struct http_t *http)
 {
 	assert(http);
 
@@ -1489,7 +1481,7 @@ __retry:
 
 				if (bytes < 0)
 				{
-					_log("buf_read_[tls/socket]() returned %d\n", rv);
+					_log("buf_read_[tls/socket]() returned %d\n", retVal);
 					goto fail_dealloc;
 				}
 				else
@@ -1611,80 +1603,86 @@ http_status_code_int(buf_t *buf)
 }
 
 const char *
-http_status_code_string(int code)
+code_as_string(struct http_t *http)
 {
-	static char code_string[64];
+	assert(http);
 
-	switch((unsigned int)code)
+	//char code_string[64];
+
+	switch((unsigned int)http->code)
 	{
 		case HTTP_OK:
-			sprintf(code_string, "%s%u OK%s", COL_DARKGREEN, HTTP_OK, COL_END);
-			//return "200 OK";
+			//sprintf(code_string, "%s%u OK%s", COL_DARKGREEN, HTTP_OK, COL_END);
+			return "200 OK";
 			break;
 		case HTTP_MOVED_PERMANENTLY:
-			sprintf(code_string, "%s%u Moved Permanently%s", COL_ORANGE, HTTP_MOVED_PERMANENTLY, COL_END);
-			//return "301 Moved permanently";
+			//sprintf(code_string, "%s%u Moved Permanently%s", COL_ORANGE, HTTP_MOVED_PERMANENTLY, COL_END);
+			return "301 Moved permanently";
 			break;
 		case HTTP_FOUND:
-			sprintf(code_string, "%s%u Found%s", COL_ORANGE, HTTP_FOUND, COL_END);
-			//return "302 Found";
+			//sprintf(code_string, "%s%u Found%s", COL_ORANGE, HTTP_FOUND, COL_END);
+			return "302 Found";
 			break;
 		case HTTP_SEE_OTHER:
-			sprintf(code_string, "%s%u See Other%s", COL_ORANGE, HTTP_SEE_OTHER, COL_END);
+			//sprintf(code_string, "%s%u See Other%s", COL_ORANGE, HTTP_SEE_OTHER, COL_END);
 			break;
 		case HTTP_BAD_REQUEST:
-			sprintf(code_string, "%s%u Bad Request%s", COL_RED, HTTP_BAD_REQUEST, COL_END);
-			//return "400 Bad request";
+			//sprintf(code_string, "%s%u Bad Request%s", COL_RED, HTTP_BAD_REQUEST, COL_END);
+			return "400 Bad request";
 			break;
 		case HTTP_UNAUTHORISED:
-			sprintf(code_string, "%s%u Unauthorised%s", COL_RED, HTTP_UNAUTHORISED, COL_END);
-			//return "401 Unauthorised";
+			//sprintf(code_string, "%s%u Unauthorised%s", COL_RED, HTTP_UNAUTHORISED, COL_END);
+			return "401 Unauthorised";
 			break;
 		case HTTP_FORBIDDEN:
-			sprintf(code_string, "%s%u Forbidden%s", COL_RED, HTTP_FORBIDDEN, COL_END);
-			return code_string;
-			//return "403 Forbidden";
+			//sprintf(code_string, "%s%u Forbidden%s", COL_RED, HTTP_FORBIDDEN, COL_END);
+			//return code_string;
+			return "403 Forbidden";
 			break;
 		case HTTP_NOT_FOUND:
-			sprintf(code_string, "%s%u Not Found%s", COL_RED, HTTP_NOT_FOUND, COL_END);
-			//return "404 Not found";
+			//sprintf(code_string, "%s%u Not Found%s", COL_RED, HTTP_NOT_FOUND, COL_END);
+			return "404 Not found";
 			break;
 		case HTTP_METHOD_NOT_ALLOWED:
-			sprintf(code_string, "%s%u Method Not Allowed%s", COL_RED, HTTP_METHOD_NOT_ALLOWED, COL_END);
+			//sprintf(code_string, "%s%u Method Not Allowed%s", COL_RED, HTTP_METHOD_NOT_ALLOWED, COL_END);
+			return "Method Not Allowed";
 			break;
 		case HTTP_REQUEST_TIMEOUT:
-			sprintf(code_string, "%s%u Request Timeout%s", COL_RED, HTTP_REQUEST_TIMEOUT, COL_END);
-			//return "408 Request timeout";
+			//sprintf(code_string, "%s%u Request Timeout%s", COL_RED, HTTP_REQUEST_TIMEOUT, COL_END);
+			return "408 Request timeout";
 			break;
 		case HTTP_INTERNAL_ERROR:
-			sprintf(code_string, "%s%u Internal Server Error%s", COL_RED, HTTP_INTERNAL_ERROR, COL_END);
-			//return "500 Internal server error";
+			//sprintf(code_string, "%s%u Internal Server Error%s", COL_RED, HTTP_INTERNAL_ERROR, COL_END);
+			return "500 Internal server error";
 			break;
 		case HTTP_BAD_GATEWAY:
-			sprintf(code_string, "%s%u Bad Gateway%s", COL_RED, HTTP_BAD_GATEWAY, COL_END);
-			//return "502 Bad gateway";
+			//sprintf(code_string, "%s%u Bad Gateway%s", COL_RED, HTTP_BAD_GATEWAY, COL_END);
+			return "502 Bad gateway";
 			break;
 		case HTTP_SERVICE_UNAV:
-			sprintf(code_string, "%s%u Service Unavailable%s", COL_RED, HTTP_SERVICE_UNAV, COL_END);
-			//return "503 Service unavailable";
+			//sprintf(code_string, "%s%u Service Unavailable%s", COL_RED, HTTP_SERVICE_UNAV, COL_END);
+			return "503 Service unavailable";
 			break;
 		case HTTP_GATEWAY_TIMEOUT:
-			sprintf(code_string, "%s%u Gateway Timeout%s", COL_RED, HTTP_GATEWAY_TIMEOUT, COL_END);
-			//return "504 Gateway timeout";
+			//sprintf(code_string, "%s%u Gateway Timeout%s", COL_RED, HTTP_GATEWAY_TIMEOUT, COL_END);
+			return "504 Gateway timeout";
 			break;
-		case HTTP_ALREADY_EXISTS:
-			sprintf(code_string, "%s%u Local Found%s", COL_DARKGREEN, HTTP_ALREADY_EXISTS, COL_END);
-			//return "0xdeadbeef Local copy already exists";
-			break;
-		case HTTP_IS_XDOMAIN:
-			sprintf(code_string, "%s%u Is XDomain%s", COL_RED, HTTP_IS_XDOMAIN, COL_END);
-			break;
+		//case HTTP_ALREADY_EXISTS:
+			//sprintf(code_string, "%s%u Local Found%s", COL_DARKGREEN, HTTP_ALREADY_EXISTS, COL_END);
+		//	return "0xdeadbeef Local copy already exists";
+			//break;
+		//case HTTP_IS_XDOMAIN:
+			//sprintf(code_string, "%s%u Is XDomain%s", COL_RED, HTTP_IS_XDOMAIN, COL_END);
+		//	return "
+			//break;
 		default:
-			sprintf(code_string, "%sUnknown HTTP Status Code (%u)%s", COL_RED, code, COL_END);
-			//return "Unknown http status code";
+			//sprintf(code_string, "%sUnknown (%u)%s", COL_RED, code, COL_END);
+			return "Unknown";
 	}
 
-	return code_string;
+	return "Unknown";
+
+//	return code_string;
 }
 
 ssize_t
@@ -1703,7 +1701,7 @@ http_response_header_len(buf_t *buf)
 }
 
 char *
-http_url_parse_host(char *url, char *host)
+URL_parse_host(char *url, char *host)
 {
 	char *p;
 	size_t url_len = strlen(url);
@@ -1752,7 +1750,7 @@ http_url_parse_host(char *url, char *host)
 }
 
 char *
-http_url_parse_page(char *url, char *page)
+URL_parse_page(char *url, char *page)
 {
 	char *p;
 	char *q;
@@ -1811,8 +1809,8 @@ http_url_parse_page(char *url, char *page)
  * @off: the offset from within the header to start search
  * @ret_off: offset where header found returned here
  */
-static int
-http_check_header_1_1(buf_t *buf, const char *name, off_t off, off_t *ret_off)
+int
+check_header_1_1(buf_t *buf, const char *name, off_t off, off_t *ret_off)
 {
 	assert(buf);
 	assert(name);
@@ -1932,8 +1930,8 @@ http_parse_header(buf_t *buf, struct http_header *head)
  * @buf: the buffer containing the HTTP header
  * @name: the name of the header (e.g., "Set-Cookie")
  */
-static char *
-http_fetch_header_1_1(buf_t *buf, const char *name, http_header_t *hh, off_t whence)
+char *
+fetch_header_1_1(buf_t *buf, const char *name, http_header_t *hh, off_t whence)
 {
 	assert(buf);
 	assert(name);
@@ -2009,7 +2007,7 @@ http_fetch_header_1_1(buf_t *buf, const char *name, http_header_t *hh, off_t whe
  * @hh The header field object.
  */
 int
-http_append_header_1_1(buf_t *buf, http_header_t *hh)
+append_header_1_1(buf_t *buf, http_header_t *hh)
 {
 	assert(buf);
 	assert(hh);
@@ -2079,7 +2077,6 @@ http_check_host(struct http_t *http)
 
 	return;
 }
-*/
 
 /**
  * Check if the HTTP connection has been closed.
@@ -2116,7 +2113,7 @@ http_connection_closed(struct http_t *http)
 }
 
 static int
-HTTP_init_obj(struct HTTP_private *private, uint64_t id)
+HTTP_init_object(struct HTTP_private *private, uint64_t id)
 {
 	char cache_name[64];
 	struct http_t *http;
@@ -2132,7 +2129,7 @@ HTTP_init_obj(struct HTTP_private *private, uint64_t id)
 			http_header_cache_ctor,
 			http_header_cache_dtor)))
 	{
-		fprintf(stderr, "private_init_obj: failed to create cache for HTTP header objects\n");
+		fprintf(stderr, "HTTP_init_object: failed to create cache for HTTP header objects\n");
 		goto fail;
 	}
 
@@ -2149,7 +2146,7 @@ HTTP_init_obj(struct HTTP_private *private, uint64_t id)
 			http_header_cache_ctor,
 			http_header_cache_dtor)))
 	{
-		fprintf(stderr, "private_init_obj: failed to create cache for HTTP cookie objects\n");
+		fprintf(stderr, "HTTP_init_object: failed to create cache for HTTP cookie objects\n");
 		goto fail_destroy_cache;
 	}
 
@@ -2164,8 +2161,8 @@ HTTP_init_obj(struct HTTP_private *private, uint64_t id)
  *	that all threads can see and share
  *	any dead links they found on a page.
  */
-	sprintf(_cache_name, "http_dead_link_cache-0x%lx", id);
-	if (!(private->dead_links = cache_create(
+	sprintf(cache_name, "http_dead_link_cache-0x%lx", id);
+	if (!(private->deadLinks = cache_create(
 			cache_name,
 			sizeof(http_dead_link_t),
 			0,
@@ -2180,7 +2177,7 @@ HTTP_init_obj(struct HTTP_private *private, uint64_t id)
  * XXX - Should also be shared by threads.
  */
 	sprintf(cache_name, "http_redirected_link_cache-0x%lx", id);
-	if (!(private->redirected = cache_create(
+	if (!(private->redirectedLinks = cache_create(
 			cache_name,
 			sizeof(http_redirected_t),
 			0,
@@ -2196,18 +2193,18 @@ HTTP_init_obj(struct HTTP_private *private, uint64_t id)
 	http->primary_host = calloc(HTTP_HOST_MAX+1, 1);
 	http->page = calloc(HTTP_URL_MAX+1, 1);
 	http->URL = calloc(HTTP_URL_MAX+1, 1);
-	http->redirectedURL = calloc(HTTP_URL_MAX+1, 1);
-	http->redirected = 0;
+	http->ops = &Methods_v1_1;
+	http->version = HTTP_VERSION_1_1;
 
 	if (buf_init(&http->conn.read_buf, HTTP_DEFAULT_READ_BUF_SIZE) < 0)
 	{
-		fprintf(stderr, "private_init_obj: failed to initialise read buf\n");
+		fprintf(stderr, "HTTP_init_object: failed to initialise read buf\n");
 		goto fail_destroy_cache;
 	}
 
 	if (buf_init(&http->conn.write_buf, HTTP_DEFAULT_WRITE_BUF_SIZE) < 0)
 	{
-		fprintf(stderr, "private_init_obj: failed to initialise write buf\n");
+		fprintf(stderr, "HTTP_init_object: failed to initialise write buf\n");
 		goto fail_release_mem;
 	}
 
@@ -2216,7 +2213,6 @@ HTTP_init_obj(struct HTTP_private *private, uint64_t id)
 	assert(http->primary_host);
 	assert(http->page);
 	assert(http->URL);
-	assert(http->redirectedURL);
 
 	return 0;
 
@@ -2228,8 +2224,8 @@ fail_destroy_cache:
 
 	cache_destroy(private->headers);
 	cache_destroy(private->cookies);
-	cache_destroy(private->dead_links);
-	cache_destroy(private->redirected);
+	cache_destroy(private->deadLinks);
+	cache_destroy(private->redirectedLinks);
 
 fail:
 	return -1;
@@ -2247,13 +2243,13 @@ HTTP_new(uint64_t id)
 
 	if (!private)
 	{
-		fprintf(stderr, "http_new: failed to allocate memory for new HTTP object\n");
+		_log("http_new: failed to allocate memory for new HTTP object\n");
 		goto fail;
 	}
 
-	if (private_init_obj(private, id) < 0)
+	if (HTTP_init_object(private, id) < 0)
 	{
-		fprintf(stderr, "http_new: failed to initialise HTTP object\n");
+		_log("http_new: failed to initialise HTTP object\n");
 		goto fail;
 	}
 
@@ -2276,7 +2272,6 @@ HTTP_delete(struct http_t *http)
 	free(http->primary_host);
 	free(http->conn.host_ipv4);
 	free(http->URL);
-	//free(http->redirectedURL);
 
 	cache_clear_all(private->headers);
 	cache_destroy(private->headers);
@@ -2284,11 +2279,11 @@ HTTP_delete(struct http_t *http)
 	cache_clear_all(private->cookies);
 	cache_destroy(private->cookies);
 
-	cache_clear_all(private->dead_links);
-	cache_destroy(private->dead_links);
+	cache_clear_all(private->deadLinks);
+	cache_destroy(private->deadLinks);
 
-	cache_clear_all(private->redirected);
-	cache_destroy(private->redirected);
+	cache_clear_all(private->redirectedLinks);
+	cache_destroy(private->redirectedLinks);
 
 	buf_destroy(&http->conn.read_buf);
 	buf_destroy(&http->conn.write_buf);
