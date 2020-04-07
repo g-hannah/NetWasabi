@@ -56,21 +56,11 @@
 
 #define HTTP_ALIGN_SIZE(s) (((s) + 0xf) & ~(0xf))
 
-typedef struct http_link_t
-{
-	char *url;
-	int nr_requests;
-	struct http_link_t *left;
-	struct http_link_t *right;
-} http_link_t;
-
-typedef struct http_state_t
-{
-	int nr_requests; /* total number page requests we've sent */
-	int nr_links; /* total number links we've reaped */
-	http_link_t *head;
-	char *base_page; /* website specified by user */
-} http_state_t;
+/*
+ * Allow callers to register callbacks, for example
+ * to be called on certain HTTP codes and whatnot.
+ */
+//typedef void *(*HTTP_callback_t)(struct http_t *, void *);
 
 typedef struct http_header_t
 {
@@ -81,20 +71,6 @@ typedef struct http_header_t
 	size_t nsize; /* Amount of memory allocated for name */
 	size_t vsize; /* Amount of memory allocated for value */
 } http_header_t;
-
-struct http_field
-{
-	char *name;
-	char *value;
-	size_t nlen;
-	size_t vlen;
-	struct http_field *next;
-};
-
-struct http_header
-{
-	struct http_field *field;
-};
 
 #define http_socket(h) ((h)->conn.sock)
 #define http_tls(h) ((h)->conn.ssl)
@@ -119,23 +95,6 @@ enum request
 	GET = 1
 };
 
-struct HTTP_methods
-{
-	int (*send_request)(struct http_t *);
-	int (*recv_response)(struct http_t *);
-	int (*build_header)(struct http_t *);
-	int (*append_header)(buf_t *, http_header_t *);
-	int (*check_header)(buf_t *, const char *, off_t, off_t *);
-	char *(*fetch_header)(buf_t *, const char *, http_header_t *, off_t);
-	char *(*URL_parse_host)(char *, char *);
-	char *(*URL_parse_page)(char *, char *);
-};
-
-#define HTTP_VERSION_1_0 0x10000000u
-#define HTTP_VERSION_1_1 0x10100000u
-#define HTTP_VERSION_2_0 0x20000000u
-#define HTTP_DEFAULT_VERSION HTTP_VERSION_1_1
-
 struct http_t
 {
 	char *host;
@@ -149,9 +108,20 @@ struct http_t
 	struct conn conn;
 	enum request req_type;
 	int code;
-	int redirected;
-	char *redirectedURL;
 	struct HTTP_methods *ops;
+};
+
+struct HTTP_methods
+{
+	int (*send_request)(struct http_t *);
+	int (*recv_response)(struct http_t *);
+	int (*build_header)(struct http_t *);
+	int (*append_header)(buf_t *, http_header_t *);
+	int (*check_header)(buf_t *, const char *, off_t, off_t *);
+	char *(*fetch_header)(buf_t *, const char *, http_header_t *, off_t);
+	char *(*URL_parse_host)(char *, char *);
+	char *(*URL_parse_page)(char *, char *);
+	const char *(*code_as_string)(struct http_t *);
 };
 
 size_t httplen;
@@ -172,12 +142,13 @@ char *http_fetch_header(buf_t *, const char *, http_header_t *, off_t) __nonnull
 char *http_parse_host(char *, char *) __nonnull((1,2)) __wur;
 char *http_parse_page(char *, char *) __nonnull((1,2)) __wur;
 
-void http_check_host(struct http_t *) __nonnull((1));
 int http_connection_closed(struct http_t *) __nonnull((1)) __wur;
 */
 
-struct http_t *http_new(void) __wur;
+struct http_t *http_new(uint64_t) __wur;
 void http_delete(struct http_t *) __nonnull((1));
+
+void http_check_host(struct http_t *) __nonnull((1));
 
 /*
  * Connection-related functions

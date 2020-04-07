@@ -10,28 +10,28 @@
 #include "http.h"
 
 #define NETWASABI_BUILD		"0.0.3"
-#define NETWASABI_DIR			"NetWasabi_Crawled"
+#define NETWASABI_DIR		"NetWasabi_Crawled"
 
 #define COL_ORANGE	"\x1b[38;5;208m"
-#define COL_RED			"\x1b[38;5;9m"
-#define COL_BLUE		"\x1b[38;5;12m"
-#define COL_PINK		"\x1b[38;5;13m"
-#define COL_GREEN		"\x1b[38;5;10m"
-#define COL_BROWN		"\x1b[38;5;130m"
-#define COL_DARKCYAN "\x1b[38;5;23m"
+#define COL_RED		"\x1b[38;5;9m"
+#define COL_BLUE	"\x1b[38;5;12m"
+#define COL_PINK	"\x1b[38;5;13m"
+#define COL_GREEN	"\x1b[38;5;10m"
+#define COL_BROWN	"\x1b[38;5;130m"
+#define COL_DARKCYAN	"\x1b[38;5;23m"
 #define COL_PURPLE	"\x1b[38;5;5m"
-#define COL_LEMON		"\x1b[38;5;228m"
-#define COL_LIGHTRED "\x1b[38;5;204m"
-#define COL_LIGHTBLUE "\x1b[38;5;27m"
-#define COL_LIGHTGREEN "\x1b[38;5;46m"
-#define COL_LIGHTGREY "\x1b[38;5;250m"
-#define COL_LIGHTPURPLE "\x1b[38;5;141m"
-#define COL_DARKRED "\x1b[38;5;160m"
-#define COL_DARKGREY "\x1b[38;5;243m"
-#define COL_DARKBLUE "\x1b[38;5;20m"
-#define COL_DARKORANGE "\x1b[38;5;202m"
-#define COL_DARKGREEN "\x1b[38;5;28m"
-#define COL_END			"\x1b[m"
+#define COL_LEMON	"\x1b[38;5;228m"
+#define COL_LIGHTRED	"\x1b[38;5;204m"
+#define COL_LIGHTBLUE	"\x1b[38;5;27m"
+#define COL_LIGHTGREEN	"\x1b[38;5;46m"
+#define COL_LIGHTGREY	"\x1b[38;5;250m"
+#define COL_LIGHTPURPLE	"\x1b[38;5;141m"
+#define COL_DARKRED	"\x1b[38;5;160m"
+#define COL_DARKGREY	"\x1b[38;5;243m"
+#define COL_DARKBLUE	"\x1b[38;5;20m"
+#define COL_DARKORANGE	"\x1b[38;5;202m"
+#define COL_DARKGREEN	"\x1b[38;5;28m"
+#define COL_END		"\x1b[m"
 
 /*
  * For correct drawing to the screen
@@ -175,6 +175,15 @@ struct url_types
 #define keep_tslash(n) ((n)->config.tslash)
 #define tslash_on(n) ((n)->config.tslash = 1)
 #define tslash_off(n) ((n)->config.tslash = 0)
+
+typedef struct HTTP_link
+{
+	char *URL;
+	size_t URL_len;
+	int nr_requests;
+	struct HTTP_link *left;
+	struct HTTP_link *right;
+} http_link_t;
 
 enum state
 {
