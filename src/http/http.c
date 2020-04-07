@@ -426,42 +426,6 @@ http_header_cache_dtor(void *hh)
 	return;
 }
 
-int
-http_link_cache_ctor(void *http_link)
-{
-	http_link_t *hl = (http_link_t *)http_link;
-	clear_struct(hl);
-
-	hl->url = nw_calloc(HTTP_URL_MAX+1, 1);
-
-	if (!hl->url)
-		return -1;
-
-	memset(hl->url, 0, HTTP_URL_MAX+1);
-
-	hl->left = NULL;
-	hl->right = NULL;
-
-	return 0;
-}
-
-void
-http_link_cache_dtor(void *http_link)
-{
-	assert(http_link);
-
-	http_link_t *hl = (http_link_t *)http_link;
-
-	if (hl->url)
-	{
-		free(hl->url);
-		hl->url = NULL;
-	}
-
-	clear_struct(hl);
-	return;
-}
-
 /**
  * Cache a dead link.
  *
