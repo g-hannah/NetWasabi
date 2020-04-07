@@ -92,9 +92,9 @@ http_connect(struct http_t *http)
 	update_connection_state(http, FL_CONNECTION_CONNECTING);
 
 	if (option_set(OPT_USE_TLS))
-		sock4.sin_port = htons(HTTPS_PORT_NR);
+		sock4.sin_port = htons(HTTPS_PORT);
 	else
-		sock4.sin_port = htons(HTTP_PORT_NR);
+		sock4.sin_port = htons(HTTP_PORT);
 
 	if ((http_socket(http) = socket(AF_INET, SOCK_STREAM, 0)) < 0)
 	{
@@ -207,9 +207,9 @@ http_reconnect(struct http_t *http)
 	update_connection_state(http, FL_CONNECTION_CONNECTING);
 
 	if (option_set(OPT_USE_TLS))
-		sock4.sin_port = htons(HTTPS_PORT_NR);
+		sock4.sin_port = htons(HTTPS_PORT);
 	else
-		sock4.sin_port = htons(HTTP_PORT_NR);
+		sock4.sin_port = htons(HTTP_PORT);
 
 	if ((http_socket(http) = socket(AF_INET, SOCK_STREAM, 0)) < 0)
 	{
