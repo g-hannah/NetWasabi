@@ -19,7 +19,8 @@
  * Gracefully handle 3xx/4xx/5xx codes.
  * (follow redirects automatically)
  *
- * Make the dead link cache global.
+ * Make the dead link and redirected link caches
+ * shareable among threads.
  *
  * Upgrade to handle HTTP 2.0
  *
@@ -27,7 +28,37 @@
  * which will allow us to be dynamic and use various
  * versions of the HTTP protocol.
  *
+ * Decouple this file and the netwasabi header
+ * because we want the internals of this module
+ * to be opaque and therefore reusable elsewhere.
+ *
+ * Create a hash bucket data structure for header
+ * fields so that it will be easy to consult
+ * whatever we are interested in later.
+ * (At the moment, we just search within the
+ * header each time we wish to know a value
+ * and save it temporarily in a struct).
  */
+
+/*
+ * Definitions related to HTTP 2.0
+ *
+ * This MUST be followed by a SETTINGS frame,
+ * which MAY be empty (RFC 7540)
+ */
+#define HTTP_2_0_CONNECTION_PREFACE_START_SEQUENCE "PRI * HTTP/2.0\r\n\r\nSM\r\n\r\n"
+#define HTTP_2_0_SETTINGS_MAX_FRAME_SIZE 1048576u // 2^20
+
+#define HTTP_UPGRADE_HEADER_FIELD_CLEAR	"Upgrade: h2c"
+#define HTTP_UPGRADE_HEADER_FIELD_TLS	"Upgrade: h2"
+
+struct HTTP_frame
+{
+	uint32_t len:24,
+	uint32_t type:8;
+	uint8_t flags;
+	uint32_t streamId;
+} __attribute__((packed));
 
 #define HTTP_SKIP_HOST_PART(PTR, URL)\
 do {\
@@ -50,6 +81,8 @@ do {\
 } while (0)
 
 #define HTTP_private(h) (struct HTTP_private *)(h)
+
+#define set_verb(h, v) ((h)->verb = (v))
 
 #define HTTP_SMALL_READ_BLOCK 8
 #define HTTP_MAX_WAIT_TIME 6
@@ -146,8 +179,8 @@ struct HTTP_dead_link
  */
 struct HTTP_redirected
 {
-	char *originalURL; // The URL that elicits an HTTP redirect
-	char *currentURL; // The URL found in the Location header field
+	char *fromURL; // The URL that elicits an HTTP redirect
+	char *toURL; // The URL found in the Location header field
 	time_t when; // When we first encountered the original URL
 };
 
@@ -343,6 +376,35 @@ HTTP_cache_dead_link(struct http_t *http, const char *URL, int code)
 	dl->timestamp = time(NULL);
 	++dl->times_seen;
 
+	return;
+
+fail:
+	_log("failed to obtain cache object for dead link");
+	return;
+}
+
+static void
+HTTP_cache_redirected(struct http_t *http, const char *from, const char *to)
+{
+	assert(http);
+	assert(from);
+	assert(to);
+
+	struct HTTP_private *private = HTTP_private(http);
+	http_redirected_t *rl = cache_alloc(private->redirected, private->rlPtr);
+
+	if (NULL == rl)
+		goto fail;
+
+	size_t fromLen = strlen(from);
+	size_t toLen = strlen(to);
+
+	memcpy((void *)rl->fromURL, (void *)from, fromLen < HTTP_URL_MAX ? fromLen : HTTP_URL_MAX);
+	memcpy((void *)rl->toURL, (void *)to, toLen < HTTP_URL_MAX ? toLen : HTTP_URL_MAX);
+	rl->when = time(NULL);
+
+fail:
+	_log("failed to obtain cache object for redirected link");
 	return;
 }
 
@@ -677,6 +739,8 @@ http_send_request_1_1(struct http_t *http)
 	buf_t *buf = &http->conn.write_buf;
 
 	buf_clear(buf);
+
+	set_verb(http, GET);
 	build_request_header_1_1(http);
 
 	if (option_set(OPT_USE_TLS))
@@ -836,7 +900,7 @@ read_bytes(struct http_t *http, size_t toread)
  *
  */
 static void
-private_read_until_next_chunk_size(struct http_t *http, buf_t *buf, char **cur_pos)
+read_until_next_chunk_size(struct http_t *http, buf_t *buf, char **cur_pos)
 {
 	assert(http);
 	assert(buf);
@@ -985,7 +1049,7 @@ do_chunked_recv(struct http_t *http)
 		return -1;
 	}
 
-	private_read_until_next_chunk_size(http, buf, &p);
+	read_until_next_chunk_size(http, buf, &p);
 
 	while (1)
 	{
@@ -1108,7 +1172,7 @@ do_chunked_recv(struct http_t *http)
 		if (overread >= chunk_size)
 		{
 			p = (e + save_size);
-			private_read_until_next_chunk_size(http, buf, &p);
+			read_until_next_chunk_size(http, buf, &p);
 		}
 		else
 		{
@@ -1133,7 +1197,7 @@ do_chunked_recv(struct http_t *http)
  * \r is/will be in the "\r\nchunk_size\r\n" sequence.
  */
 		p = (buf->buf_head + chunk_offset + save_size);
-		private_read_until_next_chunk_size(http, buf, &p);
+		read_until_next_chunk_size(http, buf, &p);
 	}
 
 	_log("Returning %lu from %s\n", total_bytes, __func__);
@@ -1262,13 +1326,14 @@ http_recv_response_1_1(struct http_t *http)
 	size_t clen;
 	size_t overread;
 	ssize_t bytes;
-	int rv = -1;
-	int http_status_code;
+	int retVal = -1;
+	int code = 0;
 	int total_bytes = 0;
+	char tmpURL[HTTP_URL_MAX];
 	http_header_t *content_len = NULL;
 	http_header_t *transfer_enc = NULL;
 	buf_t *buf = &http->conn.read_buf;
-	struct HTTP_private *private = (struct HTTP_private *)http;
+	struct HTTP_private *private = HTTP_private(http);
 
 /*
  * Set the (ssl) socket to non-blocking.
@@ -1311,28 +1376,39 @@ __retry:
 	buf_clear(&http->conn.read_buf);
 	assert(http->conn.read_buf.data_len == 0);
 
-	rv = read_until_eoh(http, &p);
+	retVal = read_until_eoh(http, &p);
 
-	if (rv < 0 || HTTP_OPERATION_TIMEOUT == rv)
+	if (retVal < 0 || HTTP_OPERATION_TIMEOUT == retVal)
 	{
-		_log("read_until_eoh() returned %d\n", rv);
+		_log("read_until_eoh() returned %d\n", retVal);
 		goto fail_dealloc;
 	}
 
-	total_bytes += rv;
-	rv = -1;
+	total_bytes += retVal;
+	retVal = -1;
 
 /*
  * If the response header has any Set-Cookie header fields, then
  * clear all current cookie objects from the cache and extract
  * the new one(s) from the header and cache them.
  */
-	private_check_cookies(http);
+	check_cookies(http);
 
-	http_status_code = http_status_code_int(buf);
-	_log("got status code %d\n", http_status_code);
+	code = http_status_code_int(buf);
+	_log("got status code %d\n", code);
 
-	if (HTTP_OK != http_status_code)
+	http->code = code;
+
+/*
+ * With HEAD, always send back the code
+ * we received. With a GET, we will follow
+ * redirects and resend the request
+ * transparently.
+ */ 
+	if (HEAD == http->verb)
+		goto out_dealloc;
+
+	if (HTTP_OK != code)
 	{
 		char *__eoh = HTTP_EOH(&http->conn.read_buf);
 		if (__eoh)
@@ -1342,37 +1418,17 @@ __retry:
 /*
  * Check for a URL redirect status code.
  */
-	switch((unsigned int)http_status_code)
+	switch((unsigned int)code)
 	{
 		case HTTP_OK:
-			if (HEAD == http->req_type)
-			{
-				http->code = HTTP_OK;
-				goto out_dealloc;
-			}
 			break;
 		case HTTP_FOUND:
 		case HTTP_MOVED_PERMANENTLY:
 		case HTTP_SEE_OTHER:
 /*
- * We want to avoid resending requests for URLs we come by in pages
- * that are being redirected. Before we request any URLs, we are
- * checking to see if we have already archived the page. If we archive
- * a local copy of the page but use the _redirected_ URL, then we will
- * ask for the old URL in the future if we come across it.
- *
- * Set redirected flag to non-zero, and save the current URL in REDIRECTEDURL
- * so that when archiving, we can archive using RED_URL. That way, in
- * future when we are checking if we have already archived a URL, we will
- * correctly see that we have (assuming future URLs for this page are
- * still using the obsolete URL, which seems to be the case).
- *
- * If it's a HEAD request, just send back HTTP_OK. If it's a GET request,
- * resend the request here with the new URL location and then jump above
- * to the label __RETRY.
+ * Cache the URL that caused the redirect.
  */
-			http->redirected = 1;
-			strcpy(http->redirectedURL, http->URL);
+			memcpy((void *)tmpURL, (void *)http->URL, strlen(http->URL));
 
 			if (set_new_location(http) < 0)
 			{
@@ -1380,21 +1436,12 @@ __retry:
 				goto fail_dealloc;
 			}
 
-			if (HEAD == http->req_type)
-			{
-				http->code = HTTP_OK;
-				goto out_dealloc;
-			}
-/*
- * If we responded to a HEAD request and set the new URL above,
- * then we really shouldn't get here with a following GET request.
- * But let's just keep this here in case somehow or other we
- * get here with a GET request.
- */
+			HTTP_cache_redirected_link(http, tmpURL, http->URL);
 			buf_clear(&http->conn.write_buf);
 			assert(http_wbuf(http).data_len == 0);
+			set_verb(http, GET);
 
-			if (http_send_request(http, GET) < 0)
+			if (http->ops->send_request(http) < 0)
 			{
 				_log("failed to resend GET request after setting new Location\n");
 				goto fail_dealloc;
@@ -1402,21 +1449,16 @@ __retry:
 
 			goto __retry;
 			break;
+		case HTTP_BAD_REQUEST: // cache as dead link for timebeing.
+		case HTTP_NOT_FOUND:
+			HTTP_cache_dead_link(http, http->URL, code);
 		default:
 			break;
 	}
 
-/*
- * If it was a HEAD request, then we have
- * nothing more to read from the socket.
- */
-	if (HEAD == http->req_type)
-		goto out_dealloc;
-
-
-	if (http_fetch_header(&http->conn.read_buf, "Transfer-Encoding", transfer_enc, (off_t)0))
+	if (http->ops->fetch_header(&http->conn.read_buf, "Transfer-Encoding", transfer_enc, (off_t)0))
 	{
-		if (!strncmp("chunked", transfer_enc->value, transfer_enc->vlen))
+		if (!strncasecmp("chunked", transfer_enc->value, transfer_enc->vlen))
 		{
 			if (do_chunked_recv(http) == -1)
 			{
@@ -1428,7 +1470,7 @@ __retry:
 		}
 	}
 
-	if (http_fetch_header(buf, "Content-Length", content_len, (off_t)0))
+	if (http->ops->fetch_header(buf, "Content-Length", content_len, (off_t)0))
 	{
 		clen = strtoul(content_len->value, NULL, 0);
 
@@ -1465,6 +1507,18 @@ __retry:
 	}
 	else
 	{
+		_log("No Content-Length or chunked transfer encoding header fields");
+		total_bytes = 0;
+	}
+/*
+ * We shouldn't really get here, because we SHOULD
+ * be getting a Content-Length header and if not
+ * it would surely be sent chunked.
+ *
+ * The question is: should we really have this code
+ * here or should we return an error given the
+ * above...?
+ *
 	read_again:
 
 		bytes = 0;
@@ -1490,6 +1544,7 @@ __retry:
 			goto read_again;
 		}
 	}
+*/
 
 out_dealloc:
 	cache_dealloc(private->headers, (void *)content_len, &content_len);
