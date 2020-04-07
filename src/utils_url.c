@@ -281,8 +281,9 @@ is_xdomain(struct http_t *http, buf_t *url)
 }
 
 int
-local_archive_exists(char *link)
+local_archive_exists(struct http_t *http, char *link)
 {
+	assert(http);
 	assert(link);
 
 	buf_t tmp;
