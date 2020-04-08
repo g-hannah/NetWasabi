@@ -61,12 +61,6 @@ static cache_t *Dead_URL_cache;
 struct cache_ctx cache1;
 struct cache_ctx cache2;
 
-#ifdef DEBUG
-int WDEBUG = 1;
-#else
-int WDEBUG = 0;
-#endif
-
 #define WLOG_FILE "./fast_mode_log.txt"
 FILE *wlogfp = NULL;
 
@@ -89,9 +83,7 @@ catch_sigpipe(int signo)
 static void
 wlog(const char *fmt, ...)
 {
-	if (!WDEBUG)
-		return;
-
+#ifdef DEBUG
 	va_list args;
 
 	va_start(args, fmt);
@@ -99,7 +91,9 @@ wlog(const char *fmt, ...)
 	va_end(args);
 
 	fflush(wlogfp);
-
+#else
+	(void)fmt;
+#endif
 	return;
 }
 
