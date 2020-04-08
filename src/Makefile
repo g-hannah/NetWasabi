@@ -7,6 +7,7 @@ INCLUDE_DIR := ../include
 PRIMARY_DEPENDENCIES = \
 	$(INCLUDE_DIR)/buffer.h \
 	$(INCLUDE_DIR)/cache.h \
+	$(INCLUDE_DIR)/cache_management.h \
 	$(INCLUDE_DIR)/fast_mode.h \
 	$(INCLUDE_DIR)/http.h \
 	$(INCLUDE_DIR)/graph.h \
@@ -18,6 +19,7 @@ PRIMARY_DEPENDENCIES = \
 
 PRIMARY_SOURCE = \
 	main.c \
+	cache_management.c \
 	fast_mode.c \
 	graph.c \
 	netwasabi.c \
