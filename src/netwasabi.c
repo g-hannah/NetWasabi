@@ -9,6 +9,7 @@
 #include <unistd.h>
 #include "buffer.h"
 #include "cache.h"
+#include "cache_management.h"
 #include "http.h"
 #include "malloc.h"
 #include "robots.h"
@@ -43,6 +44,8 @@ LOG(const char *fmt, ...)
 }
 */
 
+static cache_t *Dead_URL_cache;
+
 static void
 __ctor __dbg_init(void)
 {
@@ -65,42 +68,6 @@ __dtor __dbg_fini(void)
 	fclose(logfp);
 	logfp = NULL;
 
-	return;
-}
-
-int
-http_link_cache_ctor(void *http_link)
-{
-	http_link_t *hl = (http_link_t *)http_link;
-	clear_struct(hl);
-
-	hl->URL = nw_calloc(HTTP_URL_MAX+1, 1);
-
-	if (!hl->URL)
-		return -1;
-
-	memset(hl->URL, 0, HTTP_URL_MAX+1);
-
-	hl->left = NULL;
-	hl->right = NULL;
-
-	return 0;
-}
-
-void
-http_link_cache_dtor(void *http_link)
-{
-	assert(http_link);
-
-	http_link_t *hl = (http_link_t *)http_link;
-
-	if (hl->URL)
-	{
-		free(hl->URL);
-		hl->URL = NULL;
-	}
-
-	clear_struct(hl);
 	return;
 }
 
@@ -432,11 +399,11 @@ clear_error_msg(void)
 }
 
 void
-deconstruct_btree(http_link_t *root, cache_t *cache)
+deconstruct_btree(URL_t *root, cache_t *cache)
 {
 #pragma GCC diagnostic push
 #pragma GCC diagnostic ignored "-Wnonnull-compare"
-	if (root == (http_link_t *)NULL)
+	if (root == (URL_t *)NULL)
 	{
 		return;
 	}
@@ -878,7 +845,7 @@ __url_acceptable(struct http_t *http, struct cache_ctx *fctx, struct cache_ctx *
 		cache_lock(dctx->cache);
 
 		int cmp = 0;
-		http_link_t *nodePtr = dctx->root;
+		URL_t *nodePtr = dctx->root;
 
 		while (nodePtr)
 		{
@@ -926,8 +893,8 @@ __insert_link(struct cache_ctx *fctx, buf_t *url)
 
 	if (!(fctx->root))
 	{
-		http_link_t *r;
-		r = (http_link_t *)cache_alloc(fctx->cache, &fctx->root);
+		URL_t *r;
+		r = (URL_t *)cache_alloc(fctx->cache, &fctx->root);
 
 		strncpy(r->URL, url->buf_head, url->data_len);
 		r->URL[url->data_len] = 0;
@@ -955,13 +922,13 @@ __insert_link(struct cache_ctx *fctx, buf_t *url)
  * to iteratively insert nodes into the tree.
  */
 
-	http_link_t *nodePtr;
+	URL_t *nodePtr;
 	int cmp;
 	off_t nodePtr_offset;
 	void *nodePtr_stack = &nodePtr;
-	http_link_t *new_addr;
-	http_link_t *parent;
-	http_link_t *gparent;
+	URL_t *new_addr;
+	URL_t *parent;
+	URL_t *gparent;
 
 	nodePtr = fctx->root;
 	parent = gparent = NULL;
@@ -994,7 +961,7 @@ __insert_link(struct cache_ctx *fctx, buf_t *url)
  * (NPTR_STACK is pointing to the stack address of our local NPTR var).
  */
 				nodePtr_offset = (off_t)((char *)nodePtr - (char *)fctx->cache->cache);
-				new_addr = (http_link_t *)cache_alloc(fctx->cache, &nodePtr->left);
+				new_addr = (URL_t *)cache_alloc(fctx->cache, &nodePtr->left);
 				*((unsigned long *)nodePtr_stack) = (unsigned long)((char *)fctx->cache->cache + nodePtr_offset);
 
 				assert((char *)nodePtr >= (char *)fctx->cache->cache && ((char *)nodePtr - (char *)fctx->cache->cache) < fctx->cache->cache_size);
@@ -1305,12 +1272,24 @@ crawl(struct http_t *http, struct cache_ctx *cache1, struct cache_ctx *cache2)
 	int status_code = 0;
 	int i;
 	size_t len;
-	http_link_t *link;
+	URL_t *link;
+	Dead_URL_t *dead = NULL;
 
 	tslash_off(&nwctx);
 
 	cache1->state = DRAINING;
 	cache2->state = FILLING;
+
+	if (!(Dead_URL_cache = cache_create(
+			"dead_url_cache",
+			sizeof(Dead_URL_t),
+			0,
+			Dead_URL_cache_ctor,
+			Dead_URL_cache_dtor)))
+	{
+		fprintf(stderr, "crawl: failed to create dead url cache\n");
+		goto fail;
+	}
 
 	while (1)
 	{
@@ -1323,7 +1302,7 @@ crawl(struct http_t *http, struct cache_ctx *cache1, struct cache_ctx *cache2)
  */
 		if (cache1->state == DRAINING)
 		{
-			link = (http_link_t *)cache1->cache->cache;
+			link = (URL_t *)cache1->cache->cache;
 			nr_links = cache_nr_used(cache1->cache);
 
 			deconstruct_btree(cache2->root, cache2->cache);
@@ -1339,7 +1318,7 @@ crawl(struct http_t *http, struct cache_ctx *cache1, struct cache_ctx *cache2)
 		}
 		else
 		{
-			link = (http_link_t *)cache2->cache->cache;
+			link = (URL_t *)cache2->cache->cache;
 			nr_links = cache_nr_used(cache2->cache);
 
 			deconstruct_btree(cache1->root, cache1->cache);
@@ -1376,6 +1355,11 @@ crawl(struct http_t *http, struct cache_ctx *cache1, struct cache_ctx *cache2)
 				continue;
 			}
 
+			if ((dead = search_dead_URL(Dead_URL_cache, link->URL)))
+			{
+				continue;
+			}
+
 			assert(len < HTTP_URL_MAX);
 			strcpy(http->URL, link->URL);
 
@@ -1402,60 +1386,17 @@ crawl(struct http_t *http, struct cache_ctx *cache1, struct cache_ctx *cache2)
 				goto fail;
 
 			++(link->nr_requests);
-/*
-	XXX - All of this is taken care of in the HTTP module, as it should be!
 
-			switch((unsigned int)status_code)
+			switch(http->code)
 			{
 				case HTTP_OK:
-				case HTTP_GONE:
-				case HTTP_NOT_FOUND: // don't want to keep requesting the link and getting 404, so just archive it
 					break;
-
-				case HTTP_BAD_REQUEST:
-
-					buf_clear(&http_wbuf(http));
-					buf_clear(&http_rbuf(http));
-
-					http_reconnect(http);
-
+				case HTTP_NOT_FOUND:
+					cache_dead_URL(Dead_URL_cache, http->URL, http->code);
 					goto next;
-					break;
-				case HTTP_METHOD_NOT_ALLOWED:
-				case HTTP_FORBIDDEN:
-				case HTTP_INTERNAL_ERROR:
-				case HTTP_BAD_GATEWAY:
-				case HTTP_SERVICE_UNAV:
-				case HTTP_GATEWAY_TIMEOUT:
-
-					buf_clear(&http_wbuf(http));
-					buf_clear(&http_rbuf(http));
-
-					http_reconnect(http);
-
-					goto next;
-					break;
-				case HTTP_IS_XDOMAIN:
-				case HTTP_ALREADY_EXISTS:
-				case FL_HTTP_SKIP_LINK:
-					goto next;
-				case HTTP_OPERATION_TIMEOUT:
-
-					buf_clear(&http_rbuf(http));
-
-					if (!http->host[0])
-						strcpy(http->host, http->primary_host);
-
-					http_reconnect(http);
-
-					goto next;
-					break;
 				default:
-					put_error_msg("Unknown HTTP status code returned (%d)", status_code);
 					goto next;
 			}
-*/
-
 /*
  * If we haven't yet reached the threshold of URLs in the
  * FILLING cache (and thus fill is non-zero), then
@@ -1498,7 +1439,7 @@ crawl(struct http_t *http, struct cache_ctx *cache1, struct cache_ctx *cache2)
 
 			archive_page(http);
 
-		//next:
+		next:
 			++link;
 			--url_cnt;
 

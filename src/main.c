@@ -13,6 +13,7 @@
 #include <unistd.h>
 #include "buffer.h"
 #include "cache.h"
+#include "cache_management.h"
 #include "fast_mode.h"
 #include "http.h"
 #include "malloc.h"
@@ -84,42 +85,6 @@ static void
 __dtor __wr_fini(void)
 {
 	pthread_mutex_destroy(&screen_mutex);
-}
-
-static int
-http_link_cache_ctor(void *http_link)
-{
-	http_link_t *hl = (http_link_t *)http_link;
-	clear_struct(hl);
-
-	hl->URL = nw_calloc(HTTP_URL_MAX+1, 1);
-
-	if (!hl->URL)
-		return -1;
-
-	memset(hl->URL, 0, HTTP_URL_MAX+1);
-
-	hl->left = NULL;
-	hl->right = NULL;
-
-	return 0;
-}
-
-static void
-http_link_cache_dtor(void *http_link)
-{
-	assert(http_link);
-
-	http_link_t *hl = (http_link_t *)http_link;
-
-	if (hl->URL)
-	{
-		free(hl->URL);
-		hl->URL = NULL;
-	}
-
-	clear_struct(hl);
-	return;
 }
 
 #define THREAD_SLEEP_TIME_USEC 500000
@@ -488,6 +453,9 @@ main(int argc, char *argv[])
 		goto fail;
 	}
 
+	http->followRedirects = 1;
+	http->verb = GET;
+
 	url_len = strlen(argv[1]);
 	assert(url_len < HTTP_URL_MAX);
 	strcpy(http->URL, argv[1]);
@@ -504,21 +472,21 @@ main(int argc, char *argv[])
 	wbuf = &http_wbuf(http);
 
 	/*
-	 * Create a new cache for http_link_t objects.
+	 * Create a new cache for URL_t objects.
 	 */
 	cache1_ctx.cache = cache_create(
 			"http_link_cache",
-			sizeof(http_link_t),
+			sizeof(URL_t),
 			0,
-			http_link_cache_ctor,
-			http_link_cache_dtor);
+			URL_cache_ctor,
+			URL_cache_dtor);
 
 	cache2_ctx.cache = cache_create(
 			"http_link_cache2",
-			sizeof(http_link_t),
+			sizeof(URL_t),
 			0,
-			http_link_cache_ctor,
-			http_link_cache_dtor);
+			URL_cache_ctor,
+			URL_cache_dtor);
 
 	/*
 	 * Catch SIGINT and SIGQUIT so we can release cache memory, etc.

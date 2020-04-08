@@ -283,7 +283,7 @@ worker_crawl(void *args)
 		goto thread_fail;
 	}
 
-	http->followRedirected = 1;
+	http->followRedirects = 1;
 	http->verb = GET;
 
 	strcpy(http->URL, main_url);
@@ -369,7 +369,7 @@ worker_crawl(void *args)
 		link = __get_next_link(cache1.state == DRAINING ? &cache1 : &cache2);
 
 		cache_lock(Dead_URL_cache);
-		Dead_URL_t *dead = search_dead_link(Dead_URL_cache, link->URL);
+		Dead_URL_t *dead = search_dead_URL(Dead_URL_cache, link->URL);
 
 		if (dead)
 		{
@@ -450,11 +450,11 @@ worker_crawl(void *args)
 				break;
 			case HTTP_NOT_FOUND:
 				cache_lock(Dead_URL_cache);
-				cache_dead_URL(Dead_URL_cache, http->URL);
+				cache_dead_URL(Dead_URL_cache, http->URL, http->code);
 				cache_unlock(Dead_URL_cache);
-				break;
+				//goto next;
 			default:
-				break;
+				goto next;
 		}
 
 /*
@@ -503,6 +503,7 @@ worker_crawl(void *args)
 
 		cache_unlock(draining);
 
+	next:
 	//check_reconnect:
 
 		pthread_mutex_lock(&recon_mtx);
