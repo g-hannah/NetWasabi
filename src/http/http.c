@@ -105,11 +105,6 @@ do {\
 #define CREATION_FLAGS O_RDWR|O_CREAT|O_TRUNC
 #define CREATION_MODE S_IRUSR|S_IWUSR
 
-/*
- * Forward declarations
- */
-typedef struct HTTP_dead_link http_dead_link_t;
-typedef struct HTTP_redirected http_redirected_t;
 
 /*
  * User gets struct http_t which does not
@@ -183,22 +178,6 @@ struct HTTP_methods Methods_v1_1 = {
 
 //struct HTTP_methods Methods_v2_0;
 
-
-
-/*
- * Cache dead links so that we can avoid
- * wasting network bandwith requesting
- * them again when we see their URL in
- * another page on the site.
- */
-struct HTTP_dead_link
-{
-	char *URL;
-	int code;
-	time_t timestamp;
-	int times_seen;
-};
-
 /*
  * Cache redirected URLs so that we can obtain
  * their current URL if we stumble upon another
@@ -265,125 +244,6 @@ _log(char *fmt, ...)
 	fflush(hlogfp);
 
 	return;
-}
-
-/**
- * Constructor for dead link cache objects.
- */
-static int
-http_dead_link_cache_ctor(void *dlObj)
-{
-	assert(dlObj);
-
-	http_dead_link_t *dl = (http_dead_link_t *)dlObj;
-
-	dl->URL = nw_calloc(HTTP_URL_MAX, 1);
-	dl->code = 0;
-	dl->timestamp = 0;
-	dl->times_seen = 0;
-
-	if (NULL == dl->URL)
-		return -1;
-
-	return 0;
-}
-
-/**
- * Destructor for dead linke cache objects.
- */
-static void
-http_dead_link_cache_dtor(void *dlObj)
-{
-	assert(dlObj);
-
-	http_dead_link_t *dl = (http_dead_link_t *)dlObj;
-
-	if (NULL != dl->URL)
-	{
-		free(dl->URL);
-		dl->URL = NULL;
-	}
-
-	dl->code = 0;
-	dl->timestamp = 0;
-	dl->times_seen = 0;
-
-	return;
-}
-
-static int
-http_redirected_cache_ctor(void *rlObj)
-{
-	assert(rlObj);
-
-	http_redirected_t *rl = (http_redirected_t *)rlObj;
-
-	rl->fromURL = calloc(HTTP_URL_MAX, 1);
-	rl->toURL = calloc(HTTP_URL_MAX, 1);
-
-	if (!rl->fromURL || !rl->toURL)
-		goto fail_dealloc;
-
-	rl->when = 0;
-
-	return 0;
-
-fail_dealloc:
-
-	if (NULL != rl->fromURL)
-		free(rl->fromURL);
-	if (NULL != rl->toURL)
-		free(rl->toURL);
-
-	return -1;
-}
-
-static void
-http_redirected_cache_dtor(void *rlObj)
-{
-	assert(rlObj);
-
-	http_redirected_t *rl = (http_redirected_t *)rlObj;
-
-	if (NULL != rl->fromURL)
-		free(rl->fromURL);
-	if (NULL != rl->toURL)
-		free(rl->toURL);
-
-	rl->when = 0;
-
-	return;
-}
-
-/**
- * Search the dead link cache for a URL.
- *
- * @http The HTTP object containing the URL.
- */
-http_dead_link_t *
-HTTP_search_dead_link(struct HTTP_private *private)
-{
-	assert(private);
-
-	http_dead_link_t *dead = NULL;
-	int objUsed = 0;
-	size_t URL_len = strlen(((struct http_t *)private)->URL);
-
-	dead = (http_dead_link_t *)private->deadLinks->cache;
-
-	while (1)
-	{
-		while ((objUsed = cache_obj_used(private->deadLinks, (void *)dead)) != 0)
-			++dead;
-
-		if (objUsed < 0)
-			break;
-
-		if (!memcmp((void *)dead->URL, (void *)((struct http_t *)private)->URL, URL_len))
-			return dead; 
-	}
-
-	return NULL;
 }
 
 /**
@@ -691,24 +551,16 @@ send_request_1_1(struct http_t *http)
 	assert(http);
 
 	struct HTTP_private *private = (struct HTTP_private *)http;
-	http_dead_link_t *dead = NULL;
-
-/*
- * Link is dead, so return the HTTP code from dead link object.
- */
-	if ((dead = HTTP_search_dead_link(private)))
-	{
-		http->code = dead->code;
-		return 0;
-	}
 
 	buf_t *buf = &http->conn.write_buf;
-
 	buf_clear(buf);
 
-	set_verb(http, GET);
+	//set_verb(http, GET);
 	build_request_header_1_1(http);
 
+/*
+ * XXX Need to decouple this from NetWasabi options.
+ */
 	if (option_set(OPT_USE_TLS))
 	{
 		if (buf_write_tls(http->conn.ssl, buf) == -1)
@@ -1391,6 +1243,9 @@ __retry:
 		case HTTP_FOUND:
 		case HTTP_MOVED_PERMANENTLY:
 		case HTTP_SEE_OTHER:
+
+			if (!http->followRedirects)
+				break;
 /*
  * Cache the URL that caused the redirect.
  */
@@ -1402,7 +1257,6 @@ __retry:
 				goto fail_dealloc;
 			}
 
-			HTTP_cache_redirected_link(http, tmpURL, http->URL);
 			buf_clear(&http->conn.write_buf);
 			assert(http_wbuf(http).data_len == 0);
 			set_verb(http, GET);
@@ -1415,11 +1269,10 @@ __retry:
 
 			goto __retry;
 			break;
-		case HTTP_BAD_REQUEST: // cache as dead link for timebeing.
+		case HTTP_BAD_REQUEST:
 		case HTTP_NOT_FOUND:
-			HTTP_cache_dead_link(http, http->URL, code);
 		default:
-			break;
+			goto out_dealloc;
 	}
 
 	if (http->ops->fetch_header(&http->conn.read_buf, "Transfer-Encoding", transfer_enc, (off_t)0))
@@ -1547,7 +1400,7 @@ http_status_code_int(buf_t *buf)
 	char *q = NULL;
 	char *tail = buf->buf_tail;
 	char *head = buf->buf_head;
-	static char code_str[16];
+	char code_str[16];
 
 	/*
 	 * HTTP/1.1 200 OK\r\n
