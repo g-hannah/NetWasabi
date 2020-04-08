@@ -10,6 +10,7 @@
 #include <unistd.h>
 #include "buffer.h"
 #include "cache.h"
+#include "cache_management.h"
 #include "fast_mode.h"
 #include "http.h"
 #include "malloc.h"
@@ -55,6 +56,7 @@ static struct sigaction __new_sigpipe;
 
 static cache_t *filling;
 static cache_t *draining;
+static cache_t *Dead_URL_cache;
 
 struct cache_ctx cache1;
 struct cache_ctx cache2;
@@ -67,42 +69,6 @@ int WDEBUG = 0;
 
 #define WLOG_FILE "./fast_mode_log.txt"
 FILE *wlogfp = NULL;
-
-static int
-http_link_cache_ctor(void *http_link)
-{
-	http_link_t *hl = (http_link_t *)http_link;
-	clear_struct(hl);
-
-	hl->URL = nw_calloc(HTTP_URL_MAX+1, 1);
-
-	if (!hl->URL)
-		return -1;
-
-	memset(hl->URL, 0, HTTP_URL_MAX+1);
-
-	hl->left = NULL;
-	hl->right = NULL;
-
-	return 0;
-}
-
-static void
-http_link_cache_dtor(void *http_link)
-{
-	assert(http_link);
-
-	http_link_t *hl = (http_link_t *)http_link;
-
-	if (hl->URL)
-	{
-		free(hl->URL);
-		hl->URL = NULL;
-	}
-
-	clear_struct(hl);
-	return;
-}
 
 /**
  * A worker may write to a broken pipe after the
@@ -244,10 +210,10 @@ worker_signal_recon(void)
  * @ctx: the cache context containing the cache and the binary tree root
  */
 
-static http_link_t *__get_next_link(struct cache_ctx *ctx)
+static URL_t *__get_next_link(struct cache_ctx *ctx)
 {
-	http_link_t *nptr = ctx->root;
-	http_link_t *parent = NULL;
+	URL_t *nptr = ctx->root;
+	URL_t *parent = NULL;
 
 	if (!nptr)
 		return NULL;
@@ -305,7 +271,7 @@ worker_crawl(void *args)
 {
 	struct worker_thread *wt = (struct worker_thread *)args;
 	char *main_url;
-	http_link_t *link = NULL;
+	URL_t *link = NULL;
 	struct http_t *http = NULL;
 	int status_code;
 
@@ -316,6 +282,9 @@ worker_crawl(void *args)
 		put_error_msg("failed to get new HTTP object");
 		goto thread_fail;
 	}
+
+	http->followRedirected = 1;
+	http->verb = GET;
 
 	strcpy(http->URL, main_url);
 
@@ -399,6 +368,18 @@ worker_crawl(void *args)
 
 		link = __get_next_link(cache1.state == DRAINING ? &cache1 : &cache2);
 
+		cache_lock(Dead_URL_cache);
+		Dead_URL_t *dead = search_dead_link(Dead_URL_cache, link->URL);
+
+		if (dead)
+		{
+			cache_unlock(Dead_URL_cache);
+			cache_unlock(draining);
+			continue;
+		}
+
+		cache_unlock(Dead_URL_cache);
+
 		if (!link || nr_draining <= 0)
 		{
 			wlog("[0x%lx] __get_next_link gave me NULL (nr_draining = %d)\n", pthread_self());
@@ -462,51 +443,19 @@ worker_crawl(void *args)
 		http->ops->recv_response(http);
 
 		update_current_url(link->URL);
-/*
-		switch((unsigned int)status_code)
+
+		switch(http->code)
 		{
 			case HTTP_OK:
-			case HTTP_GONE:
+				break;
 			case HTTP_NOT_FOUND:
-				break;
-			case HTTP_BAD_REQUEST:
-				buf_clear(&http_wbuf(http));
-				buf_clear(&http_rbuf(http));
-
-				http_reconnect(http);
-
-				break;
-			case HTTP_METHOD_NOT_ALLOWED:
-			case HTTP_FORBIDDEN:
-			case HTTP_INTERNAL_ERROR:
-			case HTTP_BAD_GATEWAY:
-			case HTTP_SERVICE_UNAV:
-			case HTTP_GATEWAY_TIMEOUT:
-				buf_clear(&http_wbuf(http));
-				buf_clear(&http_rbuf(http));
-
-				http_reconnect(http);
-
-				break;
-			case HTTP_IS_XDOMAIN:
-			case HTTP_ALREADY_EXISTS:
-			case FL_HTTP_SKIP_LINK:
-				break;
-			case HTTP_OPERATION_TIMEOUT:
-
-				buf_clear(&http_rbuf(http));
-
-				if (!http->host[0])
-					strcpy(http->host, http->primary_host);
-
-				http_reconnect(http);
-
+				cache_lock(Dead_URL_cache);
+				cache_dead_URL(Dead_URL_cache, http->URL);
+				cache_unlock(Dead_URL_cache);
 				break;
 			default:
-				wlog("[0x%lx] Received erroneous status code %d\n", pthread_self(), status_code);
-				goto check_reconnect;
+				break;
 		}
-*/
 
 /*
  * The global volatile FILL variable controls whether
@@ -670,10 +619,10 @@ do_fast_mode(char *remote_host)
 
 	if (!(cache1.cache = cache_create(
 			"fast_mode_url_cache1",
-			sizeof(http_link_t),
+			sizeof(URL_t),
 			0,
-			http_link_cache_ctor,
-			http_link_cache_dtor)))
+			URL_cache_ctor,
+			URL_cache_dtor)))
 	{
 		fprintf(stderr, "__fast_mode_init: failed to create cache1\n");
 		goto fail;
@@ -681,14 +630,41 @@ do_fast_mode(char *remote_host)
 
 	if (!(cache2.cache = cache_create(
 			"fast_mode_url_cache2",
-			sizeof(http_link_t),
+			sizeof(URL_t),
 			0,
-			http_link_cache_ctor,
-			http_link_cache_dtor)))
+			URL_cache_ctor,
+			URL_cache_dtor)))
 	{
 		fprintf(stderr, "__fast_mode_init: failed to create cache2\n");
 		goto fail;
 	}
+
+	if (!(Dead_URL_cache = cache_create(
+			"dead_url_cache",
+			sizeof(Dead_URL_t),
+			0,
+			Dead_URL_cache_ctor,
+			Dead_URL_cache_dtor)))
+	{
+		fprintf(stderr, "__fast_mode_init: failed to create dead url cache\n");
+		goto fail;
+	}
+
+#if 0
+//	We're going to be asking the HTTP module
+//	to automatically follow URL redirects.
+
+	if (!(Redirected_URL_cache = cache_create(
+			"redirected_url_cache",
+			sizeof(Redirected_URL_t),
+			0,
+			Redirected_URL_cache_ctor,
+			Redirected_URL_cache_dtor)))
+	{
+		fprintf(stderr, "__fast_mode_init: failed to create redirected url cache\n");
+		goto fail;
+	}
+#endif
 
 	pthread_barrier_init(&start_barrier, NULL, FAST_MODE_NR_WORKERS);
 	pthread_mutex_init(&eoc_mtx, NULL);
@@ -828,6 +804,8 @@ do_fast_mode(char *remote_host)
 	cache_clear_all(cache2.cache);
 	cache_destroy(cache1.cache);
 	cache_destroy(cache2.cache);
+	cache_clear_all(Dead_URL_cache);
+	cache_destroy(Dead_URL_cache);
 
 	return 0;
 
@@ -850,6 +828,9 @@ do_fast_mode(char *remote_host)
 
 	if (cache2.cache)
 		cache_destroy(cache2.cache);
+
+	if (Dead_URL_cache)
+		cache_destroy(Dead_URL_cache);
 
 	return -1;
 }
