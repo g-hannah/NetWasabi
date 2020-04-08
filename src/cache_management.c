@@ -1,4 +1,5 @@
 #include <assert.h>
+#include "cache_management.h"
 #include "netwasabi.h"
 
 /*
@@ -57,7 +58,10 @@ Dead_URL_cache_ctor(void *dlObj)
 
 	Dead_URL_t *dl = (Dead_URL_t *)dlObj;
 
-	dl->URL = nw_calloc(HTTP_URL_MAX, 1);
+	dl->URL = calloc(HTTP_URL_MAX, 1);
+
+	assert(dl->URL);
+
 	dl->code = 0;
 	dl->timestamp = 0;
 	dl->times_seen = 0;
@@ -92,9 +96,10 @@ Dead_URL_cache_dtor(void *dlObj)
 }
 
 Dead_URL_t *
-HTTP_search_dead_link(cache_t *cache, const char *URL)
+search_dead_URL(cache_t *cache, const char *URL)
 {
-	assert(private);
+	assert(cache);
+	assert(URL);
 
 	Dead_URL_t *dead = NULL;
 	int objUsed = 0;
@@ -117,38 +122,61 @@ HTTP_search_dead_link(cache_t *cache, const char *URL)
 	return NULL;
 }
 
-int
-URL_cache_ctor(void *http_link)
+static Dead_URL_t dummy_dead_URL;
+
+void
+cache_dead_URL(cache_t *cache, const char *URL, int code)
 {
-	URL_t *hl = (URL_t *)http_link;
-	clear_struct(hl);
+	assert(cache);
+	assert(URL);
 
-	hl->URL = nw_calloc(HTTP_URL_MAX+1, 1);
+	Dead_URL_t *dead = cache_alloc(cache, &dummy_dead_URL);
+	if (!dead)
+		return;
 
-	if (!hl->URL)
+	memcpy((void *)dead->URL, (void *)URL, strlen(URL));
+	dead->code = code;
+	dead->timestamp = time(NULL);
+	dead->times_seen = 1;
+
+	dead = NULL;
+	return;
+}
+
+int
+URL_cache_ctor(void *urlObj)
+{
+	assert(urlObj);
+
+	URL_t *url = (URL_t *)urlObj;
+	clear_struct(url);
+
+	url->URL = calloc(HTTP_URL_MAX+1, 1);
+
+	if (!url->URL)
 		return -1;
 
-	memset(hl->URL, 0, HTTP_URL_MAX+1);
+	memset(url->URL, 0, HTTP_URL_MAX+1);
 
-	hl->left = NULL;
-	hl->right = NULL;
+	url->left = NULL;
+	url->right = NULL;
 
 	return 0;
 }
 
 void
-URL_cache_dtor(void *http_link)
+URL_cache_dtor(void *urlObj)
 {
-	assert(http_link);
+	assert(urlObj);
 
-	URL_t *hl = (URL_t *)http_link;
+	URL_t *url = (URL_t *)urlObj;
 
-	if (hl->URL)
+	if (url->URL)
 	{
-		free(hl->URL);
-		hl->URL = NULL;
+		free(url->URL);
+		url->URL = NULL;
 	}
 
-	clear_struct(hl);
+	clear_struct(url);
 	return;
 }
