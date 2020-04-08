@@ -62,7 +62,7 @@
  */
 //typedef void *(*HTTP_callback_t)(struct http_t *, void *);
 
-typedef struct http_header_t
+typedef struct HTTP_Header
 {
 	char *name;
 	char *value;
@@ -97,17 +97,17 @@ enum request
 
 struct http_t
 {
+	uint32_t version;
+	enum request verb;
+	struct conn conn;
+	int code;
+	int followRedirects;
+
 	char *host;
 	char *page;
 	char *URL;
 	char *primary_host;
 
-	uint32_t version;
-	enum request verb;
-
-	struct conn conn;
-	enum request req_type;
-	int code;
 	struct HTTP_methods *ops;
 };
 
