@@ -176,14 +176,29 @@ struct url_types
 #define tslash_on(n) ((n)->config.tslash = 1)
 #define tslash_off(n) ((n)->config.tslash = 0)
 
-typedef struct HTTP_link
+typedef struct URL_t
 {
 	char *URL;
 	size_t URL_len;
 	int nr_requests;
-	struct HTTP_link *left;
-	struct HTTP_link *right;
-} http_link_t;
+	struct URL_t *left;
+	struct URL_t *right;
+} URL_t;
+
+typedef struct Dead_URL
+{
+	char *URL;
+	int code;
+	time_t timestamp;
+	int times_seen;
+} Dead_URL_t;
+
+typedef struct Redirected_URL
+{
+	char *fromURL; // The URL that elicits an HTTP redirect
+	char *toURL; // The URL found in the Location header field
+	time_t when; // When we first encountered the original URL
+} Redirected_URL_t;
 
 enum state
 {
@@ -194,7 +209,7 @@ enum state
 struct cache_ctx
 {
 	cache_t *cache;
-	http_link_t *root;
+	URL_t *root;
 	enum state state;
 };
 
@@ -265,7 +280,7 @@ int check_local_dirs(struct http_t *, buf_t *) __nonnull((1,2)) __wur;
 void replace_with_local_urls(struct http_t *, buf_t *) __nonnull((1,2));
 int archive_page(struct http_t *) __nonnull((1)) __wur;
 int parse_links(struct http_t *, struct cache_ctx *, struct cache_ctx *) __nonnull((1,2,3)) __wur;
-void deconstruct_btree(http_link_t *, cache_t *) __nonnull((1,2));
+void deconstruct_btree(URL_t *, cache_t *) __nonnull((1,2));
 int do_request(struct http_t *) __nonnull((1)) __wur;
 
 int crawl(struct http_t *, struct cache_ctx *, struct cache_ctx *) __nonnull((1,2,3)) __wur;
