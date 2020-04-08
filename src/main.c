@@ -447,7 +447,7 @@ main(int argc, char *argv[])
 	buf_t *wbuf = NULL;
 
 #define MAIN_THREAD_ID 0x445248544e49414dul
-	if (!(http = http_new(MAIN_THREAD_ID)))
+	if (!(http = HTTP_new(MAIN_THREAD_ID)))
 	{
 		fprintf(stderr, "main: failed to obtain new HTTP object\n");
 		goto fail;
@@ -578,7 +578,7 @@ main(int argc, char *argv[])
 
 	out_disconnect:
 	http_disconnect(http);
-	http_delete(http);
+	HTTP_delete(http);
 
 	if (cache_nr_used(cache1_ctx.cache) > 0)
 		cache_clear_all(cache1_ctx.cache);
@@ -606,7 +606,7 @@ main(int argc, char *argv[])
 	fail_disconnect:
 	screen_updater_stop = 1;
 	http_disconnect(http);
-	http_delete(http);
+	HTTP_delete(http);
 
 	if (cache_nr_used(cache1_ctx.cache) > 0)
 		cache_clear_all(cache1_ctx.cache);
