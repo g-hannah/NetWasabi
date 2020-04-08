@@ -124,15 +124,11 @@ struct HTTP_private
  */
 	cache_t *headers;
 	cache_t *cookies;
-	cache_t *deadLinks;
-	cache_t *redirectedLinks;
 /*
  * The following are used to pass their addresses
  * to cache_alloc().
  */
 	http_header_t *hfPtr; // header field object pointer
-	http_dead_link_t *dlPtr; // dead link object pointer
-	http_redirected_t *rlPtr; // redirected link object pointer
 };
 
 /*
@@ -157,10 +153,6 @@ static char *fetch_header_1_1(buf_t *, const char *, http_header_t *, off_t);
 static char *URL_parse_host(char *, char *);
 static char *URL_parse_page(char *, char *);
 static const char *code_as_string(struct http_t *);
-
-static void HTTP_cache_redirected_link(struct http_t *, const char *, const char *);
-static http_dead_link_t *HTTP_search_dead_link(struct HTTP_private *);
-static void HTTP_cache_dead_link(struct http_t *, const char *, int);
 
 static int http_status_code_int(buf_t *) __nonnull((1));
 
@@ -225,25 +217,20 @@ FILE *hlogfp = NULL;
 
 #define LOG_FILE "./http_debug_log.txt"
 
-#ifdef DEBUG
-int _DEBUG = 1;
-#else
-int _DEBUG = 0;
-#endif
-
 static void
 _log(char *fmt, ...)
 {
+#ifdef DEBUG
 	va_list args;
-
-	if (!_DEBUG)
-		return;
 
 	va_start(args, fmt);
 	vfprintf(hlogfp, fmt, args);
 	va_end(args);
 
 	fflush(hlogfp);
+#else
+	(void)fmt;
+#endif
 
 	return;
 }
@@ -295,64 +282,6 @@ http_header_cache_dtor(void *hh)
 
 	clear_struct(ch);
 
-	return;
-}
-
-/**
- * Cache a dead link.
- *
- * @http The HTTP object in which the cache resides
- * @URL The URL to cache
- * @code The HTTP code that was received for the link (e.g., 404)
- */
-void
-HTTP_cache_dead_link(struct http_t *http, const char *URL, int code)
-{
-	assert(http);
-	assert(URL);
-	assert(strlen(URL) < HTTP_URL_MAX);
-
-	struct HTTP_private *private = (struct HTTP_private *)http;
-	http_dead_link_t *dl = NULL;
-
-	dl = cache_alloc(private->deadLinks, &private->dlPtr);
-	if (NULL == private->dlPtr)
-		goto fail;
-
-	strcpy(dl->URL, URL);
-	dl->code = code;
-	dl->timestamp = time(NULL);
-	++dl->times_seen;
-
-	return;
-
-fail:
-	_log("failed to obtain cache object for dead link");
-	return;
-}
-
-void
-HTTP_cache_redirected_link(struct http_t *http, const char *from, const char *to)
-{
-	assert(http);
-	assert(from);
-	assert(to);
-
-	struct HTTP_private *private = HTTP_private(http);
-	http_redirected_t *rl = cache_alloc(private->redirectedLinks, private->rlPtr);
-
-	if (NULL == rl)
-		goto fail;
-
-	size_t fromLen = strlen(from);
-	size_t toLen = strlen(to);
-
-	memcpy((void *)rl->fromURL, (void *)from, fromLen < HTTP_URL_MAX ? fromLen : HTTP_URL_MAX);
-	memcpy((void *)rl->toURL, (void *)to, toLen < HTTP_URL_MAX ? toLen : HTTP_URL_MAX);
-	rl->when = time(NULL);
-
-fail:
-	_log("failed to obtain cache object for redirected link");
 	return;
 }
 
@@ -532,7 +461,7 @@ build_request_header_1_1(struct http_t *http)
 
 	if (nrCookies)
 	{
-		struct http_header_t *cookieObj = (struct http_header_t *)((struct HTTP_private *)http)->cookies->cache;
+		http_header_t *cookieObj = (http_header_t *)((struct HTTP_private *)http)->cookies->cache;
 		int i;
 
 		for (i = 0; i < nrCookies; ++i)
@@ -552,7 +481,7 @@ send_request_1_1(struct http_t *http)
 {
 	assert(http);
 
-	struct HTTP_private *private = (struct HTTP_private *)http;
+	//struct HTTP_private *private = (struct HTTP_private *)http;
 
 	buf_t *buf = &http->conn.write_buf;
 	buf_clear(buf);
