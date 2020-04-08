@@ -38,6 +38,16 @@
  * (At the moment, we just search within the
  * header each time we wish to know a value
  * and save it temporarily in a struct).
+ *
+ * Move the dead link and redirected link caches
+ * out of this file. It is the responsability of
+ * the user of the module to do what they wish
+ * with the information on a URL returned from
+ * the HTTP module (404, etc). We should, like
+ * in the Java HTTP implementation, simply have
+ * a flag the user can set which will determine
+ * whether we automatically follow redirected
+ * links or just return the 3xx code.
  */
 
 #define HTTP_VERSION_1_0 0x10000000u
