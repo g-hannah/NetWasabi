@@ -11,6 +11,7 @@ TOP_DIR := src
 
 PRIMARY_OBJS := \
 	$(TOP_DIR)/main.o \
+	$(TOP_DIR)/cache_management.c \
 	$(TOP_DIR)/graph.o \
 	$(TOP_DIR)/fast_mode.o \
 	$(TOP_DIR)/netwasabi.o \
