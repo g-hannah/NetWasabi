@@ -157,6 +157,6 @@ void http_check_host(struct http_t *) __nonnull((1));
 int http_connect(struct http_t *) __nonnull((1)) __wur;
 void http_disconnect(struct http_t *) __nonnull((1));
 int http_reconnect(struct http_t *) __nonnull((1)) __wur;
-int http_switch_tls(struct http_t *) __nonnull((1)) __wur;
+int HTTP_upgrade_to_TLS(struct http_t *) __nonnull((1)) __wur;
 
 #endif /* !defined HTTP_H */
