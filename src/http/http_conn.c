@@ -117,7 +117,7 @@ http_connect(struct http_t *http)
 		goto fail_release_ainf;
 	}
 
-	if (http->usingSecure)
+	if (http->usingSecure)	
 	{
 /*
  * Calling __init_openssl() more than once (multithreaded)
@@ -159,7 +159,7 @@ http_disconnect(struct http_t *http)
 
 	update_connection_state(http, FL_CONNECTION_DISCONNECTED);
 
-	if (option_set(OPT_USE_TLS))
+	if (http->usingSecure)
 	{
 		SSL_CTX_free(http->conn.ssl_ctx);
 		SSL_free(http_tls(http));
@@ -181,7 +181,7 @@ http_reconnect(struct http_t *http)
 	close(http_socket(http));
 	http_socket(http) = -1;
 
-	if (option_set(OPT_USE_TLS))
+	if (http->usingSecure)
 	{
 		SSL_CTX_free(http->conn.ssl_ctx);
 		SSL_free(http_tls(http));
@@ -213,7 +213,7 @@ http_reconnect(struct http_t *http)
 
 	update_connection_state(http, FL_CONNECTION_CONNECTING);
 
-	if (option_set(OPT_USE_TLS))
+	if (http->usingSecure)
 		sock4.sin_port = htons(HTTPS_PORT);
 	else
 		sock4.sin_port = htons(HTTP_PORT);
@@ -230,7 +230,7 @@ http_reconnect(struct http_t *http)
 		goto fail_release_ainf;
 	}
 
-	if (option_set(OPT_USE_TLS))
+	if (http->usingSecure)
 	{
 		http->conn.ssl_ctx = SSL_CTX_new(TLS_client_method());
 		http_tls(http) = SSL_new(http->conn.ssl_ctx);
@@ -256,13 +256,13 @@ http_reconnect(struct http_t *http)
 }
 
 int
-http_switch_tls(struct http_t *http)
+HTTP_upgrade_to_TLS(struct http_t *http)
 {
 	assert(http);
 
 	http_disconnect(http);
 
-	set_option(OPT_USE_TLS);
+	http->usingSecure = 1;
 
 	if (http_connect(http) < 0)
 		goto fail;
