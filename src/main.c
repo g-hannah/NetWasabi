@@ -454,6 +454,7 @@ main(int argc, char *argv[])
 	}
 
 	http->followRedirects = 1;
+	http->usingSecure = 1;
 	http->verb = GET;
 
 	url_len = strlen(argv[1]);
@@ -512,11 +513,15 @@ main(int argc, char *argv[])
 	update_current_url(http->URL);
 
 	http->ops->send_request(http);
+	http->ops->recv_response(http);
 	//status_code = do_request(http);
 	update_status_code(http->code);
 
 	if (HTTP_OK != http->code)
+	{
+		fprintf(stderr, "Error (%d %s)\n", http->code, http->ops->code_as_string(http));
 		goto out_disconnect;
+	}
 
 /*
 	switch((unsigned int)http->code)
@@ -623,6 +628,7 @@ main(int argc, char *argv[])
 		destroy_graph(forbidden);
 
 	fail:
+	fprintf(stderr, "Failed...\n");
 	sigaction(SIGINT, &old_sigint, NULL);
 	sigaction(SIGQUIT, &old_sigquit, NULL);
 
