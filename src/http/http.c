@@ -192,30 +192,12 @@ struct HTTP_redirected
 	time_t when; // When we first encountered the original URL
 };
 
-static void
-__ctor HTTP_init(void)
-{
 #ifdef DEBUG
-	hlogfp = fdopen(open(LOG_FILE, O_RDWR|O_TRUNC|O_CREAT, S_IRUSR|S_IWUSR), "r+");
-	assert(hlogfp);
-	_log("Opened log file\n");
+# define PATH_MAX_GUESS 1024
+static char *LOG_FILE = NULL;
+static int pathMax = 0;
+static FILE *hlogfp = NULL;
 #endif
-	return;
-}
-
-static void
-__dtor private_fini(void)
-{
-#ifdef DEBUG
-	fclose(hlogfp);
-	hlogfp = NULL;
-#endif
-	return;
-}
-
-FILE *hlogfp = NULL;
-
-#define LOG_FILE "./http_debug_log.txt"
 
 static void
 _log(char *fmt, ...)
@@ -234,6 +216,46 @@ _log(char *fmt, ...)
 
 	return;
 }
+
+static void
+__ctor HTTP_init(void)
+{
+#ifdef DEBUG
+	char *userHome = getenv("HOME");
+	if (!userHome)
+		return;
+
+	pathMax = pathconf("/", _PC_PATH_MAX);
+	if (0 == pathMax)
+		pathMax = PATH_MAX_GUESS;
+
+	LOG_FILE = calloc(pathMax, 1);
+	if (!LOG_FILE)
+		abort();
+
+	snprintf(LOG_FILE, pathMax, "%s/netwasabi_http_log.txt", userHome);
+
+	hlogfp = fdopen(open(LOG_FILE, O_RDWR|O_TRUNC|O_CREAT, S_IRUSR|S_IWUSR), "r+");
+	assert(hlogfp);
+	_log("Opened log file\n");
+#endif
+	return;
+}
+
+static void
+__dtor private_fini(void)
+{
+#ifdef DEBUG
+	if (NULL != LOG_FILE)
+		free(LOG_FILE);
+
+	fclose(hlogfp);
+	hlogfp = NULL;
+#endif
+	return;
+}
+
+//#define LOG_FILE "./http_debug_log.txt"
 
 /**
  * cache_http_cookie_ctor - initialise object for the cookie cache
@@ -476,6 +498,49 @@ build_request_header_1_1(struct http_t *http)
 	return 0;
 }
 
+static void
+rewrite_URL_protocol(struct http_t *http, char *replace, char *replacement)
+{
+	assert(http);
+
+	int URL_len = strlen(http->URL);
+	buf_t buf;
+
+	buf_init(&buf, URL_len);
+
+	_log("Rewriting URL %s\n", http->URL);
+	buf_append(&buf, http->URL);
+	buf_replace(&buf, replace, replacement);
+
+	strcpy(http->URL, (char *)buf.data);
+	_log("URL: %s\n", http->URL);
+
+	return;
+}
+
+static void
+check_target_URL(struct http_t *http, int wantSecure)
+{
+	assert(http);
+
+	if (wantSecure)
+	{
+		if (strncmp(http->URL, "https://", 8))
+		{
+			rewrite_URL_protocol(http, "http://", "https://");
+		}
+	}
+	else
+	{
+		if (strncmp(http->URL, "http://", 7))
+		{
+			rewrite_URL_protocol(http, "https://", "http://");
+		}
+	}
+
+	return;
+}
+
 int
 send_request_1_1(struct http_t *http)
 {
@@ -486,12 +551,31 @@ send_request_1_1(struct http_t *http)
 	buf_t *buf = &http->conn.write_buf;
 	buf_clear(buf);
 
+	check_target_URL(http, http->usingSecure);
+
 	//set_verb(http, GET);
 	build_request_header_1_1(http);
 
+	if (http->usingSecure)
+	{
+		if (buf_write_tls(http->conn.ssl, buf) < 0)
+		{
+			_log("Error writing to SSL socket\n");
+			goto fail;
+		}
+	}
+	else
+	{
+		if (buf_write_socket(http->conn.sock, buf) < 0)
+		{
+			_log("Error writing to socket\n");
+			goto fail;
+		}
+	}
+
 /*
  * XXX Need to decouple this from NetWasabi options.
- */
+ *
 	if (option_set(OPT_USE_TLS))
 	{
 		if (buf_write_tls(http->conn.ssl, buf) == -1)
@@ -508,6 +592,7 @@ send_request_1_1(struct http_t *http)
 			goto fail;
 		}
 	}
+*/
 
 	return 0;
 
@@ -1078,6 +1163,7 @@ recv_response_1_1(struct http_t *http)
 	int retVal = -1;
 	int code = 0;
 	int total_bytes = 0;
+	int needResend = 0;
 	char tmpURL[HTTP_URL_MAX];
 	http_header_t *content_len = NULL;
 	http_header_t *transfer_enc = NULL;
@@ -1122,10 +1208,14 @@ recv_response_1_1(struct http_t *http)
  */
 __retry:
 
+	total_bytes = 0;
+
 	buf_clear(&http->conn.read_buf);
 	assert(http->conn.read_buf.data_len == 0);
 
 	retVal = read_until_eoh(http, &p);
+
+	_log("Got HTTP response header\n");
 
 	if (retVal < 0 || HTTP_OPERATION_TIMEOUT == retVal)
 	{
@@ -1134,6 +1224,8 @@ __retry:
 	}
 
 	total_bytes += retVal;
+
+	_log("Read %lu bytes\n", total_bytes);
 	retVal = -1;
 
 /*
@@ -1188,18 +1280,27 @@ __retry:
 				goto fail_dealloc;
 			}
 
+			_log("Old location: %s - New location: %s\n", tmpURL, http->URL);
+
 			buf_clear(&http->conn.write_buf);
 			assert(http_wbuf(http).data_len == 0);
-			set_verb(http, GET);
 
+			needResend = 1;
+			break;
+			// need to read rest of data in the buffer
+
+/*
 			if (http->ops->send_request(http) < 0)
 			{
 				_log("failed to resend GET request after setting new Location\n");
 				goto fail_dealloc;
 			}
 
+			_log("Resent request to web server\n");
+
 			goto __retry;
 			break;
+*/
 		case HTTP_BAD_REQUEST:
 		case HTTP_NOT_FOUND:
 		default:
@@ -1216,7 +1317,7 @@ __retry:
 				goto fail_dealloc;
 			}
 
-			goto out_dealloc;
+			goto __done_reading;
 		}
 	}
 
@@ -1259,6 +1360,19 @@ __retry:
 	{
 		_log("No Content-Length or chunked transfer encoding header fields");
 		total_bytes = 0;
+		goto out_dealloc;
+	}
+
+__done_reading:
+
+	if (needResend)
+	{
+		_log("Resending request to web server\n");
+		//http->ops->build_header(http); // this was missing here!!
+		http->ops->send_request(http);
+		needResend = 0;
+		_log("Sent request. Jumping to retry\n");
+		goto __retry;
 	}
 /*
  * We shouldn't really get here, because we SHOULD
