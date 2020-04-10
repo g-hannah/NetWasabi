@@ -18,6 +18,13 @@
 #include "http.h"
 #include "netwasabi.h"
 
+/* TODO
+ *
+ * Create global HTTP logging function and remove
+ * the put_error_msg() function calls because they
+ * do _not_ belong in this module.
+ */
+
 static pthread_once_t __ossl_init_once = PTHREAD_ONCE_INIT;
 
 #if 0
@@ -91,7 +98,7 @@ http_connect(struct http_t *http)
 	sprintf(http->conn.host_ipv4, "%s", inet_ntoa(sock4.sin_addr));
 	update_connection_state(http, FL_CONNECTION_CONNECTING);
 
-	if (option_set(OPT_USE_TLS))
+	if (http->usingSecure)
 		sock4.sin_port = htons(HTTPS_PORT);
 	else
 		sock4.sin_port = htons(HTTP_PORT);
@@ -110,7 +117,7 @@ http_connect(struct http_t *http)
 		goto fail_release_ainf;
 	}
 
-	if (option_set(OPT_USE_TLS))
+	if (http->usingSecure)
 	{
 /*
  * Calling __init_openssl() more than once (multithreaded)
