@@ -102,6 +102,7 @@ struct http_t
 	struct conn conn;
 	int code;
 	int followRedirects;
+	int usingSecure;
 
 	char *host;
 	char *page;
@@ -145,8 +146,8 @@ char *http_parse_page(char *, char *) __nonnull((1,2)) __wur;
 int http_connection_closed(struct http_t *) __nonnull((1)) __wur;
 */
 
-struct http_t *http_new(uint64_t) __wur;
-void http_delete(struct http_t *) __nonnull((1));
+struct http_t *HTTP_new(uint64_t) __wur;
+void HTTP_delete(struct http_t *) __nonnull((1));
 
 void http_check_host(struct http_t *) __nonnull((1));
 
