@@ -13,7 +13,6 @@ PRIMARY_OBJS := \
 	$(TOP_DIR)/main.o \
 	$(TOP_DIR)/cache_management.c \
 	$(TOP_DIR)/fast_mode.o \
-	$(TOP_DIR)/hash_bucket.o \
 	$(TOP_DIR)/graph.o \
 	$(TOP_DIR)/netwasabi.o \
 	$(TOP_DIR)/robots.o \
@@ -23,11 +22,11 @@ PRIMARY_OBJS := \
 MM_OBJS := \
 	$(MM_DIR)/buffer.o \
 	$(MM_DIR)/cache.o \
+	$(MM_DIR)/hash_bucket.o \
 	$(MM_DIR)/malloc.o
 
 HTTP_OBJS := \
-	$(HTTP_DIR)/http.o \
-	$(HTTP_DIR)/http_conn.o
+	$(HTTP_DIR)/http.o
 
 ALL_OBJS := $(MM_OBJS) $(HTTP_OBJS) $(PRIMARY_OBJS)
 
