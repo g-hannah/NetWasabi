@@ -7,11 +7,13 @@ INCLUDE_DIR := ../../include
 MM_DEPENDENCIES = \
 	$(INCLUDE_DIR)/buffer.h \
 	$(INCLUDE_DIR)/cache.h \
+	$(INCLUDE_DIR)/hash_bucket.h \
 	$(INCLUDE_DIR)/malloc.h
 
 MM_SOURCE = \
 	buffer.c \
 	cache.c \
+	hash_bucket.c \
 	malloc.c
 
 MM_OBJS := $(MM_SOURCE:.c=.o)
