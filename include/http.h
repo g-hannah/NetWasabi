@@ -119,9 +119,9 @@ struct HTTP_methods
 	int (*send_request)(struct http_t *);
 	int (*recv_response)(struct http_t *);
 	int (*build_header)(struct http_t *);
-	int (*append_header)(buf_t *, http_header_t *);
-	int (*check_header)(buf_t *, const char *, off_t, off_t *);
-	char *(*fetch_header)(buf_t *, const char *, http_header_t *, off_t);
+	int (*append_header)(struct http_t *, char *);
+	//int (*check_header)(buf_t *, const char *, off_t, off_t *);
+	char *(*fetch_header)(struct http_t *, char *);
 	char *(*URL_parse_host)(char *, char *);
 	char *(*URL_parse_page)(char *, char *);
 	const char *(*code_as_string)(struct http_t *);
