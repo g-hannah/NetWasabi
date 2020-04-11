@@ -506,7 +506,7 @@ cache_dealloc(cache_t *cachep, void *slot, void *ptr_addr)
 {
 	assert(cachep);
 	assert(slot);
-	assert(ptr_addr);
+	//assert(ptr_addr);
 
 	int obj_idx;
 	int nr_assigned = cachep->nr_assigned;
@@ -519,8 +519,8 @@ cache_dealloc(cache_t *cachep, void *slot, void *ptr_addr)
 			obj_idx, cachep->name);
 */
 
-	//if ((void *)ptr_addr != NULL)
-	//{
+	if (ptr_addr != NULL)
+	{
 		CACHE_REMOVE_PTR(cachep, ptr_addr);
 		assert(cachep->nr_assigned < nr_assigned);
 
@@ -530,7 +530,7 @@ cache_dealloc(cache_t *cachep, void *slot, void *ptr_addr)
 				cachep->name, nr_assigned, cachep->nr_assigned,
 				cachep->capacity);
 		}
-	//}
+	}
 
 	CACHE_INC_FREE(cachep);
 	__cache_mark_unused(cachep, obj_idx);
