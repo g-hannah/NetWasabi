@@ -163,7 +163,7 @@ adjust_buckets(bucket_obj_t *bucket_obj)
 static void
 check_load_factor(bucket_obj_t *bucket_obj)
 {
-	float load_factor = (float)bucket_obj->nr_buckets_used / (float)bucket_obj->nr_buckets;
+	float load_factor = LOAD_FACTOR(bucket_obj);
 
 	if (load_factor >= bucket_obj->load_factor)
 	{
@@ -286,6 +286,28 @@ BUCKET_object_destroy(bucket_obj_t *bucket_obj)
 	free(bucket_obj);
 
 	return;
+}
+
+/**
+ * Free all buckets and data and create
+ * a new bucket array with default
+ * number of buckets.
+ */
+int
+BUCKET_reset_buckets(bucket_obj_t *bucket_obj)
+{
+	assert(bucket_obj);
+
+	free_buckets(bucket_obj);
+
+	bucket_obj->nr_buckets = DEFAULT_NUMBER_BUCKETS;
+	bucket_obj->nr_buckets_used = 0;
+	bucket_obj->buckets = calloc(DEFAULT_NUMBER_BUCKETS, sizeof(bucket_t));
+
+	if (!bucket_obj->buckets)
+		return -1;
+
+	return 0;
 }
 
 /*
