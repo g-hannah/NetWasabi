@@ -7,6 +7,14 @@
 #include <stdio.h>
 #include "hash_bucket.h"
 
+/*
+ * TODO
+ * 
+ * Improve the hashing algorithm as getting
+ * some collisions despite having plenty
+ * of empty buckets to use.
+ */
+
 #define HASHING_PRIME 1610612741u
 #define ALIGN_SIZE(s) (((s) + 0xf) & ~(0xf))
 
