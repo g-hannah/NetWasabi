@@ -423,7 +423,6 @@ parse_response_header_1_1(struct http_t *http)
 		sol = eol + 2;
 
 #ifdef DEBUG
-		_log("size of HTTP_EOL: %lu\n", sizeof(HTTP_EOL));
 		bucket_t *bucket = BUCKET_get_bucket(http->headers, field_name);
 		assert(bucket);
 		if (bucket->next != NULL)
