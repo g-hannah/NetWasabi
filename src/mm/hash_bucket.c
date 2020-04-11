@@ -112,7 +112,7 @@ free_buckets(bucket_obj_t *bucket_obj)
  * will give a different index, which means we wouldn't
  * be able to retrieve our data.
  */
-static void
+static int
 adjust_buckets(bucket_obj_t *bucket_obj)
 {
 	assert(bucket_obj);
@@ -136,7 +136,11 @@ adjust_buckets(bucket_obj_t *bucket_obj)
 	for (i = 0; i < nr_buckets; ++i)
 	{
 		old_bucket = &bucket_obj->buckets[i];
-		BUCKET_put_data(&tmp_bucket_obj, old_bucket->key, old_bucket->data);
+		if (BUCKET_put_data(&tmp_bucket_obj, old_bucket->key, old_bucket->data) < 0)
+		{
+			Log("adjust_buckets: failed to put data into new bucket array\n");
+			goto fail;
+		}
 	}
 
 /*
@@ -152,7 +156,15 @@ adjust_buckets(bucket_obj_t *bucket_obj)
 	memset(&tmp_bucket_obj, 0, sizeof(bucket_obj_t));
 
 	Log("New bucket array at %p\n", bucket_obj->buckets);
-	return;
+	return 0;
+
+fail:
+	free_buckets(&tmp_bucket_obj);
+	free_buckets(bucket_obj);
+	buckets = NULL;
+	bucket_obj->buckets = NULL;
+
+	return -1;
 }
 
 /**
@@ -175,7 +187,8 @@ check_load_factor(bucket_obj_t *bucket_obj)
 
 		Log("Number of buckets now %u\n", bucket_obj->nr_buckets);
 
-		adjust_buckets(bucket_obj);
+		if (adjust_buckets(bucket_obj) < 0)
+			abort(); // XXX Handle this more elegantly
 	}
 
 	return;
@@ -197,7 +210,7 @@ new_bucket(void)
 	return bucket;
 }
 
-void
+int
 BUCKET_put_data(bucket_obj_t *bucket_obj, char *key, char *data)
 {
 	assert(bucket_obj);
@@ -206,6 +219,7 @@ BUCKET_put_data(bucket_obj_t *bucket_obj, char *key, char *data)
 
 	uint32_t hash = hash_Object(key);
 	int index = BUCKET(hash, bucket_obj->nr_buckets);
+	size_t key_len = strlen(key);
 	size_t data_len = strlen(data);
 	bucket_t *bucket;
 
@@ -220,14 +234,30 @@ BUCKET_put_data(bucket_obj_t *bucket_obj, char *key, char *data)
 			bucket = bucket->next;
 
 		bucket->next = new_bucket();
+		bucket = bucket->next;
 	}
 	else
 	{
 		++bucket_obj->nr_buckets_used;
 	}
 
+	bucket->key = calloc(ALIGN_SIZE(key_len), 1);
+
+	if (!bucket->key)
+		goto fail;
+
+	memcpy((void *)bucket->key, (void *)key, key_len);
+
+	bucket->key[key_len] = 0;
+	bucket->hash = hash;
 	bucket->data = calloc(ALIGN_SIZE(data_len), 1);
+
+	if (!bucket->data)
+		goto fail;
+
 	memcpy(bucket->data, (void *)data, data_len);
+
+	((char *)bucket->data)[data_len] = 0;
 	bucket->data_len = data_len;
 	bucket->used = 1;
 
@@ -235,7 +265,16 @@ BUCKET_put_data(bucket_obj_t *bucket_obj, char *key, char *data)
 
 	check_load_factor(bucket_obj);
 
-	return;
+	return 0;
+
+fail:
+	if (bucket->key)
+		free(bucket->key);
+
+	if (bucket->data)
+		free(bucket->data);
+
+	return -1;
 }
 
 bucket_t *
@@ -308,6 +347,35 @@ BUCKET_reset_buckets(bucket_obj_t *bucket_obj)
 		return -1;
 
 	return 0;
+}
+
+void
+BUCKET_clear_bucket(bucket_obj_t *bucket_obj, char *key)
+{
+	assert(bucket_obj);
+	assert(key);
+
+	bucket_t *bucket = BUCKET_get_bucket(bucket_obj, key);
+	if (!bucket)
+		return;
+
+	if (bucket->next)
+	{
+		free_bucket_list(bucket->next);
+		bucket->next = NULL;
+	}
+
+	free(bucket->key);
+	bucket->key = NULL;
+
+	free(bucket->data);
+	bucket->data = NULL;
+
+	bucket->data_len = 0;
+	bucket->hash = 0;
+	bucket->used = 0;
+
+	return;
 }
 
 /*

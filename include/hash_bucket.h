@@ -27,8 +27,9 @@ typedef struct Bucket_Object
 
 bucket_obj_t *BUCKET_object_new(void);
 void BUCKET_object_destroy(bucket_obj_t *bObj);
-void BUCKET_put_data(bucket_obj_t *bObj, char *key, char *data);
+int BUCKET_put_data(bucket_obj_t *bObj, char *key, char *data);
+int BUCKET_reset_buckets(bucket_obj_t *bObj);
+void BUCKET_clear_bucket(bucket_obj_t *bObj, char *key);
 bucket_t *BUCKET_get_bucket(bucket_obj_t *bObj, char *key);
-void BUCKET_reset_buckets(bucket_obj_t *bObj);
 
 #endif /* !defined __HASH_BUCKET_H__ */
