@@ -505,7 +505,7 @@ worker_crawl(void *args)
 		if (__do_reconnect)
 		{
 			http_disconnect(http);
-			http_reconnect(http);
+			http_connect(http);
 
 			wlog("[0x%lx] Doing reconnect!\n");
 
