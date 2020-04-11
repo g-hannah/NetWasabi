@@ -6,14 +6,16 @@
 #include <time.h>
 #include "buffer.h"
 #include "cache.h"
+#include "hash_bucket.h"
 
 #define HTTP_SWITCHING_PROTOCOLS 101u // for successful upgrade to HTTP 2.0
 #define HTTP_OK 200u
 #define HTTP_MOVED_PERMANENTLY 301u
-#define HTTP_FOUND 302u
+#define HTTP_FOUND 302u // the URI is being temporarily redirected
 #define HTTP_SEE_OTHER 303u
-#define HTTP_BAD_REQUEST 400u
+#define HTTP_BAD_REQUEST 400u // the user agent sent a malformed request
 #define HTTP_UNAUTHORISED 401u
+#define HTTP_PAYMENT_REQUIRED 402u
 #define HTTP_FORBIDDEN 403u
 #define HTTP_NOT_FOUND 404u
 #define HTTP_METHOD_NOT_ALLOWED 405u
@@ -25,8 +27,6 @@
 #define HTTP_GATEWAY_TIMEOUT 504u
 
 /* Custom status codes */
-#define HTTP_ALREADY_EXISTS 702u
-#define HTTP_IS_XDOMAIN 703u
 
 #define HTTP_OPERATION_TIMEOUT -2
 
@@ -36,7 +36,7 @@
 #define HTTP_HOST_MAX 256
 
 #define HTTP_VERSION		"1.1"
-#define HTTP_USER_AGENT		"Mozilla/5.0 (X11; Ubuntu; Linux x86_64; rv:68.0) Gecko/20100101 Firefox/68.0"
+#define HTTP_USER_AGENT		"Mozilla/5.0 (X11; Ubuntu; Linux x86_64; rv:75.0) Gecko/20100101 Firefox/75.0"
 #define HTTP_ACCEPT		"text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8"
 #define HTTP_EOH_SENTINEL	"\r\n\r\n"
 #define HTTP_EOL		"\r\n"
@@ -108,6 +108,8 @@ struct http_t
 	char *page;
 	char *URL;
 	char *primary_host;
+
+	bucket_obj_t *headers;
 
 	struct HTTP_methods *ops;
 };
