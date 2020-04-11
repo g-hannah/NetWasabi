@@ -38,27 +38,42 @@ Log(char *fmt, ...)
 	return;
 }
 
-static uint32_t
-hash_Object(char *string_Obj)
+static void
+rotate_byte_left(char *c, int amount)
 {
-	assert(string_Obj);
+	unsigned char uc = (unsigned char)*c;
+
+	if (amount == sizeof(c))
+		return;
+
+	uc = ((uc << amount) | (uc >> (sizeof(c) - amount)));
+	*c = (char)uc;
+
+	return;
+}
+
+static uint32_t
+hash_Object(char *data)
+{
+	assert(data);
 	//assert(nrBuckets > 0);
 
-	size_t len = strlen(string_Obj);
-	char *p = string_Obj;
+	size_t len = strlen(data);
+	char *p = data;
 	char c = (char)0;
-	char *limit = string_Obj + len;
-	uint64_t rcx = 0;
+	char *limit = data + len;
+	uint64_t rax = 0;
 
 	while (p < limit)
 	{
 		c ^= *p++;
+		rotate_byte_left(&c, 3);
 	}
 
-	rcx = (c * HASHING_PRIME);
+	rax = (c * HASHING_PRIME);
 	//rcx >>= (sizeof(uint32_t)*8);
 
-	return (uint32_t)rcx;
+	return (uint32_t)rax;
 }
 
 static void
