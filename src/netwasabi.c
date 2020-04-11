@@ -333,7 +333,7 @@ update_status_code(int status_code)
 	switch(status_code)
 	{
 		case HTTP_OK:
-		case HTTP_ALREADY_EXISTS:
+		//case HTTP_ALREADY_EXISTS:
 			fprintf(stderr, "%s%3d%s", COL_DARKGREEN, status_code, COL_END);
 			break;
 		case HTTP_MOVED_PERMANENTLY:
@@ -1379,7 +1379,10 @@ crawl(struct http_t *http, struct cache_ctx *cache1, struct cache_ctx *cache2)
 
 			//status_code = do_request(http);
 
-			status_code = http->ops->send_request(http);
+			http->ops->send_request(http);
+			http->ops->recv_response(http);
+
+			status_code = http->code;
 			update_status_code(status_code);
 
 			if (status_code < 0)
