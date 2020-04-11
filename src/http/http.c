@@ -1,7 +1,15 @@
+#include <arpa/inet.h>
 #include <assert.h>
 #include <arpa/inet.h>
+#include <ctype.h>
 #include <errno.h>
 #include <fcntl.h>
+#include <netdb.h>
+#include <netinet/in.h>
+#include <openssl/conf.h>
+#include <openssl/err.h>
+#include <openssl/ssl.h>
+#include <pthread.h>
 #include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -335,6 +343,96 @@ use_rand:
 	return;
 }
 */
+
+static void
+to_lower_case(char *string)
+{
+	if (!string)
+		return;
+
+	char *p = string;
+	char *e = string + strlen(string);
+
+	while (p < e)
+	{
+		*p = tolower(*p);
+		++p;
+	}
+
+	return;
+}
+
+/**
+ * Parse the response header fields into a hash bucket.
+ */
+static void
+parse_response_header_1_1(struct http_t *http)
+{
+	assert(http);
+
+	buf_t *buf = &http->conn.read_buf;
+	char *sol = NULL; // start of line
+	char *eol = NULL; // end of line
+	char *eoh = NULL; // end of header
+	char *p = NULL;
+	char *q = NULL;
+	char field_name[1024];
+	char field_value[2048];
+
+	eoh = HTTP_EOH(buf);
+	eoh -= 2;
+
+	sol = buf->buf_head;
+
+/*
+ * Skip the initial line showing the status of the request (200 OK...)
+ */
+	eol = memchr(sol, '\r', (eol - sol));
+	if (!eol)
+		return;
+
+	sol = eol + sizeof(HTTP_EOL);
+
+	while (sol < eoh)
+	{
+		eol = memchr(sol, '\r', (eoh - sol));
+
+		if (!eol)
+			break;
+
+		p = sol;
+		q = memchr(p, ':', (eol - p));
+
+		if (!q)
+			break;
+
+		memcpy((void *)field_name, (void *)p, (q - p));
+		field_name[q - p] = 0;
+		to_lower_case(field_name);
+
+		p = ++q;
+		while (*p == ' ' && p < eol)
+			++p;
+
+		if (p == eol)
+		{
+			break;
+		}
+
+		memcpy((void *)field_value, (void *)p, (eol - p));
+		field_value[eol - p] = 0;
+
+		BUCKET_put_data(http->headers, field_name, field_value);
+
+		sol = eol + sizeof(HTTP_EOL);
+
+#ifdef DEBUG
+		bucket_t *bucket = BUCKET_get_bucket(http->headers, field_name);
+		assert(bucket);
+		assert(!memcmp((void *)bucket->data, (void *)field_value, bucket->data_len));
+#endif
+	}
+}
 
 /**
  * check_cookies - check for Set-Cookie header fields in response header
@@ -1179,13 +1277,34 @@ recv_response_1_1(struct http_t *http)
 	if (!http->conn.ssl_nonblocking)
 		http_set_ssl_non_blocking(http);
 
+	parse_response_header_1_1(http);
+
+	bucket_t *bucket = NULL;
+
+	bucket = BUCKET_get_bucket(http->headers, "set-cookie");
+	if (bucket)
+	{
+		_log("set cookie: %s\n", (char *)bucket->data);
+	}
+
+	bucket = BUCKET_get_bucket(http->headers, "transfer-encoding");
+	if (bucket)
+	{
+		_log("transfer encoding: %s\n", (char *)bucket->data);
+	}
+
+	bucket = BUCKET_get_bucket(http->headers, "content-length");
+	if (bucket)
+	{
+		_log("content length: %s (%d)\n", (char *)bucket->data, atoi((char *)bucket->data));
+	}
 /*
  * XXX
  *
  *	We should really parse the header fields
  *	that we are interested in and set various
  *	flags based upon the information.
- */
+ *
 	content_len = (http_header_t *)cache_alloc(private->headers, &content_len);
 
 	if (!content_len)
@@ -1201,6 +1320,7 @@ recv_response_1_1(struct http_t *http)
 		_log("failed to get cache object for transfer_enc\n");
 		goto fail_dealloc;
 	}
+*/
 
 /*
  * Jump back to here to resend a request after dealing with
@@ -1427,7 +1547,7 @@ fail_dealloc:
 		cache_dealloc(private->headers, (void *)transfer_enc, &transfer_enc);
 	}
 
-fail:
+//fail:
 	return -1;
 }
 
@@ -1987,12 +2107,15 @@ http_connection_closed(struct http_t *http)
 static int
 HTTP_init_object(struct HTTP_private *private, uint64_t id)
 {
-	char cache_name[64];
+	//char cache_name[64];
 	struct http_t *http;
+
+	http = (struct http_t *)private;
+	http->headers = BUCKET_object_new();
 
 /*
  * HTTP header object cache.
- */
+ *
 	sprintf(cache_name, "HTTP_header_cache-0x%lx", id);
 	if (!(private->headers = cache_create(
 			cache_name,
@@ -2006,10 +2129,11 @@ HTTP_init_object(struct HTTP_private *private, uint64_t id)
 	}
 
 	_log("Created header cache %s\n", cache_name);
+*/
 
 /*
  * HTTP cookie object cache.
- */
+ *
 	sprintf(cache_name, "HTTP_cookie_cache-0x%lx", id);
 	if (!(private->cookies = cache_create(
 			cache_name,
@@ -2023,27 +2147,27 @@ HTTP_init_object(struct HTTP_private *private, uint64_t id)
 	}
 
 	_log("Created cookies cache %s\n", cache_name);
-
-	http = (struct http_t *)private;
+*/
 
 	http->host = calloc(HTTP_HOST_MAX+1, 1);
 	http->conn.host_ipv4 = calloc(HTTP_ALIGN_SIZE(INET_ADDRSTRLEN+1), 1);
 	http->primary_host = calloc(HTTP_HOST_MAX+1, 1);
 	http->page = calloc(HTTP_URL_MAX+1, 1);
 	http->URL = calloc(HTTP_URL_MAX+1, 1);
+
 	http->ops = Default_Version_Methods;
 	http->version = HTTP_DEFAULT_VERSION;
 
 	if (buf_init(&http->conn.read_buf, HTTP_DEFAULT_READ_BUF_SIZE) < 0)
 	{
 		fprintf(stderr, "HTTP_init_object: failed to initialise read buf\n");
-		goto fail_destroy_cache;
+		goto fail;
 	}
 
 	if (buf_init(&http->conn.write_buf, HTTP_DEFAULT_WRITE_BUF_SIZE) < 0)
 	{
 		fprintf(stderr, "HTTP_init_object: failed to initialise write buf\n");
-		goto fail_release_mem;
+		goto fail;
 	}
 
 	assert(http->host);
@@ -2054,16 +2178,21 @@ HTTP_init_object(struct HTTP_private *private, uint64_t id)
 
 	return 0;
 
-fail_release_mem:
+fail:
 
 	buf_destroy(&http->conn.read_buf);
 
+	if (http->headers)
+		BUCKET_object_destroy(http->headers);
+/*
 fail_destroy_cache:
 
 	cache_destroy(private->headers);
 	cache_destroy(private->cookies);
 
 fail:
+*/
+
 	return -1;
 }
 
@@ -2101,7 +2230,7 @@ HTTP_delete(struct http_t *http)
 {
 	assert(http);
 
-	struct HTTP_private *private = (struct HTTP_private *)http;
+	//struct HTTP_private *private = (struct HTTP_private *)http;
 
 	free(http->host);
 	free(http->page);
@@ -2109,11 +2238,14 @@ HTTP_delete(struct http_t *http)
 	free(http->conn.host_ipv4);
 	free(http->URL);
 
+	BUCKET_object_destroy(http->headers);
+/*
 	cache_clear_all(private->headers);
 	cache_destroy(private->headers);
 
 	cache_clear_all(private->cookies);
 	cache_destroy(private->cookies);
+*/
 
 	buf_destroy(&http->conn.read_buf);
 	buf_destroy(&http->conn.write_buf);
@@ -2121,4 +2253,233 @@ HTTP_delete(struct http_t *http)
 	_log("Deleted HTTP object\n");
 
 	return;
+}
+
+/*
+ * ================================================================================================
+ *
+ * Start of functions related to connection with remote web server.
+ *
+ * ================================================================================================
+ */
+
+/*
+ * We need to make sure that OpenSSL
+ * initialised once and once only.
+ */
+static pthread_once_t __ossl_init_once = PTHREAD_ONCE_INIT;
+
+/**
+ * __init_openssl - initialise the openssl library
+ */
+static inline void
+__init_openssl(void)
+{
+	SSL_library_init();
+	SSL_load_error_strings();
+	OpenSSL_add_all_algorithms();
+	//OPENSSL_config(NULL); // this became deprecated 
+	ERR_load_crypto_strings();
+}
+
+/**
+ * http_connect - set up a connection with the target site
+ * @http: HTTP object with remote host information
+ */
+int
+http_connect(struct http_t *http)
+{
+	assert(http);
+
+	struct sockaddr_in sock4;
+	struct addrinfo *ainf = NULL;
+	struct addrinfo *aip = NULL;
+
+	clear_struct(&sock4);
+
+	if (getaddrinfo(http->host, NULL, NULL, &ainf) < 0)
+	{
+		_log("error getting address information for remote host\n");
+		goto fail;
+	}
+
+	for (aip = ainf; aip; aip = aip->ai_next)
+	{
+		if (aip->ai_family == AF_INET && aip->ai_socktype == SOCK_STREAM)
+		{
+			memcpy(&sock4, aip->ai_addr, aip->ai_addrlen);
+			break;
+		}
+	}
+
+	if (!aip)
+		goto fail;
+
+	assert(http->conn.host_ipv4);
+	sprintf(http->conn.host_ipv4, "%s", inet_ntoa(sock4.sin_addr));
+
+	if (http->usingSecure)
+		sock4.sin_port = htons(HTTPS_PORT);
+	else
+		sock4.sin_port = htons(HTTP_PORT);
+
+	if ((http_socket(http) = socket(AF_INET, SOCK_STREAM, 0)) < 0)
+	{
+		_log("error opening socket\n");
+		goto fail_release_ainf;
+	}
+
+	assert(http_socket(http) > 2);
+
+	if (connect(http_socket(http), (struct sockaddr *)&sock4, (socklen_t)sizeof(sock4)) != 0)
+	{
+		_log("error connecting to remote host\n");
+		goto fail_release_ainf;
+	}
+
+	if (http->usingSecure)	
+	{
+/*
+ * Calling __init_openssl() more than once (multithreaded)
+ * has in some instances caused segfaults. Thus, use
+ * pthread_once() to do it once only.
+ */
+		pthread_once(&__ossl_init_once, __init_openssl);
+		http->conn.ssl_ctx = SSL_CTX_new(TLS_client_method());
+		http_tls(http) = SSL_new(http->conn.ssl_ctx);
+
+		SSL_set_fd(http_tls(http), http_socket(http)); /* Set the socket for reading/writing */
+		SSL_set_connect_state(http_tls(http)); /* Set as client */
+	}
+
+	http->conn.sock_nonblocking = 0;
+	http->conn.ssl_nonblocking = 0;
+
+	freeaddrinfo(ainf);
+	return 0;
+
+fail_release_ainf:
+	freeaddrinfo(ainf);
+
+fail:
+	return -1;
+}
+
+void
+http_disconnect(struct http_t *http)
+{
+	assert(http);
+
+	shutdown(http_socket(http), SHUT_RDWR);
+	close(http_socket(http));
+	http_socket(http) = -1;
+
+	if (http->usingSecure)
+	{
+		SSL_CTX_free(http->conn.ssl_ctx);
+		SSL_free(http_tls(http));
+		http->conn.ssl_ctx = NULL;
+		http_tls(http) = NULL;
+	}
+
+	return;
+}
+
+/*
+int
+http_reconnect(struct http_t *http)
+{
+	struct sockaddr_in sock4;
+	struct addrinfo *ainf = NULL;
+	struct addrinfo *aip = NULL;
+
+	shutdown(http_socket(http), SHUT_RDWR);
+	close(http_socket(http));
+	http_socket(http) = -1;
+
+	if (http->usingSecure)
+	{
+		SSL_CTX_free(http->conn.ssl_ctx);
+		SSL_free(http_tls(http));
+		http->conn.ssl_ctx = NULL;
+		http_tls(http) = NULL;
+	}
+
+	clear_struct(&sock4);
+
+	if (getaddrinfo(http->host, NULL, NULL, &ainf) < 0)
+	{
+		error("failed to get address information for remote host");
+		goto fail;
+	}
+
+	for (aip = ainf; aip; aip = aip->ai_next)
+	{
+		if (aip->ai_family == AF_INET && aip->ai_socktype == SOCK_STREAM)
+		{
+			memcpy(&sock4, aip->ai_addr, aip->ai_addrlen);
+			break;
+		}
+	}
+
+	if (!aip)
+		goto fail;
+
+	sprintf(http->conn.host_ipv4, "%s", inet_ntoa(sock4.sin_addr));
+
+	if (http->usingSecure)
+		sock4.sin_port = htons(HTTPS_PORT);
+	else
+		sock4.sin_port = htons(HTTP_PORT);
+
+	if ((http_socket(http) = socket(AF_INET, SOCK_STREAM, 0)) < 0)
+	{
+		error("error opening socket");
+		goto fail_release_ainf;
+	}
+
+	if (connect(http_socket(http), (struct sockaddr *)&sock4, (socklen_t)sizeof(sock4)) != 0)
+	{
+		error("error connecting to remote host");
+		goto fail_release_ainf;
+	}
+
+	if (http->usingSecure)
+	{
+		http->conn.ssl_ctx = SSL_CTX_new(TLS_client_method());
+		http_tls(http) = SSL_new(http->conn.ssl_ctx);
+
+		SSL_set_fd(http_tls(http), http_socket(http)); // Set the socket for reading/writing
+		SSL_set_connect_state(http_tls(http)); // Set as client
+	}
+
+	http->conn.sock_nonblocking = 0;
+	http->conn.ssl_nonblocking = 0;
+
+	freeaddrinfo(ainf);
+	return 0;
+
+	fail_release_ainf:
+	freeaddrinfo(ainf);
+
+	fail:
+	return -1;
+}
+*/
+
+int
+HTTP_upgrade_to_TLS(struct http_t *http)
+{
+	assert(http);
+
+	http_disconnect(http);
+	http->usingSecure = 1;
+
+	if (http_connect(http) < 0)
+		goto fail;
+
+	return 0;
+
+	fail:
+	return -1;
 }
