@@ -10,8 +10,7 @@ HTTP_DEPENDENCIES = \
 	$(INCLUDE_DIR)/http.h
 
 HTTP_SOURCE = \
-	http.c \
-	http_conn.c
+	http.c
 
 HTTP_OBJS := $(HTTP_SOURCE:.c=.o)
 
