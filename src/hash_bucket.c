@@ -1,0 +1,340 @@
+#include <assert.h>
+#include <limits.h>
+#include <stdarg.h>
+#include <stdint.h>
+#include <string.h>
+#include <stdlib.h>
+#include <stdio.h>
+#include "hash_bucket.h"
+
+#define HASHING_PRIME 1610612741u
+#define ALIGN_SIZE(s) (((s) + 0xf) & ~(0xf))
+
+#define BUCKET(h, n) ((h)%(n))
+#define DEFAULT_NUMBER_BUCKETS 256
+#define DEFAULT_LOAD_FACTOR_THRESHOLD 0.75f
+
+static void
+Log(char *fmt, ...)
+{
+#ifdef DEBUG
+	va_list args;
+
+	va_start(args, fmt);
+	vfprintf(stderr, fmt, args);
+	va_end(args);
+#else
+	(void)fmt;
+#endif
+
+	return;
+}
+
+static uint32_t
+hash_Object(char *string_Obj)
+{
+	assert(string_Obj);
+	//assert(nrBuckets > 0);
+
+	size_t len = strlen(string_Obj);
+	char *p = string_Obj;
+	char c = (char)0;
+	char *limit = string_Obj + len;
+	uint64_t rcx = 0;
+
+	while (p < limit)
+	{
+		c ^= *p++;
+	}
+
+	rcx = (c * HASHING_PRIME);
+	//rcx >>= (sizeof(uint32_t)*8);
+
+	return (uint32_t)rcx;
+}
+
+static void
+check_load_factor(bucket_obj_t *bucket_obj)
+{
+	float load_factor = (float)bucket_obj->nr_buckets_used / (float)bucket_obj->nr_buckets;
+
+	if (load_factor >= bucket_obj->load_factor)
+	{
+		Log("Resizing bucket array (load factor: %f)\n", load_factor);
+		bucket_obj->nr_buckets <<= 1;
+		bucket_obj->buckets = realloc(bucket_obj->buckets, (bucket_obj->nr_buckets*sizeof(bucket_t)));
+		assert(bucket_obj->buckets);
+		Log("Number of buckets now %u\n", bucket_obj->nr_buckets);
+	}
+
+	return;
+}
+
+static bucket_t *
+new_bucket(void)
+{
+	bucket_t *bucket = malloc(sizeof(bucket_t));
+
+	if (!bucket)
+		return NULL;
+
+	bucket->data = NULL;
+	bucket->data_len = 0;
+	bucket->used = 0;
+	bucket->next = NULL;
+
+	return bucket;
+}
+
+static void
+free_bucket_list(bucket_t *list_start)
+{
+	bucket_t *current;
+	bucket_t *prev;
+
+	current = list_start;
+
+	while (current)
+	{
+		prev = current;
+		current = current->next;
+		free(prev);
+	}
+
+	return;
+}
+
+static void
+free_buckets(bucket_obj_t *bucket_obj)
+{
+	assert(bucket_obj);
+
+	int i;
+	unsigned nr_buckets = bucket_obj->nr_buckets;
+	bucket_t *bucket;
+
+	for (i = 0; (unsigned int)i < nr_buckets; ++i)
+	{
+		bucket = &bucket_obj->buckets[i];
+
+		if (bucket->used)
+		{
+			if (bucket->next != NULL)
+			{
+				Log("Freeing linked list of buckets from bucket #%d\n", i);
+				free_bucket_list(bucket->next);
+			}
+
+			Log("Freeing data at bucket #%d\n", i);
+			free(bucket->data);
+
+			bucket->data_len = 0;
+			bucket->used = 0;
+			bucket->next = NULL;
+
+			--bucket_obj->nr_buckets_used;
+		}
+	}
+
+	free(bucket_obj->buckets);
+}
+
+void
+BUCKET_put_data(bucket_obj_t *bucket_obj, char *key, char *data)
+{
+	assert(bucket_obj);
+	assert(key);
+	assert(data);
+
+	uint32_t hash = hash_Object(key);
+	int index = BUCKET(hash, bucket_obj->nr_buckets);
+	size_t data_len = strlen(data);
+	bucket_t *bucket;
+
+	Log("Hash of key \"%s\": %X\n", key, hash);
+	Log("Bucket index: %d\n", index);
+
+	bucket = &bucket_obj->buckets[index];
+
+	if (bucket->used)
+	{
+		while (bucket->next != NULL)
+			bucket = bucket->next;
+
+		bucket->next = new_bucket();
+	}
+	else
+	{
+		++bucket_obj->nr_buckets_used;
+	}
+
+	bucket->data = calloc(ALIGN_SIZE(data_len), 1);
+	memcpy(bucket->data, (void *)data, data_len);
+	bucket->data_len = data_len;
+	bucket->used = 1;
+
+	Log("%s => %s\n", key, (char *)bucket->data);
+
+	check_load_factor(bucket_obj);
+
+	return;
+}
+
+bucket_obj_t *
+BUCKET_object_new(void)
+{
+	bucket_obj_t *bucket_obj = malloc(sizeof(bucket_obj_t));
+
+	if (!bucket_obj)
+		return NULL;
+
+	bucket_obj->buckets = calloc(DEFAULT_NUMBER_BUCKETS, sizeof(bucket_t));
+
+	if (!bucket_obj->buckets)
+		goto fail_release_bucket_obj;
+
+	bucket_obj->nr_buckets = DEFAULT_NUMBER_BUCKETS;
+	bucket_obj->nr_buckets_used = 0;
+	bucket_obj->load_factor = DEFAULT_LOAD_FACTOR_THRESHOLD;
+
+	memset(bucket_obj->buckets, 0, sizeof(bucket_t) * DEFAULT_NUMBER_BUCKETS);
+
+	return bucket_obj;
+
+fail_release_bucket_obj:
+
+	free(bucket_obj);
+	return NULL;
+}
+
+void
+BUCKET_object_destroy(bucket_obj_t *bucket_obj)
+{
+	if (!bucket_obj)
+		return;
+
+	free_buckets(bucket_obj);
+	free(bucket_obj);
+
+	return;
+}
+
+int
+main(void)
+{
+	bucket_obj_t *bObj = BUCKET_object_new();
+
+	char string1[] = "Content-Encoding";
+	char string2[] = "Vary";
+	char string3[] = "Set-Cookie";
+	char string4[] = "Range";
+	char string5[] = "Transfer-Encoding";
+	char string6[] = "Content-Length";
+	char string7[] = "x-content-type-options";
+	char string8[] = "strict-transport-security";
+	char string9[] = "Cache-Control";
+
+	char data1[] = "deflate";
+	char data2[] = "encoding";
+	char data3[] = "friday 10th april 2020; secure=true";
+	char data4[] = "100 - 1024";
+	char data5[] = "chunked";
+	char data6[] = "21423";
+	char data7[] = "no idea what this one would be";
+	char data8[] = "true";
+	char data9[] = "no-cache; refresh";
+
+	BUCKET_put_data(bObj, string1, data1);
+	BUCKET_put_data(bObj, string2, data2);
+	BUCKET_put_data(bObj, string3, data3);
+	BUCKET_put_data(bObj, string4, data4);
+	BUCKET_put_data(bObj, string5, data5);
+	BUCKET_put_data(bObj, string6, data6);
+	BUCKET_put_data(bObj, string7, data7);
+	BUCKET_put_data(bObj, string8, data8);
+	BUCKET_put_data(bObj, string9, data9);
+
+	BUCKET_put_data(bObj, string1, data1);
+	BUCKET_put_data(bObj, string2, data2);
+	BUCKET_put_data(bObj, string3, data3);
+	BUCKET_put_data(bObj, string4, data4);
+	BUCKET_put_data(bObj, string5, data5);
+	BUCKET_put_data(bObj, string6, data6);
+	BUCKET_put_data(bObj, string7, data7);
+	BUCKET_put_data(bObj, string8, data8);
+	BUCKET_put_data(bObj, string9, data9);
+
+	BUCKET_put_data(bObj, string1, data1);
+	BUCKET_put_data(bObj, string2, data2);
+	BUCKET_put_data(bObj, string3, data3);
+	BUCKET_put_data(bObj, string4, data4);
+	BUCKET_put_data(bObj, string5, data5);
+	BUCKET_put_data(bObj, string6, data6);
+	BUCKET_put_data(bObj, string7, data7);
+	BUCKET_put_data(bObj, string8, data8);
+	BUCKET_put_data(bObj, string9, data9);
+
+	BUCKET_put_data(bObj, string1, data1);
+	BUCKET_put_data(bObj, string2, data2);
+	BUCKET_put_data(bObj, string3, data3);
+	BUCKET_put_data(bObj, string4, data4);
+	BUCKET_put_data(bObj, string5, data5);
+	BUCKET_put_data(bObj, string6, data6);
+	BUCKET_put_data(bObj, string7, data7);
+	BUCKET_put_data(bObj, string8, data8);
+	BUCKET_put_data(bObj, string9, data9);
+
+	BUCKET_put_data(bObj, string1, data1);
+	BUCKET_put_data(bObj, string2, data2);
+	BUCKET_put_data(bObj, string3, data3);
+	BUCKET_put_data(bObj, string4, data4);
+	BUCKET_put_data(bObj, string5, data5);
+	BUCKET_put_data(bObj, string6, data6);
+	BUCKET_put_data(bObj, string7, data7);
+	BUCKET_put_data(bObj, string8, data8);
+	BUCKET_put_data(bObj, string9, data9);
+
+	BUCKET_put_data(bObj, string1, data1);
+	BUCKET_put_data(bObj, string2, data2);
+	BUCKET_put_data(bObj, string3, data3);
+	BUCKET_put_data(bObj, string4, data4);
+	BUCKET_put_data(bObj, string5, data5);
+	BUCKET_put_data(bObj, string6, data6);
+	BUCKET_put_data(bObj, string7, data7);
+	BUCKET_put_data(bObj, string8, data8);
+	BUCKET_put_data(bObj, string9, data9);
+
+	BUCKET_put_data(bObj, string1, data1);
+	BUCKET_put_data(bObj, string2, data2);
+	BUCKET_put_data(bObj, string3, data3);
+	BUCKET_put_data(bObj, string4, data4);
+	BUCKET_put_data(bObj, string5, data5);
+	BUCKET_put_data(bObj, string6, data6);
+	BUCKET_put_data(bObj, string7, data7);
+	BUCKET_put_data(bObj, string8, data8);
+	BUCKET_put_data(bObj, string9, data9);
+
+	BUCKET_put_data(bObj, string1, data1);
+	BUCKET_put_data(bObj, string2, data2);
+	BUCKET_put_data(bObj, string3, data3);
+	BUCKET_put_data(bObj, string4, data4);
+	BUCKET_put_data(bObj, string5, data5);
+	BUCKET_put_data(bObj, string6, data6);
+	BUCKET_put_data(bObj, string7, data7);
+	BUCKET_put_data(bObj, string8, data8);
+	BUCKET_put_data(bObj, string9, data9);
+
+	BUCKET_put_data(bObj, string1, data1);
+	BUCKET_put_data(bObj, string2, data2);
+	BUCKET_put_data(bObj, string3, data3);
+	BUCKET_put_data(bObj, string4, data4);
+	BUCKET_put_data(bObj, string5, data5);
+	BUCKET_put_data(bObj, string6, data6);
+	BUCKET_put_data(bObj, string7, data7);
+	BUCKET_put_data(bObj, string8, data8);
+	BUCKET_put_data(bObj, string9, data9);
+
+	BUCKET_object_destroy(bObj);
+
+	return 0;
+}
