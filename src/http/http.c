@@ -369,7 +369,7 @@ parse_response_header_1_1(struct http_t *http)
 	if (!eol)
 		return;
 
-	sol = eol + sizeof(HTTP_EOL);
+	sol = eol + 2;
 
 	while (sol < eoh)
 	{
@@ -417,13 +417,19 @@ parse_response_header_1_1(struct http_t *http)
 		memcpy((void *)field_value, (void *)p, (eol - p));
 		field_value[eol - p] = 0;
 
+		_log("Putting header field \"%s\" (%s) into hash table\n", field_name, field_value);
 		BUCKET_put_data(http->headers, field_name, field_value);
 
-		sol = eol + sizeof(HTTP_EOL);
+		sol = eol + 2;
 
 #ifdef DEBUG
+		_log("size of HTTP_EOL: %lu\n", sizeof(HTTP_EOL));
 		bucket_t *bucket = BUCKET_get_bucket(http->headers, field_name);
 		assert(bucket);
+		if (bucket->next != NULL)
+		{
+			bucket = BUCKET_get_bucket_from_list(bucket, field_name);
+		}
 		assert(!memcmp((void *)bucket->data, (void *)field_value, bucket->data_len));
 #endif
 	}
@@ -587,9 +593,13 @@ send_request_1_1(struct http_t *http)
 	buf_clear(buf);
 
 	check_target_URL(http, http->usingSecure);
-
 	//set_verb(http, GET);
 	build_request_header_1_1(http);
+
+#ifdef DEBUG
+	_log("Request header:\n\n");
+	_log(buf->buf_head);
+#endif
 
 	if (http->usingSecure)
 	{
@@ -655,7 +665,7 @@ read_until_eoh(struct http_t *http, char **p)
 		if (cycles >= CYCLES_MAX)
 			return HTTP_OPERATION_TIMEOUT;
 
-		if (option_set(OPT_USE_TLS))
+		if (http->usingSecure)
 			n = buf_read_tls(http_tls(http), buf, HTTP_SMALL_READ_BLOCK);
 		else
 			n = buf_read_socket(http_socket(http), buf, HTTP_SMALL_READ_BLOCK);
@@ -737,7 +747,7 @@ read_bytes(struct http_t *http, size_t toread)
 		if (cycles > CYCLES_MAX)
 			break;
 
-		if (option_set(OPT_USE_TLS))
+		if (http->usingSecure)
 			n = buf_read_tls(http_tls(http), buf, r);
 		else
 			n = buf_read_socket(http_socket(http), buf, r);
@@ -1189,30 +1199,6 @@ recv_response_1_1(struct http_t *http)
 		http_set_sock_non_blocking(http);
 	if (!http->conn.ssl_nonblocking)
 		http_set_ssl_non_blocking(http);
-
-	parse_response_header_1_1(http);
-
-	bucket_t *bucket = NULL;
-
-#ifdef DEBUG
-	bucket = BUCKET_get_bucket(http->headers, "set-cookie");
-	if (bucket)
-	{
-		_log("set cookie: %s\n", (char *)bucket->data);
-	}
-
-	bucket = BUCKET_get_bucket(http->headers, "transfer-encoding");
-	if (bucket)
-	{
-		_log("transfer encoding: %s\n", (char *)bucket->data);
-	}
-
-	bucket = BUCKET_get_bucket(http->headers, "content-length");
-	if (bucket)
-	{
-		_log("content length: %s (%d)\n", (char *)bucket->data, atoi((char *)bucket->data));
-	}
-#endif
 /*
  * XXX
  *
@@ -1250,6 +1236,8 @@ __retry:
 
 	bytes = read_until_eoh(http, &p);
 
+	_log(http->conn.read_buf.buf_head);
+
 	_log("Got HTTP response header\n");
 
 	if (bytes < 0 || HTTP_OPERATION_TIMEOUT == bytes)
@@ -1269,6 +1257,30 @@ __retry:
 	_log("got status code %d\n", code);
 
 	http->code = code;
+
+	parse_response_header_1_1(http);
+
+	bucket_t *bucket = NULL;
+
+#ifdef DEBUG
+	bucket = BUCKET_get_bucket(http->headers, "set-cookie");
+	if (bucket)
+	{
+		_log("set cookie: %s\n", (char *)bucket->data);
+	}
+
+	bucket = BUCKET_get_bucket(http->headers, "transfer-encoding");
+	if (bucket)
+	{
+		_log("transfer encoding: %s\n", (char *)bucket->data);
+	}
+
+	bucket = BUCKET_get_bucket(http->headers, "content-length");
+	if (bucket)
+	{
+		_log("content length: %s (%d)\n", (char *)bucket->data, atoi((char *)bucket->data));
+	}
+#endif
 
 /*
  * With HEAD, always send back the code
@@ -1936,6 +1948,7 @@ append_header_1_1(struct http_t *http, char *key)
 	{
 		assert(bucket->data_len < HTTP_COOKIE_MAX);
 
+		_log("Appending header field: %s => %s\n", bucket->key, (char *)bucket->data);
 		if (!memcmp((void *)bucket->key, (void *)"set-cookie", 10))
 			buf_append(&tmp, "Cookie");
 		else
@@ -2292,7 +2305,6 @@ http_disconnect(struct http_t *http)
 	return;
 }
 
-/*
 int
 http_reconnect(struct http_t *http)
 {
@@ -2316,7 +2328,7 @@ http_reconnect(struct http_t *http)
 
 	if (getaddrinfo(http->host, NULL, NULL, &ainf) < 0)
 	{
-		error("failed to get address information for remote host");
+		_log("failed to get address information for remote host\n");
 		goto fail;
 	}
 
@@ -2341,13 +2353,13 @@ http_reconnect(struct http_t *http)
 
 	if ((http_socket(http) = socket(AF_INET, SOCK_STREAM, 0)) < 0)
 	{
-		error("error opening socket");
+		_log("error opening socket\n");
 		goto fail_release_ainf;
 	}
 
 	if (connect(http_socket(http), (struct sockaddr *)&sock4, (socklen_t)sizeof(sock4)) != 0)
 	{
-		error("error connecting to remote host");
+		_log("error connecting to remote host\n");
 		goto fail_release_ainf;
 	}
 
@@ -2372,7 +2384,6 @@ http_reconnect(struct http_t *http)
 	fail:
 	return -1;
 }
-*/
 
 int
 HTTP_upgrade_to_TLS(struct http_t *http)
