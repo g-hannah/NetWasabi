@@ -25,37 +25,13 @@
  * TODO
  *
  * Gracefully handle 3xx/4xx/5xx codes.
- * (follow redirects automatically)
- *
- * Make the dead link and redirected link caches
- * shareable among threads.
  *
  * Upgrade to handle HTTP 2.0
- *
- * Embed HTTP_methods structure within HTTP object
- * which will allow us to be dynamic and use various
- * versions of the HTTP protocol.
  *
  * Decouple this file and the netwasabi header
  * because we want the internals of this module
  * to be opaque and therefore reusable elsewhere.
  *
- * Create a hash bucket data structure for header
- * fields so that it will be easy to consult
- * whatever we are interested in later.
- * (At the moment, we just search within the
- * header each time we wish to know a value
- * and save it temporarily in a struct).
- *
- * Move the dead link and redirected link caches
- * out of this file. It is the responsability of
- * the user of the module to do what they wish
- * with the information on a URL returned from
- * the HTTP module (404, etc). We should, like
- * in the Java HTTP implementation, simply have
- * a flag the user can set which will determine
- * whether we automatically follow redirected
- * links or just return the 3xx code.
  */
 
 #define HTTP_VERSION_1_0 0x10000000u
@@ -130,13 +106,13 @@ struct HTTP_private
  * and headers, which allows
  * multithreading.
  */
-	cache_t *headers;
-	cache_t *cookies;
+	//cache_t *headers;
+	//cache_t *cookies;
 /*
  * The following are used to pass their addresses
  * to cache_alloc().
  */
-	http_header_t *hfPtr; // header field object pointer
+	//http_header_t *hfPtr; // header field object pointer
 };
 
 /*
@@ -155,9 +131,11 @@ int http_connection_closed(struct http_t *) __nonnull((1)) __wur;
 static int send_request_1_1(struct http_t *);
 static int recv_response_1_1(struct http_t *);
 static int build_request_header_1_1(struct http_t *);
-static int append_header_1_1(buf_t *, http_header_t *);
-static int check_header_1_1(buf_t *, const char *, off_t, off_t *);
-static char *fetch_header_1_1(buf_t *, const char *, http_header_t *, off_t);
+//static int append_header_1_1(buf_t *, http_header_t *);
+static int append_header_1_1(struct http_t *, char *);
+//static int check_header_1_1(buf_t *, const char *, off_t, off_t *);
+//static char *fetch_header_1_1(buf_t *, const char *, http_header_t *, off_t);
+static char *fetch_header_1_1(struct http_t *, char *);
 static char *URL_parse_host(char *, char *);
 static char *URL_parse_page(char *, char *);
 static const char *code_as_string(struct http_t *);
@@ -169,7 +147,7 @@ struct HTTP_methods Methods_v1_1 = {
 	.recv_response = recv_response_1_1,
 	.build_header = build_request_header_1_1,
 	.append_header = append_header_1_1,
-	.check_header = check_header_1_1,
+	//.check_header = check_header_1_1,
 	.fetch_header = fetch_header_1_1,
 	.URL_parse_host = URL_parse_host,
 	.URL_parse_page = URL_parse_page,
@@ -410,7 +388,24 @@ parse_response_header_1_1(struct http_t *http)
 		field_name[q - p] = 0;
 		to_lower_case(field_name);
 
+		/*
+		 * If we encounter a set-cookie header, check
+		 * for and clear any old ones. Otherwise, we'll
+		 * end up with a long linked list of cookies
+		 * that we keep adding to our request headers.
+		 */
+		if (!memcmp((void *)field_name, (void *)"set-cookie", 10))
+		{
+			BUCKET_clear_bucket(http->headers, field_name);
+		}
+
 		p = ++q;
+
+	/*
+	 * XXX	Determine rule regarding more than one
+	 *	bit of WS between the ':' after the
+	 *	field name and the following field value.
+	 */
 		while (*p == ' ' && p < eol)
 			++p;
 
@@ -432,54 +427,6 @@ parse_response_header_1_1(struct http_t *http)
 		assert(!memcmp((void *)bucket->data, (void *)field_value, bucket->data_len));
 #endif
 	}
-}
-
-/**
- * check_cookies - check for Set-Cookie header fields in response header
- *			and clear all old cookies if there are new ones specified.
- *
- * @buf: the receive buffer
- * @http: the HTTP object containing the cookie object cache
- */
-static int
-check_cookies(struct http_t *http)
-{
-	assert(http);
-
-	buf_t *buf = &http->conn.read_buf;
-	struct HTTP_private *private = (struct HTTP_private *)http;
-
-	if (strstr(buf->buf_head, "Set-Cookie"))
-	{
-		off_t off = 0;
-
-		cache_clear_all(private->cookies);
-
-		while (http->ops->check_header(buf, "Set-Cookie", off, &off))
-		{
-			if (!(private->hfPtr = (http_header_t *)cache_alloc(private->cookies, &private->hfPtr)))
-			{
-				fprintf(stderr, "private_check_cookies: failed to allocate HTTP header cache object\n");
-				goto fail;
-			}
-
-			if (!(http->ops->fetch_header(buf, "Set-Cookie", private->hfPtr, off)))
-			{
-				fprintf(stderr, "private_check_cookies: failed to extract Set-Cookie header field\n");
-				goto fail_dealloc;
-			}
-
-			++off;
-		}
-	}
-
-	return 0;
-
-	fail_dealloc:
-	cache_clear_all(private->cookies);
-
-	fail:
-	return -1;
 }
 
 #define HTTP_HEADER_BUFSIZE 8192
@@ -575,21 +522,11 @@ build_request_header_1_1(struct http_t *http)
 	header_buf = NULL;
 
 /*
- * Append any cached cookies to the request header.
+ * Append any cookies to the header. append_header()
+ * will replace "set-cookie" with "cookie" when
+ * appending them.
  */
-	int nrCookies = cache_nr_used(((struct HTTP_private *)http)->cookies);
-
-	if (nrCookies)
-	{
-		http_header_t *cookieObj = (http_header_t *)((struct HTTP_private *)http)->cookies->cache;
-		int i;
-
-		for (i = 0; i < nrCookies; ++i)
-		{
-			http->ops->append_header(buf, cookieObj);
-			++nrCookies;
-		}
-	}
+	http->ops->append_header(http, "set-cookie");
 
 	buf_destroy(&tmp);
 
@@ -1147,54 +1084,30 @@ set_new_location(struct http_t *http)
 {
 	assert(http);
 
-	struct HTTP_private *private = (struct HTTP_private *)http;
-	http_header_t *location = NULL;
+	bucket_t *bucket = BUCKET_get_bucket(http->headers, "location");
 
-	if (!(location = (http_header_t *)cache_alloc(private->headers, &location)))
-	{
-		_log("set_new_location: failed to obtain HTTP header cache object\n");
-		goto fail_dealloc;
-	}
+	assert(bucket->data_len < HTTP_URL_MAX);
+	strcpy(http->URL, (char *)bucket->data);
 
-	if (!http->ops->fetch_header(&http->conn.read_buf, "Location", location, (off_t)0))
-	{
-		_log("%s: failed to find HTTP header field \"Location\"\n", __func__);
-		goto fail_dealloc;
-	}
+	_log("Got new location: %s\n", (char *)bucket->data);
 
-	assert(location->vlen < HTTP_URL_MAX);
-
-	if (!location->value[0])
-		return 0;
-
-	strcpy(http->URL, location->value);
-
-	_log("Got new location: %s\n", location->value);
-
-	if (!http->ops->URL_parse_host(location->value, http->host))
+	if (!http->ops->URL_parse_host(http->URL, http->host))
 	{
 		_log("%s: failed to parse HOST from URL\n", __func__);
-		goto fail_dealloc;
+		return -1;
 	}
 
 	_log("Extracted host: %s\n", http->host);
 
-	if (!http->ops->URL_parse_page(location->value, http->page))
+	if (!http->ops->URL_parse_page(http->URL, http->page))
 	{
 		_log("%s: failed to parse page from URL\n", __func__);
-		goto fail_dealloc;
+		return -1;
 	}
 
 	_log("Extracted page: %s\n", http->page);
 
-	cache_dealloc(private->headers, location, &location);
-
 	return 0;
-
-fail_dealloc:
-	cache_dealloc(private->headers, location, &location);
-
-	return -1;
 }
 
 /**
@@ -1263,10 +1176,10 @@ recv_response_1_1(struct http_t *http)
 	int total_bytes = 0;
 	int needResend = 0;
 	char tmpURL[HTTP_URL_MAX];
-	http_header_t *content_len = NULL;
-	http_header_t *transfer_enc = NULL;
+	//http_header_t *content_len = NULL;
+	//http_header_t *transfer_enc = NULL;
 	buf_t *buf = &http->conn.read_buf;
-	struct HTTP_private *private = HTTP_private(http);
+	//struct HTTP_private *private = HTTP_private(http);
 
 /*
  * Set the (ssl) socket to non-blocking.
@@ -1281,6 +1194,7 @@ recv_response_1_1(struct http_t *http)
 
 	bucket_t *bucket = NULL;
 
+#ifdef DEBUG
 	bucket = BUCKET_get_bucket(http->headers, "set-cookie");
 	if (bucket)
 	{
@@ -1298,6 +1212,7 @@ recv_response_1_1(struct http_t *http)
 	{
 		_log("content length: %s (%d)\n", (char *)bucket->data, atoi((char *)bucket->data));
 	}
+#endif
 /*
  * XXX
  *
@@ -1333,27 +1248,22 @@ __retry:
 	buf_clear(&http->conn.read_buf);
 	assert(http->conn.read_buf.data_len == 0);
 
-	retVal = read_until_eoh(http, &p);
+	bytes = read_until_eoh(http, &p);
 
 	_log("Got HTTP response header\n");
 
-	if (retVal < 0 || HTTP_OPERATION_TIMEOUT == retVal)
+	if (bytes < 0 || HTTP_OPERATION_TIMEOUT == bytes)
 	{
-		_log("read_until_eoh() returned %d\n", retVal);
-		goto fail_dealloc;
+		_log("read_until_eoh() returned %d\n", bytes);
+		goto fail;
 	}
 
-	total_bytes += retVal;
+	total_bytes += bytes;
 
 	_log("Read %lu bytes\n", total_bytes);
 	retVal = -1;
 
-/*
- * If the response header has any Set-Cookie header fields, then
- * clear all current cookie objects from the cache and extract
- * the new one(s) from the header and cache them.
- */
-	check_cookies(http);
+	//check_cookies(http);
 
 	code = http_status_code_int(buf);
 	_log("got status code %d\n", code);
@@ -1367,7 +1277,7 @@ __retry:
  * transparently.
  */ 
 	if (HEAD == http->verb)
-		goto out_dealloc;
+		goto out;
 
 	if (HTTP_OK != code)
 	{
@@ -1397,7 +1307,7 @@ __retry:
 			if (set_new_location(http) < 0)
 			{
 				_log("set_new__location() returned < 0\n");
-				goto fail_dealloc;
+				goto fail;
 			}
 
 			_log("Old location: %s - New location: %s\n", tmpURL, http->URL);
@@ -1424,26 +1334,27 @@ __retry:
 		case HTTP_BAD_REQUEST:
 		case HTTP_NOT_FOUND:
 		default:
-			goto out_dealloc;
+			goto fail;
 	}
 
-	if (http->ops->fetch_header(&http->conn.read_buf, "Transfer-Encoding", transfer_enc, (off_t)0))
+	bucket = BUCKET_get_bucket(http->headers, "transfer-encoding");
+
+	if (bucket && !strcasecmp((char *)bucket->data, "chunked"))
 	{
-		if (!strncasecmp("chunked", transfer_enc->value, transfer_enc->vlen))
+		if (do_chunked_recv(http) == -1)
 		{
-			if (do_chunked_recv(http) == -1)
-			{
-				_log("do_chunked_recv() returned -1\n");
-				goto fail_dealloc;
-			}
-
-			goto __done_reading;
+			_log("do_chunked_recv() returned -1\n");
+			goto fail;
 		}
+
+		goto __done_reading;
 	}
 
-	if (http->ops->fetch_header(buf, "Content-Length", content_len, (off_t)0))
+	bucket = BUCKET_get_bucket(http->headers, "content-length");
+
+	if (bucket)
 	{
-		clen = strtoul(content_len->value, NULL, 0);
+		clen = strtoul((char *)bucket->data, NULL, 0);
 
 		overread = (buf->buf_tail - p);
 
@@ -1453,7 +1364,7 @@ __retry:
 
 			while (clen)
 			{
-				if (option_set(OPT_USE_TLS))
+				if (http->usingSecure)
 					bytes = buf_read_tls(http_tls(http), buf, clen);
 				else
 					bytes = buf_read_socket(http_socket(http), buf, clen);
@@ -1461,7 +1372,7 @@ __retry:
 				if (bytes < 0)
 				{
 					_log("buf_read_[tls/socket]() returned %d\n", retVal);
-					goto fail_dealloc;
+					goto fail;
 				}
 				else
 				if (!bytes)
@@ -1480,7 +1391,7 @@ __retry:
 	{
 		_log("No Content-Length or chunked transfer encoding header fields");
 		total_bytes = 0;
-		goto out_dealloc;
+		goto fail;
 	}
 
 __done_reading:
@@ -1530,24 +1441,10 @@ __done_reading:
 	}
 */
 
-out_dealloc:
-	cache_dealloc(private->headers, (void *)content_len, &content_len);
-	cache_dealloc(private->headers, (void *)transfer_enc, &transfer_enc);
-
+out:
 	return total_bytes;
 
-fail_dealloc:
-	if (content_len)
-	{
-		cache_dealloc(private->headers, (void *)content_len, &content_len);
-	}
-
-	if (transfer_enc)
-	{
-		cache_dealloc(private->headers, (void *)transfer_enc, &transfer_enc);
-	}
-
-//fail:
+fail:
 	return -1;
 }
 
@@ -1800,7 +1697,7 @@ URL_parse_page(char *url, char *page)
  * type (like Set-Cookie). So returning the offset at which
  * we found a header field allows us to continue a search
  * past that point for more.
- */
+ *
 int
 check_header_1_1(buf_t *buf, const char *name, off_t off, off_t *ret_off)
 {
@@ -1822,6 +1719,7 @@ check_header_1_1(buf_t *buf, const char *name, off_t off, off_t *ret_off)
 
 	return 0;
 }
+*/
 
 /*
 #define HTTP_STATUS(b) \
@@ -1918,19 +1816,24 @@ http_parse_header(buf_t *buf, struct http_header *head)
 */
 
 /**
- * http_get_header - find and return a line in an HTTP header
- * @buf: the buffer containing the HTTP header
- * @name: the name of the header field (e.g., "Set-Cookie")
+ * Get a header field value from our hash bucket.
+ *
+ * @http: our HTTP object
+ * @key: header field name (e.g., content-length)
  */
 char *
-fetch_header_1_1(buf_t *buf, const char *name, http_header_t *hh, off_t whence)
+fetch_header_1_1(struct http_t *http, char *key)
 {
-	assert(buf);
-	assert(name);
-	assert(hh);
-	assert(hh->name);
-	assert(hh->value);
+	assert(http);
+	assert(key);
 
+	bucket_t *bucket = BUCKET_get_bucket(http->headers, key);
+	if (!bucket)
+		return NULL;
+
+	return (char *)bucket->data;
+
+/*
 	char *check_from = buf->buf_head + whence;
 	char *tail = buf->buf_tail;
 	char *eoh = HTTP_EOH(buf);
@@ -1989,25 +1892,32 @@ fetch_header_1_1(buf_t *buf, const char *name, http_header_t *hh, off_t whence)
 	hh->value[hh->vlen] = 0;
 
 	return hh->value;
+*/
 }
 
 /**
  * Append a new header field to the request
  * header in the buffer.
  *
- * @buf The buffer holding the outgoing request header.
- * @hh The header field object.
+ * @http Our HTTP object.
+ * @key The name of the header field.
  */
+//append_header_1_1(buf_t *buf, http_header_t *hh)
 int
-append_header_1_1(buf_t *buf, http_header_t *hh)
+append_header_1_1(struct http_t *http, char *key)
 {
-	assert(buf);
-	assert(hh);
+	assert(http);
+	assert(key);
 
+	buf_t *buf = &http->conn.write_buf;
 	char *p;
 	char *head = buf->buf_head;
 	char *eoh = HTTP_EOH(buf);
 	off_t poff;
+
+	bucket_t *bucket = BUCKET_get_bucket(http->headers, key);
+	if (!bucket)
+		return 0;
 
 	if (!eoh)
 	{
@@ -2020,19 +1930,30 @@ append_header_1_1(buf_t *buf, http_header_t *hh)
 
 	buf_t tmp;
 
-	assert(hh->vlen < HTTP_COOKIE_MAX);
+	buf_init(&tmp, HTTP_ALIGN_SIZE(HTTP_COOKIE_MAX));
 
-	buf_init(&tmp, HTTP_COOKIE_MAX + strlen(hh->name) + 2);
-	buf_append(&tmp, hh->name);
-	buf_append(&tmp, ": ");
-	buf_append(&tmp, hh->value);
-	buf_append(&tmp, "\r\n");
+	while (bucket)
+	{
+		assert(bucket->data_len < HTTP_COOKIE_MAX);
 
-	poff = (p - buf->buf_head);
-	buf_shift(buf, (off_t)(p - head), tmp.data_len);
-	p = (buf->buf_head + poff);
+		if (!memcmp((void *)bucket->key, (void *)"set-cookie", 10))
+			buf_append(&tmp, "Cookie");
+		else
+			buf_append(&tmp, bucket->key);
 
-	strncpy(p, tmp.buf_head, tmp.data_len);
+		buf_append(&tmp, ": ");
+		buf_append(&tmp, (char *)bucket->data);
+		buf_append(&tmp, "\r\n");
+
+		poff = (p - buf->buf_head);
+		buf_shift(buf, (off_t)(p - head), tmp.data_len);
+		p = (buf->buf_head + poff);
+
+		strncpy(p, tmp.buf_head, tmp.data_len);
+		buf_clear(&tmp);
+
+		bucket = bucket->next;
+	}
 
 	buf_destroy(&tmp);
 
@@ -2050,7 +1971,7 @@ http_check_host(struct http_t *http)
 	assert(http);
 
 	char old_host[HTTP_HNAME_MAX];
-	struct HTTP_private *private = (struct HTTP_private *)http;
+	//struct HTTP_private *private = (struct HTTP_private *)http;
 
 	if (!http->URL[0])
 		return;
@@ -2061,8 +1982,8 @@ http_check_host(struct http_t *http)
 
 	if (strcmp(http->host, old_host))
 	{
-		if (cache_nr_used(private->cookies) > 0)
-			cache_clear_all(private->cookies);
+		//if (cache_nr_used(private->cookies) > 0)
+		//	cache_clear_all(private->cookies);
 
 		http_reconnect(http);
 	}
@@ -2080,34 +2001,20 @@ http_connection_closed(struct http_t *http)
 {
 	assert(http);
 
-	http_header_t *connection = NULL;
-	buf_t *buf = &http->conn.read_buf;
-	int retVal = 0;
-	struct HTTP_private *private = (struct HTTP_private *)http;
+	char *header_value = http->ops->fetch_header(http, "connection");
 
-	//fprintf(stderr, "allocating header obj in CONNECTION @ %p\n", &connection);
+	if (!header_value)
+		return 0;
 
-	connection = cache_alloc(private->headers, &connection);
-	assert(connection);
+	if (!strcasecmp("close", header_value))
+		return 1;
 
-	http->ops->fetch_header(buf, "Connection", connection, (off_t)0);
-
-	if (connection->value[0])
-	{
-		if (!strcasecmp("close", connection->value))
-			retVal = 1;
-	}
-
-	//fprintf(stderr, "deallocting header obj CONNECTION @ %p\n", &connection);
-
-	cache_dealloc(private->headers, connection, &connection);
-	return retVal;
+	return 0;
 }
 
 static int
 HTTP_init_object(struct HTTP_private *private, uint64_t id)
 {
-	//char cache_name[64];
 	struct http_t *http;
 
 	http = (struct http_t *)private;
