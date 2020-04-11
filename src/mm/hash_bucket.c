@@ -284,8 +284,31 @@ BUCKET_get_bucket(bucket_obj_t *bucket_obj, char *key)
 
 	uint32_t hash = hash_Object(key);
 	int index = BUCKET(hash, bucket_obj->nr_buckets);
+	bucket_t *bucket = &bucket_obj->buckets[index];
 
-	return (bucket_t *)&bucket_obj->buckets[index];
+	if (bucket->used)
+		return bucket;
+	else
+		return NULL;
+}
+
+bucket_t *
+BUCKET_get_bucket_from_list(bucket_t *bucket, char *key)
+{
+	assert(bucket);
+	assert(key);
+
+	size_t key_len = strlen(key);
+
+	while (bucket)
+	{
+		if (!memcmp((void *)bucket->key, (void *)key, key_len))
+			return bucket;
+
+		bucket = bucket->next;
+	}
+
+	return NULL;
 }
 
 bucket_obj_t *
@@ -374,6 +397,8 @@ BUCKET_clear_bucket(bucket_obj_t *bucket_obj, char *key)
 	bucket->data_len = 0;
 	bucket->hash = 0;
 	bucket->used = 0;
+
+	--bucket_obj->nr_buckets_used;
 
 	return;
 }
