@@ -6,6 +6,7 @@
 #include "cache.h"
 #include "http.h"
 #include "malloc.h"
+#include "netwasabi.h"
 
 #define BITS_PER_CHAR (sizeof(char) * 8)
 
@@ -320,16 +321,6 @@ cache_create(char *name,
 
 	pthread_mutex_init(&cachep->lock, NULL);
 
-#ifdef DEBUG
-	printf(
-			"Created cache \"%s\"\n"
-			"Size of each object=%lu bytes\n"
-			"Capacity of cache=%d objects\n",
-			name,
-			size,
-			capacity);
-#endif
-
 	return cachep;
 }
 
@@ -344,18 +335,6 @@ cache_destroy(cache_t *cachep)
 
 	int	i;
 	int capacity = cache_capacity(cachep);
-
-#ifdef DEBUG
-	fprintf(stderr,
-		"Destroying cache \"%s\"\n"
-		"Size of cache = %lu bytes\n"
-		"Size of objects = %lu bytes\n"
-		"Cache capacity = %d objects\n",
-		cachep->name,
-		cachep->cache_size,
-		cachep->objsize,
-		cachep->capacity);
-#endif
 
 	if (cachep->name)
 	{
@@ -427,17 +406,6 @@ cache_alloc(cache_t *cachep, void *ptr_addr)
 	void *owner_addr = ptr_addr;
 	off_t owner_off;
 
-#ifdef DEBUG
-	fprintf(stderr,
-		"%sCACHE: %s\n"
-		"number of active pointers = %d\n"
-		"number of objects cache can hold = %d%s\n",
-		COL_RED, cachep->name,
-		cachep->nr_assigned,
-		cachep->capacity,
-		COL_END);
-#endif
-
 /*
  * Our bitmap can be deceiving and an index may be return
  * because it found a zero-bit but in fact that has gone
@@ -465,27 +433,6 @@ cache_alloc(cache_t *cachep, void *ptr_addr)
 		if (new_capacity & (BITS_PER_CHAR - 1))
 			++new_bitmap_size;
 
-#ifdef DEBUG
-		fprintf(stderr,
-			"Extending cache \"%s\"\n"
-			"Size of objects = %lu bytes\n"
-			"Current cache size = %lu bytes\n"
-			"Current capacity = %d objects\n"
-			"New cache size = %lu bytes\n"
-			"New capacity = %d objects\n"
-			"Added capacity = %d objects\n",
-			cachep->name,
-			cachep->objsize,
-			cache_size,
-			old_capacity,
-			new_size,
-			new_capacity,
-			added_capacity);
-
-		fprintf(stderr, "%sExtending ->assigned_list (adding %lu bytes)%s\n",
-			COL_RED, (added_capacity * sizeof(struct cache_obj_ctx)), COL_END);
-#endif
-
 		cachep->assigned_list = nw_realloc(cachep->assigned_list, (new_capacity * sizeof(struct cache_obj_ctx)));
 		assert(cachep->assigned_list);
 
@@ -496,14 +443,10 @@ cache_alloc(cache_t *cachep, void *ptr_addr)
 		}
 
 		old_cache = cachep->cache;
-#ifdef DEBUG
-		fprintf(stderr, "%sCalling realloc() for ->cache%s\n", COL_RED, COL_END);
-#endif
+
 		cachep->cache = nw_realloc(cachep->cache, new_size);
 		assert(cachep->cache);
-#ifdef DEBUG
-		fprintf(stderr, "%sCalling realloc() for ->free_bitmap%s\n", COL_RED, COL_END);
-#endif
+
 		cachep->free_bitmap = nw_realloc(cachep->free_bitmap, new_bitmap_size);
 		assert(cachep->free_bitmap);
 
@@ -625,16 +568,6 @@ cache_clear_all(cache_t *cachep)
 	int capacity = cachep->capacity;
 	int i;
 
-#ifdef DEBUG
-	fprintf(stderr,
-			"%sClearing all objects from cache \"%s\"\n"
-			"nr_assigned = %d%s\n",
-			COL_DARKBLUE,
-			cachep->name,
-			cachep->nr_assigned,
-			COL_END);
-#endif
-
 	for (i = 0; i < capacity; ++i)
 	{
 		slot = __cache_obj(cachep, i);
@@ -643,15 +576,6 @@ cache_clear_all(cache_t *cachep)
 		if (cache_obj_used(cachep, slot))
 			cache_dealloc(cachep, slot, owner);
 	}
-
-#ifdef DEBUG
-	fprintf(stderr,
-		"%sCleared objects\n"
-		"nr_assigned = %d%s\n",
-		COL_DARKBLUE,
-		cachep->nr_assigned,
-		COL_END);
-#endif
 
 	return;
 }
