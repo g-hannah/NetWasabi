@@ -9,7 +9,7 @@ PRIMARY_DEPENDENCIES = \
 	$(INCLUDE_DIR)/cache.h \
 	$(INCLUDE_DIR)/cache_management.h \
 	$(INCLUDE_DIR)/fast_mode.h \
-	$(INCLUDE_DIR)/http.h
+	$(INCLUDE_DIR)/http.h \
 	$(INCLUDE_DIR)/graph.h \
 	$(INCLUDE_DIR)/netwasabi.h \
 	$(INCLUDE_DIR)/malloc.h \
