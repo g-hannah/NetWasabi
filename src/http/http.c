@@ -113,35 +113,10 @@ static enum Error_Code
 struct HTTP_private
 {
 	struct http_t http;
-/*
- * This is private data only
- * accessable within this file.
- *
- * Every HTTP object created
- * has its own cache of cookies
- * and headers, which allows
- * multithreading.
- */
+
 	bucket_obj_t *headers;
 	cache_t *cookies;
-	//cache_t *headers;
-	//cache_t *cookies;
-/*
- * The following are used to pass their addresses
- * to cache_alloc().
- */
-	//http_header_t *hfPtr; // header field object pointer
 };
-
-/*
-int http_status_code_int(buf_t *) __nonnull((1)) __wur;
-ssize_t http_response_header_len(buf_t *) __nonnull((1)) __wur;
-
-const char *http_status_code_string(int) __wur;
-
-void http_check_host(struct http_t *) __nonnull((1));
-int http_connection_closed(struct http_t *) __nonnull((1)) __wur;
-*/
 
 void http_check_host(struct http_t *) __nonnull((1));
 int http_connection_closed(struct http_t *) __nonnull((1)) __wur;
@@ -150,8 +125,6 @@ static int send_request_1_1(struct http_t *);
 static int recv_response_1_1(struct http_t *);
 static int build_request_header_1_1(struct http_t *);
 static int append_header_1_1(struct http_t *, char *, char *);
-//static int check_header_1_1(buf_t *, const char *, off_t, off_t *);
-//static char *fetch_header_1_1(buf_t *, const char *, http_header_t *, off_t);
 static char *fetch_header_1_1(struct http_t *, char *);
 static char *URL_parse_host(char *, char *);
 static char *URL_parse_page(char *, char *);
@@ -614,6 +587,17 @@ parse_cookies(struct http_t *http)
 				p = ++q;
 			}
 		} // while (1)
+
+		_log(
+			"Cookie\n\n"
+			"value: %s\n"
+			"expires timestamp: %ld\n"
+			"for domain: %s\n"
+			"for path: %s\n",
+			cookie->whole_cookie,
+			cookie->expires,
+			cookie->for_domain,
+			cookie->for_path);
 
 		bucket = bucket->next;
 	}
