@@ -446,7 +446,7 @@ main(int argc, char *argv[])
 	buf_t *rbuf = NULL;
 	buf_t *wbuf = NULL;
 
-#define MAIN_THREAD_ID 0x445248544e49414dul
+#define MAIN_THREAD_ID 0x4e49414du
 	if (!(http = HTTP_new(MAIN_THREAD_ID)))
 	{
 		fprintf(stderr, "main: failed to obtain new HTTP object\n");
