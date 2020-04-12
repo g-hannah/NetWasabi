@@ -38,7 +38,7 @@ typedef struct cache_t
 
 cache_t *cache_create(char *, size_t, int, cache_ctor_t, cache_dtor_t);
 void cache_destroy(cache_t *) __nonnull((1));
-void *cache_alloc(cache_t *, void *) __nonnull((1,2)) __wur;
+void *cache_alloc(cache_t *, void *) __nonnull((1)) __wur;
 void cache_dealloc(cache_t *, void *, void *) __nonnull((1,2));
 int cache_obj_used(cache_t *, void *) __nonnull((1,2)) __wur;
 void *cache_next_used(cache_t *) __nonnull((1)) __wur;
