@@ -557,8 +557,11 @@ __cache_get_obj_owner(cache_t *cachep, void *slot)
 
 	for (i = 0; i < nr_assigned; ++i)
 	{
-		if (*((unsigned long *)ctx->ptr_addr) == (unsigned long)slot)
-			return ctx->ptr_addr;
+		if (ctx->ptr_addr)
+		{
+			if (*((unsigned long *)ctx->ptr_addr) == (unsigned long)slot)
+				return ctx->ptr_addr;
+		}
 
 		++ctx;
 	}
