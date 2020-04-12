@@ -163,7 +163,9 @@ static inline int __owner_is_in_cache(cache_t *cachep, void *addr)
 #define CACHE_ASSIGN_PTR(c, p, s)\
 do {\
 	struct cache_obj_ctx *____ctx_p;\
-	int __in_cache = __owner_is_in_cache((c), (p));\
+	int __in_cache;\
+	if ((p) && __owner_is_in_cache((c), (p))\
+		__in_cache = 1;\
 	int ____nr_ = (c)->nr_assigned;\
 	assert(____nr_ < (c)->capacity);\
 	____ctx_p = ((c)->assigned_list + ____nr_);\
@@ -191,7 +193,7 @@ do {\
 	assert(____nr_ <= (c)->capacity);\
 	for (____i_d_x = 0; ____i_d_x < ____nr_; ++____i_d_x)\
 	{\
-		if (____ctx_p->ptr_addr == (p))\
+		if ((p) && ____ctx_p->ptr_addr == (p))\
 		{\
 			for (____k = ____i_d_x; ____k < (____nr_ - 1); ++____k)\
 				memcpy((void *)&____ctx_p[____k], (void *)&____ctx_p[____k+1], sizeof(struct cache_obj_ctx));\
@@ -218,7 +220,8 @@ do {\
 		{\
 			____ctx_p->ptr_addr = (void *)((char *)(c)->cache + ____ctx_p->ptr_offset);\
 		}\
-		*((unsigned long *)____ctx_p->ptr_addr) = (unsigned long)((char *)(c)->cache + ____ctx_p->obj_offset);\
+		if (____ctx_p->ptr_addr)\
+			*((unsigned long *)____ctx_p->ptr_addr) = (unsigned long)((char *)(c)->cache + ____ctx_p->obj_offset);\
 		++____ctx_p;\
 	}\
 } while (0)
@@ -433,21 +436,24 @@ cache_alloc(cache_t *cachep, void *ptr_addr)
 		if (new_capacity & (BITS_PER_CHAR - 1))
 			++new_bitmap_size;
 
-		cachep->assigned_list = nw_realloc(cachep->assigned_list, (new_capacity * sizeof(struct cache_obj_ctx)));
+		cachep->assigned_list = realloc(cachep->assigned_list, (new_capacity * sizeof(struct cache_obj_ctx)));
 		assert(cachep->assigned_list);
 
-		if (__owner_is_in_cache(cachep, owner_addr))
+		if (owner_addr)
 		{
-			owner_off = (off_t)((char *)owner_addr - (char *)cachep->cache);
-			in_cache = 1;
+			if (__owner_is_in_cache(cachep, owner_addr))
+			{
+				owner_off = (off_t)((char *)owner_addr - (char *)cachep->cache);
+				in_cache = 1;
+			}
 		}
 
 		old_cache = cachep->cache;
 
-		cachep->cache = nw_realloc(cachep->cache, new_size);
+		cachep->cache = realloc(cachep->cache, new_size);
 		assert(cachep->cache);
 
-		cachep->free_bitmap = nw_realloc(cachep->free_bitmap, new_bitmap_size);
+		cachep->free_bitmap = realloc(cachep->free_bitmap, new_bitmap_size);
 		assert(cachep->free_bitmap);
 
 		cachep->nr_free += added_capacity;
@@ -462,7 +468,7 @@ cache_alloc(cache_t *cachep, void *ptr_addr)
  */
 		if (old_cache != cachep->cache)
 		{
-			if (in_cache)
+			if (owner_addr && in_cache)
 				owner_addr = (void *)((char *)cachep->cache + owner_off);
 
 			CACHE_ADJUST_PTRS(cachep);
