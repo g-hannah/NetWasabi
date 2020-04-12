@@ -514,7 +514,7 @@ main(int argc, char *argv[])
 
 	http->ops->send_request(http);
 	http->ops->recv_response(http);
-	//status_code = do_request(http);
+
 	update_status_code(http->code);
 
 	if (HTTP_OK != http->code)
@@ -522,35 +522,6 @@ main(int argc, char *argv[])
 		fprintf(stderr, "Error (%d %s)\n", http->code, http->ops->code_as_string(http));
 		goto out_disconnect;
 	}
-
-/*
-	switch((unsigned int)http->code)
-	{
-		case HTTP_OK:
-			break;
-		case HTTP_ALREADY_EXISTS:
-			do_not_archive = 1;
-//
-// It already exists, but we would like to get it anyway
-// and extract URLs from it and start crawling from there.
-//
-			http_send_request(http, GET);
-			status_code = http_recv_response(http);
-			update_status_code(status_code);
-			break;
-		case HTTP_BAD_REQUEST:
-			break;
-		case HTTP_FORBIDDEN:
-		case HTTP_METHOD_NOT_ALLOWED:
-		case HTTP_GONE:
-		case HTTP_GATEWAY_TIMEOUT:
-		case HTTP_BAD_GATEWAY:
-		case HTTP_INTERNAL_ERROR:
-		default:
-			update_status_code(status_code);
-			goto out_disconnect;
-	}
-*/
 
 	parse_links(http, &cache1_ctx, &cache2_ctx);
 	update_cache1_count(cache_nr_used(cache1_ctx.cache));
