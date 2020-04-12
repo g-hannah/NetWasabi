@@ -1,53 +1,24 @@
-#ifndef QUEUE_H
-#define QUEUE_H 1
+#ifndef __QUEUE_H__
+#define __QUEUE_H__ 1
 
-#include <pthread.h>
-
-#define FL_QUEUE_FULL 0x1
-#define FL_QUEUE_ERR 0x2
-
-#define QUEUE_FULL(q) ((q)->full)
-#define QUEUE_EMPTY(q) ((q)->nr_queue == 0)
-
-#define QUEUE_BACK(q) ((q)->back)
-#define QUEUE_FRONT(q) ((q)->front)
-
-#define QUEUE_MAX(q) ((q)->nr_max)
-#define QUEUE_SET_MAX(q, m) ((q)->nr_max = (m))
-
-#define QUEUE_INC(q)\
-do {\
-	++((q)->nr_queue);\
-	if ((q)->nr_queue == QUEUE_MAX(q)\
-		(q)->full = 1;\
-} while (0)
-
-#define QUEUE_DEC(q)\
-do {\
-	--((q)->nr_queue);\
-	assert((q)->nr_queue >= 0);\
-} while (0)
-
-struct queue_item
+typedef struct Queue_Item
 {
-	struct queue_item *prev;
-	struct queue_item *next;
 	void *data;
-	size_t size;
-};
+	size_t data_len;
+	struct Queue_item *prev;
+	struct Queue_Item *next;
+} queue_item_t;
 
-struct queue
+typedef struct Queue_Object
 {
-	struct queue_item *front;
-	struct queue_item *back;
-	int nr_queue;
-	int nr_max;
-	int full;
-	pthread_spinlock_t lock;
-};
+	queue_item_t *front;
+	queue_item_t *back;
+	int nr_items;
+} queue_obj_t;
 
-int queue_init(struct queue *, int) __nonnull((1)) __wur;
-int enqueue(struct queue *, void *, size_t) __nonnull((1,2)) __wur;
-void *dequeue(struct queue *) __nonnull((1)) __wur;
+queue_obj_t *QUEUE_object_new(void);
+void QUEUE_object_destroy(queue_obj_t *);
+int QUEUE_enqueue(queue_obj_t *, void *);
+queue_item_t *QUEUE_dequeue(queue_obj_t *);
 
-#endif /* !defined QUEUE_H */
+#endif /* !defined __QUEUE_H__ */
