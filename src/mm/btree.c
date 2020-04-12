@@ -102,6 +102,43 @@ BTREE_put_data(btree_obj_t *btree_obj, void *data, size_t data_len)
 	}
 }
 
+btree_node_t *
+BTREE_search_data(btree_obj_t *btree_obj, void *data, size_t data_len)
+{
+	assert(btree_obj);
+	assert(data);
+
+	btree_node_t *node = btree_obj->root;
+	int cmp;
+
+	while (1)
+	{
+		if (!node)
+			break;
+
+		cmp = memcmp(data, node->data, data_len);
+
+		if (!cmp)
+		{
+			return node;
+		}
+		else
+		if (cmp < 0)
+		{
+			node = node->left;
+			continue;
+		}
+		else
+		if (cmp > 0)
+		{
+			node = node->right;
+			continue;
+		}
+	}
+
+	return NULL;
+}
+
 btree_obj_t *
 BTREE_object_new(void)
 {
