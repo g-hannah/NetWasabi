@@ -1156,15 +1156,6 @@ crawl(struct http_t *http, queue_obj_t *URL_queue)
 			case HTTP_NOT_FOUND:
 
 				cache_dead_URL(Dead_URL_cache, http->URL, code);
-				dead = cache_alloc(Dead_URL_cache, NULL);
-				if (!dead)
-					break;
-
-				memcpy((void *)dead->URL, url, item->data_len);
-				dead->URL[item->data_len] = 0;
-				dead->code = code;
-				dead->timestamp = time(NULL);
-				dead->times_seen = 1;
 
 			default:
 				goto next;
