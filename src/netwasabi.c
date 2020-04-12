@@ -7,6 +7,7 @@
 #include <stdlib.h>
 #include <sys/stat.h> /* for mkdir() */
 #include <unistd.h>
+#include "btree.h"
 #include "buffer.h"
 #include "cache.h"
 #include "cache_management.h"
@@ -17,41 +18,34 @@
 #include "utils_url.h"
 #include "netwasabi.h"
 
+static cache_t *Dead_URL_cache = NULL;
+static btree_obj_t *tree_archived = NULL;
+
 #ifdef DEBUG
-int __DEBUG = 1;
-#else
-int __DEBUG = 0;
+# define __LOG_FILE__ "./nw_log.txt"
+FILE *logfp = NULL;
 #endif
 
-#define __LOG_FILE__ "./nw_log.txt"
-
-FILE *logfp = NULL;
-
-/*
 static void
 LOG(const char *fmt, ...)
 {
+#ifdef DEBUG
 	va_list args;
-
-	if (!__DEBUG)
-		return;
 
 	va_start(args, fmt);
 	vfprintf(logfp, fmt, args);
 	va_end(args);
+#else
+	(void)fmt;
+#endif
 
 	return;
 }
-*/
 
-static cache_t *Dead_URL_cache;
-
+#ifdef DEBUG
 static void
 __ctor __dbg_init(void)
 {
-	if (!__DEBUG)
-		return;
-
 	logfp = fdopen(open(__LOG_FILE__, O_RDWR|O_TRUNC|O_CREAT, S_IRUSR|S_IWUSR), "r+");
 
 	assert(logfp);
@@ -62,14 +56,12 @@ __ctor __dbg_init(void)
 static void
 __dtor __dbg_fini(void)
 {
-	if (!__DEBUG)
-		return;
-
 	fclose(logfp);
 	logfp = NULL;
 
 	return;
 }
+#endif
 
 static sigset_t oldset;
 static sigset_t newset;
@@ -716,7 +708,10 @@ archive_page(struct http_t *http)
 
 	make_local_url(http, &tmp, &local_url);
 
-/* Now we have "file:///path/to/file.extension" */
+/*
+ * Remove the "file://" from start to end up
+ * with local filesystem pathname.
+ */
 	buf_collapse(&local_url, (off_t)0, strlen("file://"));
 
 	rv = check_local_dirs(http, &local_url);
@@ -743,17 +738,20 @@ archive_page(struct http_t *http)
 	close(fd);
 	fd = -1;
 
-	out_free_bufs:
+out_free_bufs:
+
 	buf_destroy(&tmp);
 	buf_destroy(&local_url);
 
 	return 0;
 
-	fail_free_bufs:
+fail_free_bufs:
+
 	buf_destroy(&tmp);
 	buf_destroy(&local_url);
 
-	fail:
+fail:
+
 	return -1;
 }
 
@@ -767,27 +765,16 @@ static const char *const __disallowed_tokens[] =
 	(char *)NULL
 };
 
-static int nr_already = 0;
-static int nr_twins = 0;
-static int nr_dups = 0;
 static int nr_urls_call = 0;
 
 /**
- * __url_acceptable - determine if parsed URL is acceptable by searching for certain tokens
- *				and checking if the URL is already present in the DRAINING cache.
  *
  * @http: our HTTP object with remote host info
- * @fctx: the FILLING cache context with binary tree root
- * @dctx: the DRAINING cache contetx with binary tree root
- * @url: the parsed URL to check
  */
 static int
-__url_acceptable(struct http_t *http, struct cache_ctx *fctx, struct cache_ctx *dctx, buf_t *url)
+__url_acceptable(struct http_t *http, btree_obj_t *tree_archived, buf_t *url)
 {
 	assert(http);
-	assert(fctx);
-	assert(dctx);
-	assert(url);
 
 	//static char tmp_page[HTTP_URL_MAX];
 	int i;
@@ -837,42 +824,8 @@ __url_acceptable(struct http_t *http, struct cache_ctx *fctx, struct cache_ctx *
 			return 0;
 	}
 
-/*
- * Check the current "draining" cache for duplicate URLs
- */
-	if (dctx->cache)
-	{
-		cache_lock(dctx->cache);
-
-		int cmp = 0;
-		URL_t *nodePtr = dctx->root;
-
-		while (nodePtr)
-		{
-			cmp = memcmp((void *)url->buf_head, (void *)nodePtr->URL, url->data_len);
-
-			if (url->buf_head[0] && nodePtr->URL[0] && !cmp)
-			{
-				++nr_twins;
-				cache_unlock(dctx->cache);
-				return 0;
-			}
-			else
-			if (cmp < 0)
-			{
-				nodePtr = nodePtr->left;
-			}
-			else
-			{
-				nodePtr = nodePtr->right;
-			}
-
-			if (!nodePtr)
-				break;
-		}
-
-		cache_unlock(dctx->cache);
-	}
+	if (BTREE_search_data(tree_archived, (void *)url->buf_head, url->data_len))
+		return 0;
 
 	return 1;
 }
@@ -882,7 +835,7 @@ __url_acceptable(struct http_t *http, struct cache_ctx *fctx, struct cache_ctx *
  *
  * @fctx: context holding cache pointer and binary tree root
  * @url: url to add to cache
- */
+ *
 static int
 __insert_link(struct cache_ctx *fctx, buf_t *url)
 {
@@ -920,7 +873,7 @@ __insert_link(struct cache_ctx *fctx, buf_t *url)
  * stack frames due to recursion still hold old addresses from
  * the old cache location. We cannot patch them. So we need
  * to iteratively insert nodes into the tree.
- */
+ *
 
 	URL_t *nodePtr;
 	int cmp;
@@ -935,6 +888,9 @@ __insert_link(struct cache_ctx *fctx, buf_t *url)
 
 	while (1)
 	{
+		if (!nodePtr->URL)
+			assert(0);
+
 		cmp = memcmp((void *)url->buf_head, (void *)nodePtr->URL, url->data_len);
 
 		if (nodePtr->URL[0] && !cmp)
@@ -959,7 +915,7 @@ __insert_link(struct cache_ctx *fctx, buf_t *url)
  * after the alloc() if need be.
  *
  * (NPTR_STACK is pointing to the stack address of our local NPTR var).
- */
+ *
 				nodePtr_offset = (off_t)((char *)nodePtr - (char *)fctx->cache->cache);
 				new_addr = (URL_t *)cache_alloc(fctx->cache, &nodePtr->left);
 				*((unsigned long *)nodePtr_stack) = (unsigned long)((char *)fctx->cache->cache + nodePtr_offset);
@@ -1022,21 +978,21 @@ __insert_link(struct cache_ctx *fctx, buf_t *url)
 
 	return 0;
 }
+*/
 
 /**
- * Parse links from page and store in URL cache within fctx
- * checking for duplicate URLs in URL cache within dctx.
+ * Parse URLs from document and add them to the queue.
  *
- * @http: our HTTP object with remote host info
- * @fctx: context of cache we are filling
- * @dctx: context of cache within which we are checking for duplicates
+ * @http our HTTP object with remote host info
+ * @URL_queue our queue of URLs that we will add to
+ * @tree_archived tree of already-archived URLs to search through before adding to queue
  */
 int
-parse_links(struct http_t *http, struct cache_ctx *fctx, struct cache_ctx *dctx)
+parse_links(struct http_t *http, queue_obj_t *URL_queue, btree_obj_t *tree_archived)
 {
 	assert(http);
-	assert(fctx);
-	assert(dctx);
+	assert(URL_queue);
+	assert(tree_archived);
 
 	char *p = NULL;
 	char *savep = NULL;
@@ -1044,8 +1000,8 @@ parse_links(struct http_t *http, struct cache_ctx *fctx, struct cache_ctx *dctx)
 	int url_type_idx = 0;
 	size_t url_len = 0;
 	buf_t *buf = &http_rbuf(http);
-	buf_t url;
 	buf_t URL;
+	buf_t full_URL;
 	buf_t path;
 
 	if (buf_init(&url, HTTP_URL_MAX) < 0)
@@ -1058,11 +1014,6 @@ parse_links(struct http_t *http, struct cache_ctx *fctx, struct cache_ctx *dctx)
 		goto fail_destroy_bufs;
 
 	savep = buf->buf_head;
-
-	nr_already = 0;
-	nr_twins = 0;
-	nr_dups = 0;
-	nr_urls_call = 0;
 
 	while (1)
 	{
@@ -1109,143 +1060,134 @@ parse_links(struct http_t *http, struct cache_ctx *fctx, struct cache_ctx *dctx)
 		assert(url_len > 0);
 		assert(url_len < HTTP_URL_MAX);
 
-		buf_append_ex(&url, savep, url_len);
-		make_full_url(http, &url, &URL);
+		buf_append_ex(&URL, savep, url_len);
+		make_full_url(http, &url, &full_URL);
 
-		if (!__url_acceptable(http, fctx, dctx, &URL))
+		if (BTREE_search_data(tree_archived, (void *)full_URL.buf_head))
 		{
 			savep = ++p;
 			continue;
 		}
 
-		if (__insert_link(fctx, &URL) < 0)
+		if (QUEUE_enqueue(URL_queue, (void *)URL.buf_head, URL.data_len) < 0)
 			goto fail_destroy_bufs;
 
 		savep = ++p;
 		++nr_urls_call;
 	}
 
-	buf_destroy(&url);
 	buf_destroy(&URL);
+	buf_destroy(&full_URL);
 	buf_destroy(&path);
 
 	return nr_urls_call;
 
-	fail_destroy_bufs:
-	buf_destroy(&url);
+fail_destroy_bufs:
+
 	buf_destroy(&URL);
+	buf_destroy(&full_URL);
 	buf_destroy(&path);
 
-	fail:
+fail:
 	return -1;
 }
 
-/*
- XXX	The idea here was to send a HEAD
-	and then a GET, to save bandwith.
-	But something tells me that actually
-	this is probably a waste of bandwith.
-
-	Just send a GET and deal with the
-	result (200, 3XX, 4XX, 5XX).
 int
-do_request(struct http_t *http)
+crawl(struct http_t *http, queue_obj_t *URL_queue)
 {
 	assert(http);
+	assert(URL_queue);
 
-	int status_code = 0;
-	size_t bytes = 0;
-#ifdef DEBUG
-	char *__eoh = NULL;
-#endif
+	if (!URL_queue->nr_items)
+		return 0;
 
-	if (http_connection_closed(http))
-		http_reconnect(http);
+	queue_item_t *item = NULL;
+	//cache_t *Dead_URL_cache = NULL;
+	dead_url_t *dead = NULL;
+	char *url = NULL;
+	int code;
 
-	buf_clear(&http_rbuf(http));
-	buf_clear(&http_wbuf(http));
-
-	//Save bandwidth: send HEAD first.
-
-	LOG("sending HEAD request\n");
-	if (http_send_request(http, HEAD) < 0)
+	if (!(Dead_URL_cache = cache_create(
+			"dead_url_cache",
+			sizeof(Dead_URL_t),
+			0,
+			Dead_URL_cache_ctor,
+			Dead_URL_cache_dtor)))
 	{
-		LOG("http_send_request failed (HEAD)\n");
+		fprintf(stderr, "crawl: failed to create dead url cache\n");
 		goto fail;
 	}
 
-	if ((bytes = http_recv_response(http)) < 0)
-	{
-		LOG("http_recv_response returned < 0 (%d)\n", bytes);
-		goto fail;
-	}
+	tree_archived = BTREE_object_new();
 
-	status_code = http->code;
-	update_status_code(status_code);
-
-	switch((unsigned int)status_code)
+	while (1)
 	{
-		case HTTP_OK:
-		case HTTP_FOUND:
-		case HTTP_MOVED_PERMANENTLY:
-		case HTTP_SEE_OTHER:
+		item = QUEUE_dequeue(URL_queue);
+
+		if (!item)
 			break;
-		default:
-			return status_code;
+
+		assert(item->data_len < HTTP_URL_MAX);
+		strcpy(http->URL, (char *)item->data);
+
+		if ((dead = search_dead_URL(Dead_URL_cache, http->URL)))
+		{
+			++dead->times_seen;
+			continue;
+		}
+
+		//http->ops->URL_parse_host(http->URL, http->host);
+		http->ops->URL_parse_page(http->URL, http->page);
+
+		BLOCK_SIGNAL(SIGINT);
+		sleep(crawl_delay(&nwctx));
+		UNBLOCK_SIGNAL(SIGINT);
+
+		http->ops->send_request(http);
+		http->ops->recv_response(http);
+
+		code = http->code;
+
+		switch (code)
+		{
+			case HTTP_OK:
+				break;
+
+			case HTTP_NOT_FOUND:
+
+				cache_dead_URL(Dead_URL_cache, http->URL, code);
+				dead = cache_alloc(Dead_URL_cache, NULL);
+				if (!dead)
+					break;
+
+				memcpy((void *)dead->URL, url, item->data_len);
+				dead->URL[item->data_len] = 0;
+				dead->code = code;
+				dead->timestamp = time(NULL);
+				dead->times_seen = 1;
+
+			default:
+				goto next;
+		}
+
+		if (fill)
+		{
+			if (__url_parseable(http->URL))
+			{
+				parse_URLs(http, URL_queue);
+			}
+		}
+
+		archive_page(http);
+		BTREE_put_data(tree_archived, (void *)http->URL, http->URL_len);
+
+	next:
 	}
 
-	if (local_archive_exists(http->URL))
-		return HTTP_ALREADY_EXISTS;
-
-	if (http_connection_closed(http))
-	{
-		http_reconnect(http);
-	}
-
-	buf_clear(&http_wbuf(http));
-	buf_clear(&http_rbuf(http));
-
-	LOG("sending GET request\n");
-	if (http_send_request(http, GET) < 0)
-	{
-		LOG("http_send_request failed (GET)\n");
-		goto fail;
-	}
-
-	if ((bytes = http_recv_response(http)) < 0)
-	{
-		LOG("http_recv_response returned < 0 (%d)\n", bytes);
-		goto fail;
-	}
-
-	STATS_ADD_BYTES(&nwctx, bytes);
-	update_bytes(stats_nr_bytes(&nwctx));
-
-	status_code = http->code;
-	update_status_code(status_code);
-
-#ifdef DEBUG
-	if (!status_code)
-	{
-		__eoh = HTTP_EOH(&http->conn.read_buf);
-		if (__eoh)
-			LOG("0: \n\n%.*s\n", (int)(__eoh - http->conn.read_buf.buf_head), http->conn.read_buf.buf_head);
-	}
-#endif
-
-	return status_code;
-
-	fail:
-
-#ifdef DEBUG
-	__eoh = HTTP_EOH(&http->conn.read_buf);
-	if (__eoh)
-		LOG("< 0: \n\n%.*s\n", (int)(__eoh - http->conn.read_buf.buf_head), http->conn.read_buf.buf_head);
-#endif
-
+fail:
 	return -1;
 }
-*/
+
 
 /**
  * GET pages for URLs in the caches. One cache will be
@@ -1258,22 +1200,23 @@ do_request(struct http_t *http)
  * @http Our HTTP object
  * @cache1 One of the caches holding parsed URLs
  * @caceh2 Sibling cache holding parsed URLs
- */
+ *
 int
-crawl(struct http_t *http, struct cache_ctx *cache1, struct cache_ctx *cache2)
+crawl(struct http_t *http, queue_obj_t *URL_queue)
+//crawl(struct http_t *http, struct cache_ctx *cache1, struct cache_ctx *cache2)
 {
 	assert(http);
-	assert(cache1);
-	assert(cache2);
+	assert(URL_queue);
 
 	int nr_links = 0;
-	int nr_links_sibling;
 	int fill = 1;
 	int status_code = 0;
 	int i;
 	size_t len;
-	URL_t *link;
+
 	Dead_URL_t *dead = NULL;
+	queue_item_t *item = NULL;
+	URL_t *url = NULL;
 
 	tslash_off(&nwctx);
 
@@ -1299,7 +1242,7 @@ crawl(struct http_t *http, struct cache_ctx *cache1, struct cache_ctx *cache2)
  * Update cache statuses on the screen; deconstruct
  * the binary tree in the cache that we just drained
  * (which now has the status FILLING).
- */
+ *
 		if (cache1->state == DRAINING)
 		{
 			link = (URL_t *)cache1->cache->cache;
@@ -1342,7 +1285,7 @@ crawl(struct http_t *http, struct cache_ctx *cache1, struct cache_ctx *cache2)
  * Work through the cached URLs, archive each page, and
  * fill the FILLING cache with any URLs we extract from
  * these pages as we process them.
- */
+ *
 		for (i = 0; i < nr_links; ++i)
 		{
 			buf_clear(&http_wbuf(http));
@@ -1369,7 +1312,7 @@ crawl(struct http_t *http, struct cache_ctx *cache1, struct cache_ctx *cache2)
 /*
  * We don't want a SIGINT in the middle of sleeping,
  * otherwise it's bonjour la segmentation fault (usually).
- */
+ *
 			BLOCK_SIGNAL(SIGINT);
 			sleep(crawl_delay(&nwctx));
 			UNBLOCK_SIGNAL(SIGINT);
@@ -1405,7 +1348,7 @@ crawl(struct http_t *http, struct cache_ctx *cache1, struct cache_ctx *cache2)
  * FILLING cache (and thus fill is non-zero), then
  * parse the URLs from the current page we're working on
  * and cache them.
- */
+ *
 			if (fill)
 			{
 				if (__url_parseable(http->URL))
@@ -1414,7 +1357,7 @@ crawl(struct http_t *http, struct cache_ctx *cache1, struct cache_ctx *cache2)
 					{
 /*
  * parse_links(struct http_t *, struct cache_ctx *FCTX, struct cache_ctx *DCTX)
- */
+ *
 						parse_links(http, cache2, cache1);
 						nr_links_sibling = cache_nr_used(cache2->cache);
 						update_cache2_count(nr_links_sibling);
@@ -1433,7 +1376,7 @@ crawl(struct http_t *http, struct cache_ctx *cache1, struct cache_ctx *cache2)
 							fill = 0;
 /*
  * if cache1 is draining, then it's cache2 that's full, and vice versa.
- */
+ *
 							update_cache_status(cache1->state == DRAINING ? 2 : 1, FL_CACHE_STATUS_FULL);
 						}
 					}
@@ -1450,7 +1393,7 @@ crawl(struct http_t *http, struct cache_ctx *cache1, struct cache_ctx *cache2)
 			{
 /*
  * Only update if we are actually still filling the cache.
- */
+ *
 				if (fill)
 					update_cache1_count(cache_nr_used(cache1->cache));
 
@@ -1467,7 +1410,7 @@ crawl(struct http_t *http, struct cache_ctx *cache1, struct cache_ctx *cache2)
 			clear_error_msg();
 
 			tslash_off(&nwctx);
-		} /* for (i = 0; i < nr_links; ++i) */
+		} /* for (i = 0; i < nr_links; ++i) *
 
 		++current_depth;
 
@@ -1477,7 +1420,7 @@ crawl(struct http_t *http, struct cache_ctx *cache1, struct cache_ctx *cache2)
  * at the beginning of our outer while loop
  * (unless we've reached a potential max CRAWL-
  * DEPTH).
- */
+ *
 		if (cache1->state == FILLING)
 		{
 			cache1->state = DRAINING;
@@ -1494,10 +1437,11 @@ crawl(struct http_t *http, struct cache_ctx *cache1, struct cache_ctx *cache2)
 			update_operation_status("Reached maximum crawl depth");
 			break;
 		}
-	} /* while (1) */
+	} /* while (1) *
 
 	return 0;
 
 	fail:
 	return -1;
 }
+*/
