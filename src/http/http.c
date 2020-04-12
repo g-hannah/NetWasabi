@@ -419,7 +419,7 @@ date_string_to_timestamp(char *str)
 
 	if (!q)
 		return -1;
-	
+
 	strncpy(t, p, (q - p));
 	t[(q - p)] = 0;
 	time_st.tm_hour = atoi(t);
