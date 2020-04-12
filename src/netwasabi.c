@@ -1161,6 +1161,9 @@ crawl(struct http_t *http, queue_obj_t *URL_queue)
 				goto next;
 		}
 
+		archive_page(http);
+		BTREE_put_data(tree_archived, (void *)http->URL, http->URL_len);
+
 		if (fill)
 		{
 			if (__url_parseable(http->URL))
@@ -1168,9 +1171,6 @@ crawl(struct http_t *http, queue_obj_t *URL_queue)
 				parse_URLs(http, URL_queue, tree_archived);
 			}
 		}
-
-		archive_page(http);
-		BTREE_put_data(tree_archived, (void *)http->URL, http->URL_len);
 
 	next:
 	}
