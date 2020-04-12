@@ -34,6 +34,7 @@
 #define HTTP_COOKIE_MAX 2048 /* Surely this is more than enough */
 #define HTTP_HNAME_MAX 64 /* Header name */
 #define HTTP_HOST_MAX 256
+#define HTTP_HEADER_FIELD_MAX_LENGTH 2048
 
 #define HTTP_VERSION		"1.1"
 #define HTTP_USER_AGENT		"Mozilla/5.0 (X11; Ubuntu; Linux x86_64; rv:75.0) Gecko/20100101 Firefox/75.0"
@@ -104,12 +105,12 @@ struct http_t
 	int followRedirects;
 	int usingSecure;
 
+	uint32_t id;
+
 	char *host;
 	char *page;
 	char *URL;
 	char *primary_host;
-
-	bucket_obj_t *headers;
 
 	struct HTTP_methods *ops;
 };
@@ -119,7 +120,7 @@ struct HTTP_methods
 	int (*send_request)(struct http_t *);
 	int (*recv_response)(struct http_t *);
 	int (*build_header)(struct http_t *);
-	int (*append_header)(struct http_t *, char *);
+	int (*append_header)(struct http_t *, char *, char *);
 	//int (*check_header)(buf_t *, const char *, off_t, off_t *);
 	char *(*fetch_header)(struct http_t *, char *);
 	char *(*URL_parse_host)(char *, char *);
@@ -148,7 +149,7 @@ char *http_parse_page(char *, char *) __nonnull((1,2)) __wur;
 int http_connection_closed(struct http_t *) __nonnull((1)) __wur;
 */
 
-struct http_t *HTTP_new(uint64_t) __wur;
+struct http_t *HTTP_new(uint32_t) __wur;
 void HTTP_delete(struct http_t *) __nonnull((1));
 
 void http_check_host(struct http_t *) __nonnull((1));
