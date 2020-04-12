@@ -34,6 +34,15 @@
  *
  */
 
+typedef struct HTTP_Cookie
+{
+	char *whole_cookie;
+	size_t cookie_len;
+	time_t expires;
+	char *for_path;
+	char *for_domain;
+} cookie_t;
+
 #define HTTP_VERSION_1_0 0x10000000u
 #define HTTP_VERSION_1_1 0x10100000u
 #define HTTP_VERSION_2_0 0x20000000u
@@ -89,6 +98,13 @@ do {\
 #define CREATION_FLAGS O_RDWR|O_CREAT|O_TRUNC
 #define CREATION_MODE S_IRUSR|S_IWUSR
 
+/*
+static enum Error_Code
+{
+	TIMED_OUT = 1
+};
+*/
+
 
 /*
  * User gets struct http_t which does not
@@ -106,6 +122,8 @@ struct HTTP_private
  * and headers, which allows
  * multithreading.
  */
+	bucket_obj_t *headers;
+	cache_t *cookies;
 	//cache_t *headers;
 	//cache_t *cookies;
 /*
@@ -131,14 +149,15 @@ int http_connection_closed(struct http_t *) __nonnull((1)) __wur;
 static int send_request_1_1(struct http_t *);
 static int recv_response_1_1(struct http_t *);
 static int build_request_header_1_1(struct http_t *);
-//static int append_header_1_1(buf_t *, http_header_t *);
-static int append_header_1_1(struct http_t *, char *);
+static int append_header_1_1(struct http_t *, char *, char *);
 //static int check_header_1_1(buf_t *, const char *, off_t, off_t *);
 //static char *fetch_header_1_1(buf_t *, const char *, http_header_t *, off_t);
 static char *fetch_header_1_1(struct http_t *, char *);
 static char *URL_parse_host(char *, char *);
 static char *URL_parse_page(char *, char *);
 static const char *code_as_string(struct http_t *);
+
+static void append_cookies_1_1(struct http_t *);
 
 static int http_status_code_int(buf_t *) __nonnull((1));
 
@@ -241,56 +260,191 @@ __dtor private_fini(void)
 	return;
 }
 
+static int
+cookie_cache_ctor(void *cookieObj)
+{
+	if (!cookieObj)
+		return -1;
+
+	cookie_t *cookie = (cookie_t *)cookieObj;
+
+	memset(cookie, 0, sizeof(*cookie));
+
+	cookie->whole_cookie = calloc(HTTP_ALIGN_SIZE(HTTP_COOKIE_MAX), 1);
+	cookie->for_path = calloc(HTTP_ALIGN_SIZE(HTTP_COOKIE_MAX), 1);
+	cookie->for_domain = calloc(HTTP_ALIGN_SIZE(HTTP_COOKIE_MAX), 1);
+
+	assert(cookie->whole_cookie);
+	assert(cookie->for_path);
+	assert(cookie->for_domain);
+
+	return 0;
+}
+
+static void
+cookie_cache_dtor(void *cookieObj)
+{
+	if (!cookieObj)
+		return;
+
+	cookie_t *cookie = (cookie_t *)cookieObj;
+
+	free(cookie->whole_cookie);
+	free(cookie->for_path);
+	free(cookie->for_domain);
+
+	return;
+}
+
 //#define LOG_FILE "./http_debug_log.txt"
 
 /**
- * cache_http_cookie_ctor - initialise object for the cookie cache
- * @hh: pointer to the object in the cache
- *  -- called in cache_create()
+ * XXX - Move to a generic string utilities file
+ *
+ * Turn date string into timestamp.
+ * String is of format : Sun, 12 Apr 2020 08:18:37 GMT
  */
-int
-http_header_cache_ctor(void *hh)
+static time_t
+date_string_to_timestamp(char *str)
 {
-	http_header_t *ch = (http_header_t *)hh;
-	clear_struct(ch);
+	assert(str);
 
-	if (!(ch->name = nw_calloc(HTTP_HNAME_MAX+1, 1)))
-		goto fail;
+	char *p = NULL;
+	char *q = NULL;
+	char *end = NULL;
+	char DOM[3];
+	char t[6];
+	struct tm time_st;
+	size_t len = strlen(str);
 
-	if (!(ch->value = nw_calloc(HTTP_COOKIE_MAX+1, 1)))
-		goto fail;
+	memset(&time_st, 0, sizeof(time_st));
 
-	ch->nsize = HTTP_HNAME_MAX+1;
-	ch->vsize = HTTP_COOKIE_MAX+1;
+	p = str;
+	end = str + len;
 
-	assert(ch->name);
-	assert(ch->value);
+	q = memchr(p, ',', (end - p));
 
-	return 0;
+	if (!q)
+		return -1;
 
-	fail:
-	return -1;
-}
+	if (strncasecmp("Mon", p, 3) == 0)
+		time_st.tm_wday = 0;
+	else if (strncasecmp("Tue", p, 3) == 0)
+		time_st.tm_wday = 1;
+	else if (strncasecmp("Wed", p, 3) == 0)
+		time_st.tm_wday = 2;
+	else if (strncasecmp("Thu", p, 3) == 0)
+		time_st.tm_wday = 3;
+	else if (strncasecmp("Fri", p, 3) == 0)
+		time_st.tm_wday = 4;
+	else if (strncasecmp("Sat", p, 3) == 0)
+		time_st.tm_wday = 5;
+	else if (strncasecmp("Sun", p, 3) == 0)
+		time_st.tm_wday = 6;
 
-/**
- * cache_http_cookie_dtor - free memory in http_header_t cache object
- * @hh: pointer to object in cache
- */
-void
-http_header_cache_dtor(void *hh)
-{
-	assert(hh);
+	// GET THE DAY OF THE MONTH
+	++q;
 
-	http_header_t *ch = (http_header_t *)hh;
+	while (*q == ' ' && q < end)
+		++q;
 
-	if (ch->name)
-		free(ch->name);
-	if (ch->value)
-		free(ch->value);
+	if (q == end)
+		return -1;
 
-	clear_struct(ch);
+	p = q;
+	q = memchr(p, ' ', (end - p));
 
-	return;
+	if (!q)
+		return -1;
+
+	if (*(p+1) == '0')
+		++p;
+
+	strncpy(DOM, p, (q - p));
+	DOM[(q - p)] = 0;
+	time_st.tm_mday = atoi(DOM);
+
+	p = ++q;
+	q = memchr(p, ' ', (end - p));
+
+	// GET THE MONTH OF THE YEAR
+	if (strncasecmp("Jan", p, 3) == 0)
+		time_st.tm_mon = 0;
+	else
+	if (strncasecmp("Feb", p, 3) == 0)
+		time_st.tm_mon = 1;
+	else
+	if (strncasecmp("Mar", p, 3) == 0)
+		time_st.tm_mon = 2;
+	else
+	if (strncasecmp("Apr", p, 3) == 0)
+		time_st.tm_mon = 3;
+	else
+	if (strncasecmp("May", p, 3) == 0)
+		time_st.tm_mon = 4;
+	else
+	if (strncasecmp("Jun", p, 3) == 0)
+		time_st.tm_mon = 5;
+	else
+	if (strncasecmp("Jul", p, 3) == 0)
+		time_st.tm_mon = 6;
+	else
+	if (strncasecmp("Aug", p, 3) == 0)
+		time_st.tm_mon = 7;
+	else
+	if (strncasecmp("Sep", p, 3) == 0)
+		time_st.tm_mon = 8;
+	else
+	if (strncasecmp("Oct", p, 3) == 0)
+		time_st.tm_mon = 9;
+	else
+	if (strncasecmp("Nov", p, 3) == 0)
+		time_st.tm_mon = 10;
+	else
+	if (strncasecmp("Dec", p, 3) == 0)
+		time_st.tm_mon = 11;
+
+	p = ++q;
+	q = memchr(p, ' ', (end - p));
+
+	if (!q)
+		return -1;
+
+	strncpy(t, p, (q - p));
+	t[(q - p)] = 0;
+	time_st.tm_year = (atoi(t) - 1900);
+
+	p = ++q;
+	q = memchr(p, ':', (end - p));
+
+	if (!q)
+		return -1;
+	
+	strncpy(t, p, (q - p));
+	t[(q - p)] = 0;
+	time_st.tm_hour = atoi(t);
+
+	p = ++q;
+	q = memchr(p, ':', (end - p));
+
+	if (!q)
+		return -1;
+
+	strncpy(t, p, (q - p));
+	t[(q - p)] = 0;
+	time_st.tm_min = atoi(t);
+
+	p = ++q;
+	q = memchr(p, ' ', (end - p));
+
+	if (!q)
+		return -1;
+
+	strncpy(t, p, (q - p));
+	t[(q - p)] = 0;
+	time_st.tm_sec = atoi(t);
+
+	return (time_t)mktime(&time_st);
 }
 
 /*
@@ -322,6 +476,7 @@ use_rand:
 }
 */
 
+/* XXX - Move to generic string utilities file */
 static void
 to_lower_case(char *string)
 {
@@ -335,6 +490,132 @@ to_lower_case(char *string)
 	{
 		*p = tolower(*p);
 		++p;
+	}
+
+	return;
+}
+
+static void
+parse_cookies(struct http_t *http)
+{
+	assert(http);
+
+	struct HTTP_private *private = (struct HTTP_private *)http;
+	bucket_t *bucket = BUCKET_get_bucket(private->headers, "set-cookie");
+	if (!bucket)
+		return;
+
+	cache_clear_all(private->cookies);
+
+	char *p = NULL;
+	char *q = NULL;
+	char *end = NULL;
+	cookie_t *cookie = NULL;
+
+	while (bucket)
+	{
+		cookie = cache_alloc(private->cookies, NULL);
+
+		memcpy((void *)cookie->whole_cookie, bucket->data, bucket->data_len);
+		cookie->whole_cookie[bucket->data_len] = 0;
+
+		p = (char *)bucket->data;
+		end = (char *)bucket->data + bucket->data_len;
+
+		q = memchr(p, ';', (end - p));
+
+		if (!q)
+		{
+			bucket = bucket->next;
+			continue;
+		}
+
+		p = ++q;
+
+		while (1)
+		{
+			if (p >= end)
+				break;
+
+			while (*p == ' ' && p < end)
+				++p;
+
+			if (p == end)
+			{
+				break;
+			}
+
+			q = memchr(p, '=', (end - p));
+
+			if (!q)
+			{
+				break;
+			}
+
+			if (!memcmp((void *)p, (void *)"expires", 7))
+			{
+				char expiry[64];
+
+				p = ++q;
+				q = memchr(p, ';', (end - p));
+				if (!q)
+					q = end;
+
+				memcpy((void *)expiry, (void *)p, (q - p));
+				expiry[q - p] = 0;
+
+				cookie->expires = date_string_to_timestamp(expiry);
+
+				p = ++q;
+			}
+			else
+			if (!memcmp((void *)p, (void *)"domain", 6))
+			{
+				char domain[128];
+
+				p = ++q;
+				q = memchr(p, ';', (end  - p));
+				if (!q)
+					q = end;
+
+				memcpy((void *)domain, (void *)p, (q - p));
+				domain[q - p] = 0;
+
+				memcpy((void *)cookie->for_domain, (void *)p, (q - p));
+				cookie->for_domain[q - p] = 0;
+
+				p = ++q;
+			}
+			else
+			if (!memcmp((void *)p, (void *)"path", 4))
+			{
+				char Path[128];
+
+				p = ++q;
+				q = memchr(p, ';', (end  - p));
+				if (!q)
+					q = end;
+
+				memcpy((void *)Path, (void *)p, (q - p));
+				Path[q - p] = 0;
+
+				memcpy((void *)cookie->for_path, (void *)p, (q - p));
+				cookie->for_path[q - p] = 0;
+
+				p = ++q;
+			}
+			else
+			{
+				p = ++q;
+				q = memchr(p, ';', (end - p));
+				if (!q)
+					break;
+
+				p = ++q;
+			}
+		} // while (1)
+
+		bucket = bucket->next;
 	}
 
 	return;
@@ -356,6 +637,7 @@ parse_response_header_1_1(struct http_t *http)
 	char *q = NULL;
 	char field_name[1024];
 	char field_value[2048];
+	struct HTTP_private *private = (struct HTTP_private *)http;
 
 	eoh = HTTP_EOH(buf);
 	eoh -= 2;
@@ -396,7 +678,7 @@ parse_response_header_1_1(struct http_t *http)
 		 */
 		if (!memcmp((void *)field_name, (void *)"set-cookie", 10))
 		{
-			BUCKET_clear_bucket(http->headers, field_name);
+			BUCKET_clear_bucket(private->headers, field_name);
 		}
 
 		p = ++q;
@@ -418,12 +700,12 @@ parse_response_header_1_1(struct http_t *http)
 		field_value[eol - p] = 0;
 
 		_log("Putting header field \"%s\" (%s) into hash table\n", field_name, field_value);
-		BUCKET_put_data(http->headers, field_name, field_value);
+		BUCKET_put_data(private->headers, field_name, field_value);
 
 		sol = eol + 2;
 
 #ifdef DEBUG
-		bucket_t *bucket = BUCKET_get_bucket(http->headers, field_name);
+		bucket_t *bucket = BUCKET_get_bucket(private->headers, field_name);
 		assert(bucket);
 		if (bucket->next != NULL)
 		{
@@ -432,6 +714,8 @@ parse_response_header_1_1(struct http_t *http)
 		assert(!memcmp((void *)bucket->data, (void *)field_value, bucket->data_len));
 #endif
 	}
+
+	parse_cookies(http);
 }
 
 #define HTTP_HEADER_BUFSIZE 8192
@@ -454,7 +738,7 @@ build_request_header_1_1(struct http_t *http)
 	 * need to be thread-safe.
 	 */
 	//static char header_buf[4096];
-	char *header_buf = calloc(HTTP_HEADER_BUFSIZE, 1);
+	char *header_buf = calloc(HTTP_ALIGN_SIZE(HTTP_HEADER_BUFSIZE), 1);
 
 	if (NULL == header_buf)
 		return -1;
@@ -492,10 +776,10 @@ build_request_header_1_1(struct http_t *http)
 		buf_append(&tmp, http->page);
 
 		sprintf(header_buf,
-			"HEAD %s HTTP/%s\r\n"
+			"HEAD %s HTTP/1.1\r\n"
 			"Host: %s\r\n"
 			"User-Agent: %s%s",
-			tmp.buf_head, HTTP_VERSION,
+			tmp.buf_head,
 			http->host,
 			HTTP_USER_AGENT, HTTP_EOH_SENTINEL);
 		break;
@@ -509,12 +793,12 @@ build_request_header_1_1(struct http_t *http)
 			buf_snip(&tmp, 1);
 
 		sprintf(header_buf,
-			"GET %s HTTP/%s\r\n"
+			"GET %s HTTP/1.1\r\n"
 			"User-Agent: %s\r\n"
 			"Accept: %s\r\n"
 			"Host: %s\r\n"
 			"Connection: keep-alive%s",
-			http->URL, HTTP_VERSION,
+			http->URL,
 			HTTP_USER_AGENT,
 			HTTP_ACCEPT,
 			tmp.buf_head,
@@ -526,12 +810,7 @@ build_request_header_1_1(struct http_t *http)
 	free(header_buf);
 	header_buf = NULL;
 
-/*
- * Append any cookies to the header. append_header()
- * will replace "set-cookie" with "cookie" when
- * appending them.
- */
-	http->ops->append_header(http, "set-cookie");
+	append_cookies_1_1(http);
 
 	buf_destroy(&tmp);
 
@@ -616,27 +895,6 @@ send_request_1_1(struct http_t *http)
 			goto fail;
 		}
 	}
-
-/*
- * XXX Need to decouple this from NetWasabi options.
- *
-	if (option_set(OPT_USE_TLS))
-	{
-		if (buf_write_tls(http->conn.ssl, buf) == -1)
-		{
-			fprintf(stderr, "send_request: failed to write to SSL socket (%s)\n", strerror(errno));
-			goto fail;
-		}
-	}
-	else
-	{
-		if (buf_write_socket(http->conn.sock, buf) == -1)
-		{
-			fprintf(stderr, "http_send_request: failed to write to socket (%s)\n", strerror(errno));
-			goto fail;
-		}
-	}
-*/
 
 	return 0;
 
@@ -1093,7 +1351,8 @@ set_new_location(struct http_t *http)
 {
 	assert(http);
 
-	bucket_t *bucket = BUCKET_get_bucket(http->headers, "location");
+	struct HTTP_private *private = (struct HTTP_private *)http;
+	bucket_t *bucket = BUCKET_get_bucket(private->headers, "location");
 
 	assert(bucket->data_len < HTTP_URL_MAX);
 	strcpy(http->URL, (char *)bucket->data);
@@ -1188,7 +1447,7 @@ recv_response_1_1(struct http_t *http)
 	//http_header_t *content_len = NULL;
 	//http_header_t *transfer_enc = NULL;
 	buf_t *buf = &http->conn.read_buf;
-	//struct HTTP_private *private = HTTP_private(http);
+	struct HTTP_private *private = HTTP_private(http);
 
 /*
  * Set the (ssl) socket to non-blocking.
@@ -1262,19 +1521,19 @@ __retry:
 	bucket_t *bucket = NULL;
 
 #ifdef DEBUG
-	bucket = BUCKET_get_bucket(http->headers, "set-cookie");
+	bucket = BUCKET_get_bucket(private->headers, "set-cookie");
 	if (bucket)
 	{
 		_log("set cookie: %s\n", (char *)bucket->data);
 	}
 
-	bucket = BUCKET_get_bucket(http->headers, "transfer-encoding");
+	bucket = BUCKET_get_bucket(private->headers, "transfer-encoding");
 	if (bucket)
 	{
 		_log("transfer encoding: %s\n", (char *)bucket->data);
 	}
 
-	bucket = BUCKET_get_bucket(http->headers, "content-length");
+	bucket = BUCKET_get_bucket(private->headers, "content-length");
 	if (bucket)
 	{
 		_log("content length: %s (%d)\n", (char *)bucket->data, atoi((char *)bucket->data));
@@ -1348,7 +1607,7 @@ __retry:
 			goto fail;
 	}
 
-	bucket = BUCKET_get_bucket(http->headers, "transfer-encoding");
+	bucket = BUCKET_get_bucket(private->headers, "transfer-encoding");
 
 	if (bucket && !strcasecmp((char *)bucket->data, "chunked"))
 	{
@@ -1361,7 +1620,7 @@ __retry:
 		goto __done_reading;
 	}
 
-	bucket = BUCKET_get_bucket(http->headers, "content-length");
+	bucket = BUCKET_get_bucket(private->headers, "content-length");
 
 	if (bucket)
 	{
@@ -1416,41 +1675,6 @@ __done_reading:
 		_log("Sent request. Jumping to retry\n");
 		goto __retry;
 	}
-/*
- * We shouldn't really get here, because we SHOULD
- * be getting a Content-Length header and if not
- * it would surely be sent chunked.
- *
- * The question is: should we really have this code
- * here or should we return an error given the
- * above...?
- *
-	read_again:
-
-		bytes = 0;
-		p = NULL;
-
-		if (option_set(OPT_USE_TLS))
-			bytes = buf_read_tls(http_tls(http), buf, 0);
-		else
-			bytes = buf_read_socket(http_socket(http), buf, 0);
-
-		if (bytes < 0)
-		{
-			_log("buf_read_[tls/socket]() returned < 0 (reading with no content length)\n");
-			goto fail_dealloc;
-		}
-
-		total_bytes += (int)bytes;
-
-		p = strstr(buf->buf_head, "</body");
-
-		if (!p)
-		{
-			goto read_again;
-		}
-	}
-*/
 
 out:
 	return total_bytes;
@@ -1838,72 +2062,72 @@ fetch_header_1_1(struct http_t *http, char *key)
 	assert(http);
 	assert(key);
 
-	bucket_t *bucket = BUCKET_get_bucket(http->headers, key);
+	struct HTTP_private *private = (struct HTTP_private *)http;
+	bucket_t *bucket = BUCKET_get_bucket(private->headers, key);
 	if (!bucket)
 		return NULL;
 
 	return (char *)bucket->data;
+}
 
-/*
-	char *check_from = buf->buf_head + whence;
-	char *tail = buf->buf_tail;
-	char *eoh = HTTP_EOH(buf);
-	char *eol;
-	char *p;
-	char *q;
+void
+append_cookies_1_1(struct http_t *http)
+{
+	assert(http);
 
-	hh->name[0] = 0;
-	hh->value[0] = 0;
-	hh->nlen = 0;
-	hh->vlen = 0;
+	struct HTTP_private *private = (struct HTTP_private *)http;
 
-	if (!eoh)
+	if (!private->cookies)
+		return;
+
+	int nr_cookies = cache_nr_used(private->cookies);
+
+	if (!nr_cookies)
+		return;
+
+	cookie_t *cookie = (cookie_t *)private->cookies->cache;
+	buf_t *buf = &http->conn.write_buf;
+	buf_t tmp;
+	char *p = HTTP_EOH(buf);
+
+	if (!p)
+		return;
+
+	p -= 2;
+
+	int index = 0;
+	buf_init(&tmp, HTTP_COOKIE_MAX+256);
+
+	while (1)
 	{
-		fprintf(stderr, "http_get_header: failed to find end of header\n");
-		errno = EPROTO;
-		return NULL;
+		while (!cache_obj_used(private->cookies, (void *)cookie))
+		{
+			++cookie;
+			++index;
+		}
+
+		if (index >= private->cookies->capacity)
+			break;
+
+		buf_append(&tmp, "Cookie: ");
+		buf_append(&tmp, cookie->whole_cookie);
+		buf_append_ex(&tmp, HTTP_EOL, 2);
+
+		buf_shift(buf, (off_t)(p - buf->buf_head), tmp.data_len);
+
+		strncpy(p, tmp.buf_head, tmp.data_len);
+
+		p += tmp.data_len;
+
+		--nr_cookies;
+
+		if (nr_cookies <= 0)
+			break;
+
+		buf_clear(&tmp);
 	}
 
-	p = strstr(check_from, name);
-
-	if (!p || p > eoh)
-		return NULL;
-
-	eol = memchr(p, '\r', (tail - p));
-
-	if (!eol)
-		return NULL;
-
-	q = memchr(p, ':', (eol - p));
-
-	if (!q)
-		return NULL;
-
-	if (!strncmp("Set-Cookie", p, q - p))
-	{
-		size_t _nlen = strlen("Cookie");
-		strncpy(hh->name, "Cookie", _nlen);
-		hh->name[_nlen] = 0;
-		hh->nlen = _nlen;;
-	}
-	else
-	{
-		strncpy(hh->name, p, (q - p));
-		hh->name[q - p] = 0;
-		hh->nlen = (q - p);
-	}
-
-	p = (q + 1);
-
-	while (*p == ' ' && p < eol)
-		++p;
-
-	hh->vlen = (eol - p);
-	strncpy(hh->value, p, hh->vlen);
-	hh->value[hh->vlen] = 0;
-
-	return hh->value;
-*/
+	buf_destroy(&tmp);
 }
 
 /**
@@ -1915,57 +2139,32 @@ fetch_header_1_1(struct http_t *http, char *key)
  */
 //append_header_1_1(buf_t *buf, http_header_t *hh)
 int
-append_header_1_1(struct http_t *http, char *key)
+append_header_1_1(struct http_t *http, char *field_name, char *field_value)
 {
 	assert(http);
-	assert(key);
+	assert(field_name);
+	assert(field_value);
 
 	buf_t *buf = &http->conn.write_buf;
-	char *p;
-	char *head = buf->buf_head;
-	char *eoh = HTTP_EOH(buf);
-	off_t poff;
-
-	bucket_t *bucket = BUCKET_get_bucket(http->headers, key);
-	if (!bucket)
-		return 0;
-
-	if (!eoh)
-	{
-		_log("http_append_header: failed to find end of header");
-		errno = EPROTO;
-		return -1;
-	}
-
-	p = (eoh - 2);
-
 	buf_t tmp;
+	char *p = HTTP_EOH(buf);
 
-	buf_init(&tmp, HTTP_ALIGN_SIZE(HTTP_COOKIE_MAX));
+	p -= 2;
+/*
+ * \r\n\r\n
+ *      ^
+ *      p
+ */
 
-	while (bucket)
-	{
-		assert(bucket->data_len < HTTP_COOKIE_MAX);
+	buf_init(&tmp, HTTP_HEADER_FIELD_MAX_LENGTH+2);
 
-		_log("Appending header field: %s => %s\n", bucket->key, (char *)bucket->data);
-		if (!memcmp((void *)bucket->key, (void *)"set-cookie", 10))
-			buf_append(&tmp, "Cookie");
-		else
-			buf_append(&tmp, bucket->key);
+	buf_append(&tmp, field_name);
+	buf_append(&tmp, ": ");
+	buf_append(&tmp, field_value);
+	buf_append_ex(&tmp, HTTP_EOL, 2);
 
-		buf_append(&tmp, ": ");
-		buf_append(&tmp, (char *)bucket->data);
-		buf_append(&tmp, "\r\n");
-
-		poff = (p - buf->buf_head);
-		buf_shift(buf, (off_t)(p - head), tmp.data_len);
-		p = (buf->buf_head + poff);
-
-		strncpy(p, tmp.buf_head, tmp.data_len);
-		buf_clear(&tmp);
-
-		bucket = bucket->next;
-	}
+	buf_shift(buf, (off_t)(p - buf->buf_head), tmp.data_len);
+	memcpy((void *)p, (void *)tmp.buf_head, tmp.data_len);
 
 	buf_destroy(&tmp);
 
@@ -2025,48 +2224,26 @@ http_connection_closed(struct http_t *http)
 }
 
 static int
-HTTP_init_object(struct HTTP_private *private, uint64_t id)
+HTTP_init_object(struct HTTP_private *private, uint32_t id)
 {
 	struct http_t *http;
+	char cache_name[128];
 
 	http = (struct http_t *)private;
-	http->headers = BUCKET_object_new();
+	http->id = id;
 
-/*
- * HTTP header object cache.
- *
-	sprintf(cache_name, "HTTP_header_cache-0x%lx", id);
-	if (!(private->headers = cache_create(
+	private->headers = BUCKET_object_new();
+	snprintf(cache_name, 128, "HTTP_cookie_cache-%x", id);
+
+	private->cookies = cache_create(
 			cache_name,
-			sizeof(http_header_t),
+			sizeof(cookie_t),
 			0,
-			http_header_cache_ctor,
-			http_header_cache_dtor)))
-	{
-		fprintf(stderr, "HTTP_init_object: failed to create cache for HTTP header objects\n");
+			cookie_cache_ctor,
+			cookie_cache_dtor);
+
+	if (!private->cookies)
 		goto fail;
-	}
-
-	_log("Created header cache %s\n", cache_name);
-*/
-
-/*
- * HTTP cookie object cache.
- *
-	sprintf(cache_name, "HTTP_cookie_cache-0x%lx", id);
-	if (!(private->cookies = cache_create(
-			cache_name,
-			sizeof(http_header_t),
-			0,
-			http_header_cache_ctor,
-			http_header_cache_dtor)))
-	{
-		fprintf(stderr, "HTTP_init_object: failed to create cache for HTTP cookie objects\n");
-		goto fail_destroy_cache;
-	}
-
-	_log("Created cookies cache %s\n", cache_name);
-*/
 
 	http->host = calloc(HTTP_HOST_MAX+1, 1);
 	http->conn.host_ipv4 = calloc(HTTP_ALIGN_SIZE(INET_ADDRSTRLEN+1), 1);
@@ -2101,16 +2278,11 @@ fail:
 
 	buf_destroy(&http->conn.read_buf);
 
-	if (http->headers)
-		BUCKET_object_destroy(http->headers);
-/*
-fail_destroy_cache:
+	if (private->headers)
+		BUCKET_object_destroy(private->headers);
 
-	cache_destroy(private->headers);
-	cache_destroy(private->cookies);
-
-fail:
-*/
+	if (private->cookies)
+		cache_destroy(private->cookies);
 
 	return -1;
 }
@@ -2121,7 +2293,7 @@ fail:
  * @id The id to identify the object (e.g., thread ID)
  */
 struct http_t *
-HTTP_new(uint64_t id)
+HTTP_new(uint32_t id)
 {
 	struct HTTP_private *private = malloc(sizeof(struct HTTP_private));
 
@@ -2149,7 +2321,7 @@ HTTP_delete(struct http_t *http)
 {
 	assert(http);
 
-	//struct HTTP_private *private = (struct HTTP_private *)http;
+	struct HTTP_private *private = (struct HTTP_private *)http;
 
 	free(http->host);
 	free(http->page);
@@ -2157,14 +2329,9 @@ HTTP_delete(struct http_t *http)
 	free(http->conn.host_ipv4);
 	free(http->URL);
 
-	BUCKET_object_destroy(http->headers);
-/*
-	cache_clear_all(private->headers);
-	cache_destroy(private->headers);
-
+	BUCKET_object_destroy(private->headers);
 	cache_clear_all(private->cookies);
 	cache_destroy(private->cookies);
-*/
 
 	buf_destroy(&http->conn.read_buf);
 	buf_destroy(&http->conn.write_buf);
