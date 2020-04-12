@@ -1,7 +1,7 @@
 #include <assert.h>
-#include <errno.h>
 #include <stdio.h>
 #include <stdlib.h>
+#include <string.h>
 #include "queue.h"
 
 #define QUEUE_ALIGN_SIZE(s) (((s) + 0xf) & ~(0xf))
@@ -11,12 +11,10 @@ free_queue_items(queue_obj_t *queue_obj)
 {
 	assert(queue_obj);
 
-	int nr_items = queue_obj->nr_items;
-	int i;
 	queue_item_t *item;
 	queue_item_t *prev;
 
-	if (!nr_items)
+	if (!queue_obj->nr_items)
 		return;
 
 	prev = item = queue_obj->back;
@@ -32,7 +30,7 @@ free_queue_items(queue_obj_t *queue_obj)
 }
 
 int
-QUEUE_enqueue(queue_obj_t *queue_obj, void *data, size_t date_len)
+QUEUE_enqueue(queue_obj_t *queue_obj, void *data, size_t data_len)
 {
 	assert(queue_obj);
 	assert(data);
@@ -56,7 +54,7 @@ QUEUE_enqueue(queue_obj_t *queue_obj, void *data, size_t date_len)
 	else
 	{
 		item->next = queue_obj->back;
-		item->next->back = item;
+		item->next->prev = item;
 		item->prev = NULL;
 		queue_obj->back = item;
 	}
