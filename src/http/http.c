@@ -1457,46 +1457,19 @@ recv_response_1_1(struct http_t *http)
 		http_set_sock_non_blocking(http);
 	if (!http->conn.ssl_nonblocking)
 		http_set_ssl_non_blocking(http);
-/*
- * XXX
- *
- *	We should really parse the header fields
- *	that we are interested in and set various
- *	flags based upon the information.
- *
-	content_len = (http_header_t *)cache_alloc(private->headers, &content_len);
-
-	if (!content_len)
-	{
-		_log("failed to get cache object for content_len\n");
-		goto fail;
-	}
-
-	transfer_enc = (http_header_t *)cache_alloc(private->headers, &transfer_enc);
-
-	if (!transfer_enc)
-	{
-		_log("failed to get cache object for transfer_enc\n");
-		goto fail_dealloc;
-	}
-*/
 
 /*
  * Jump back to here to resend a request after dealing with
  * a 3xx URL redirect and resending the request.
  */
-__retry:
+rp_receive:
 
 	total_bytes = 0;
-
 	buf_clear(&http->conn.read_buf);
-	assert(http->conn.read_buf.data_len == 0);
 
 	bytes = read_until_eoh(http, &p);
 
 	_log(http->conn.read_buf.buf_head);
-
-	_log("Got HTTP response header\n");
 
 	if (bytes < 0 || HTTP_OPERATION_TIMEOUT == bytes)
 	{
@@ -1506,39 +1479,12 @@ __retry:
 
 	total_bytes += bytes;
 
-	_log("Read %lu bytes\n", total_bytes);
-	retVal = -1;
-
-	//check_cookies(http);
-
 	code = http_status_code_int(buf);
 	_log("got status code %d\n", code);
 
 	http->code = code;
 
 	parse_response_header_1_1(http);
-
-	bucket_t *bucket = NULL;
-
-#ifdef DEBUG
-	bucket = BUCKET_get_bucket(private->headers, "set-cookie");
-	if (bucket)
-	{
-		_log("set cookie: %s\n", (char *)bucket->data);
-	}
-
-	bucket = BUCKET_get_bucket(private->headers, "transfer-encoding");
-	if (bucket)
-	{
-		_log("transfer encoding: %s\n", (char *)bucket->data);
-	}
-
-	bucket = BUCKET_get_bucket(private->headers, "content-length");
-	if (bucket)
-	{
-		_log("content length: %s (%d)\n", (char *)bucket->data, atoi((char *)bucket->data));
-	}
-#endif
 
 /*
  * With HEAD, always send back the code
@@ -1549,13 +1495,6 @@ __retry:
 	if (HEAD == http->verb)
 		goto out;
 
-	if (HTTP_OK != code)
-	{
-		char *__eoh = HTTP_EOH(&http->conn.read_buf);
-		if (__eoh)
-			_log("\nRESPONSE HEADER\n\n%.*s\n", (int)(__eoh - http->conn.read_buf.buf_head), http->conn.read_buf.buf_head);
-	}
-
 /*
  * Check for a URL redirect status code.
  */
@@ -1563,6 +1502,7 @@ __retry:
 	{
 		case HTTP_OK:
 			break;
+
 		case HTTP_FOUND:
 		case HTTP_MOVED_PERMANENTLY:
 		case HTTP_SEE_OTHER:
@@ -1573,10 +1513,11 @@ __retry:
  * Cache the URL that caused the redirect.
  */
 			memcpy((void *)tmpURL, (void *)http->URL, strlen(http->URL));
+			tmpURL[strlen(http->URL)] = 0;
 
 			if (set_new_location(http) < 0)
 			{
-				_log("set_new__location() returned < 0\n");
+				_log("set_new_location() returned < 0\n");
 				goto fail;
 			}
 
@@ -1587,26 +1528,14 @@ __retry:
 
 			needResend = 1;
 			break;
-			// need to read rest of data in the buffer
 
-/*
-			if (http->ops->send_request(http) < 0)
-			{
-				_log("failed to resend GET request after setting new Location\n");
-				goto fail_dealloc;
-			}
-
-			_log("Resent request to web server\n");
-
-			goto __retry;
-			break;
-*/
 		case HTTP_BAD_REQUEST:
 		case HTTP_NOT_FOUND:
 		default:
 			goto fail;
 	}
 
+	bucket_t *bucket = NULL;
 	bucket = BUCKET_get_bucket(private->headers, "transfer-encoding");
 
 	if (bucket && !strcasecmp((char *)bucket->data, "chunked"))
@@ -1617,7 +1546,7 @@ __retry:
 			goto fail;
 		}
 
-		goto __done_reading;
+		goto done_reading;
 	}
 
 	bucket = BUCKET_get_bucket(private->headers, "content-length");
@@ -1664,16 +1593,15 @@ __retry:
 		goto fail;
 	}
 
-__done_reading:
+done_reading:
 
 	if (needResend)
 	{
 		_log("Resending request to web server\n");
-		//http->ops->build_header(http); // this was missing here!!
 		http->ops->send_request(http);
 		needResend = 0;
 		_log("Sent request. Jumping to retry\n");
-		goto __retry;
+		goto rp_receive;
 	}
 
 out:
@@ -1693,31 +1621,32 @@ http_status_code_int(buf_t *buf)
 {
 	assert(buf);
 
-	char *p = buf->data;
+	char *p = NULL;
 	char *q = NULL;
-	char *tail = buf->buf_tail;
-	char *head = buf->buf_head;
+	char *eoh = HTTP_EOH(buf);
 	char code_str[16];
+
+	if (!eoh)
+		return -1;
+
+	p = buf->buf_head;
 
 	/*
 	 * HTTP/1.1 200 OK\r\n
 	 */
 
-	if (!buf_integrity(buf))
-		return -1;
-
-	p = memchr(head, 0x20, (tail - head));
+	p = memchr(p, ' ', (eoh - p));
 	if (!p)
 		return -1;
 
 	++p;
 
-	q = memchr(p, 0x20, (tail - p));
+	q = memchr(p, ' ', (eoh - p));
 
 	if (!q)
 		return -1;
 
-	if ((q - p) >= 16)
+	if ((q - p) > 3)
 		return -1;
 
 	strncpy(code_str, p, (q - p));
