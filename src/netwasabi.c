@@ -1063,7 +1063,7 @@ parse_links(struct http_t *http, queue_obj_t *URL_queue, btree_obj_t *tree_archi
 		buf_append_ex(&URL, savep, url_len);
 		make_full_url(http, &url, &full_URL);
 
-		if (BTREE_search_data(tree_archived, (void *)full_URL.buf_head))
+		if (!__url_acceptable(http, tree_archived, full_URL))
 		{
 			savep = ++p;
 			continue;
@@ -1165,7 +1165,7 @@ crawl(struct http_t *http, queue_obj_t *URL_queue)
 		{
 			if (__url_parseable(http->URL))
 			{
-				parse_URLs(http, URL_queue);
+				parse_URLs(http, URL_queue, tree_archived);
 			}
 		}
 
@@ -1178,7 +1178,6 @@ crawl(struct http_t *http, queue_obj_t *URL_queue)
 fail:
 	return -1;
 }
-
 
 /**
  * GET pages for URLs in the caches. One cache will be
