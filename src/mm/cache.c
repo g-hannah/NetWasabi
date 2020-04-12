@@ -164,7 +164,7 @@ static inline int __owner_is_in_cache(cache_t *cachep, void *addr)
 do {\
 	struct cache_obj_ctx *____ctx_p;\
 	int __in_cache;\
-	if ((p) && __owner_is_in_cache((c), (p))\
+	if ((p) && __owner_is_in_cache((c), (p)))\
 		__in_cache = 1;\
 	int ____nr_ = (c)->nr_assigned;\
 	assert(____nr_ < (c)->capacity);\
