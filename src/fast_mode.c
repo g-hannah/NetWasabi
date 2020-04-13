@@ -1,13 +1,45 @@
 #include <assert.h>
-#include <errno.h>
 #include <fcntl.h>
-#include <pthread.h>
-#include <signal.h>
 #include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
-#include <unistd.h>
+
+#ifdef __linux__
+# include <errno.h>
+# include <pthread.h>
+# include <signal.h>
+# include <unistd.h>
+#elif define __MSWINDOWS__
+# include <windows.h>
+#else
+# error "Do not know which OS we are running on..."
+#endif
+
+#ifdef __linux__
+typedef pthread_t worker_t
+typedef void * worker_func_return_t
+typedef pthread_mutex_t mutex_t
+# define thread_create(id, attribute, thread_func, func_args) \
+	pthread_create((id), (attribute), (thread_func), (func_args))
+# define mutex_lock(m) \
+	pthread_mutex_lock(&(m))
+# define mutex_unlock(m) \
+	pthread_mutex_unlock(&(m))
+# define mutex_create pthread_mutex_init
+#elif defined __MSWINDOWS__
+typedef HANDLE worker_t
+typedef HANDLE mutex_t
+typedef worker_func_return_t DWORD
+# define thread_create(id, attribute, thread_func, func_args) \
+	CreateThread(NULL, 0, (thread_func), NULL, 0, NULL)
+# define mutex_lock(m) \
+	WaitForSingleObject((m), INFINITE)
+# define mutex_unlock(m) \
+	ReleaseMutex((m))
+# define mutex_create CreateMutex(NULL, FALSE, NULL)
+#endif
+
 #include "btree.h"
 #include "buffer.h"
 #include "cache.h"
@@ -15,6 +47,7 @@
 #include "fast_mode.h"
 #include "http.h"
 #include "malloc.h"
+#include "queue.h"
 #include "screen_utils.h"
 #include "netwasabi.h"
 
@@ -26,7 +59,7 @@
 
 struct worker_thread
 {
-	pthread_t tid;
+	worker_t tid;
 	int active;
 	int idx;
 	char *main_url;
@@ -57,7 +90,7 @@ static volatile long unsigned Initializing_Worker = 0;
 static volatile int Threads_Exit = 0;
 static volatile int Nr_Threads_Working = FAST_MODE_NR_WORKERS;
 
-static volatile int nr_workers_eoc = 0;
+//static volatile int nr_workers_eoc = 0;
 
 static volatile int nr_reconnected = 0;
 static volatile sig_atomic_t __do_reconnect = 0;
@@ -573,7 +606,7 @@ do_fast_mode(char *remote_host)
 		else
 			workers[i].cache_thresh = UINT_MAX;
 
-		if ((err = pthread_create(&workers[i].tid, &attr, worker_crawl, (void *)&workers[i])) != 0)
+		if ((err = thread_create(&workers[i].tid, &attr, worker_crawl, (void *)&workers[i])) != 0)
 		{
 			fprintf(stderr, "do_fast_mode: failed to create worker thread (%s)\n", strerror(err));
 			goto fail_release_mem;
