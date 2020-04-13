@@ -26,9 +26,8 @@ static cache_t *Dead_URL_cache = NULL;
 FILE *logfp = NULL;
 #endif
 
-#if 0
 static void
-LOG(const char *fmt, ...)
+Log(const char *fmt, ...)
 {
 #ifdef DEBUG
 	va_list args;
@@ -42,7 +41,6 @@ LOG(const char *fmt, ...)
 
 	return;
 }
-#endif
 
 #ifdef DEBUG
 static void
@@ -507,11 +505,11 @@ check_local_dirs(struct http_t *http, buf_t *filename)
  * URLs (i.e., file:///path_to_archived_html_document)
  */
 void
-replace_with_local_urls(struct http_t *http, buf_t *buf)
+replace_with_local_URLs(struct http_t *http)
 {
 	assert(http);
-	assert(buf);
 
+	buf_t *buf = &http->conn.read_buf;
 	char *tail = buf->buf_tail;
 	char *p;
 	char *savep;
@@ -700,8 +698,8 @@ archive_page(struct http_t *http)
 
 	buf_collapse(buf, (off_t)0, (p - buf->buf_head));
 
-	if (URL_parseable(http->URL))
-		replace_with_local_urls(http, buf);
+	//if (URL_parseable(http->URL))
+	//	replace_with_local_URLs(http, buf);
 
 	buf_init(&tmp, HTTP_URL_MAX);
 	buf_init(&local_url, 1024);
@@ -774,7 +772,7 @@ static int nr_urls_call = 0;
  * @http: our HTTP object with remote host info
  */
 static int
-__url_acceptable(struct http_t *http, btree_obj_t *tree_archived, buf_t *url)
+URL_acceptable(struct http_t *http, btree_obj_t *tree_archived, buf_t *url)
 {
 	assert(http);
 
@@ -818,10 +816,12 @@ __url_acceptable(struct http_t *http, btree_obj_t *tree_archived, buf_t *url)
 			return 0;
 	}
 
-	if (is_xdomain(http, url))
+	char Host[1024];
+	http->ops->URL_parse_host(url->buf_head, Host);
+
+	if (memcmp((void *)http->host, (void *)Host, strlen(Host)))
 	{
-		if (!option_set(OPT_ALLOW_XDOMAIN))
-			return 0;
+		return 0;
 	}
 
 	if (BTREE_search_data(tree_archived, (void *)url->buf_head, url->data_len))
@@ -911,16 +911,25 @@ parse_URLs(struct http_t *http, queue_obj_t *URL_queue, btree_obj_t *tree_archiv
 		assert(url_len < HTTP_URL_MAX);
 
 		buf_append_ex(&URL, savep, url_len);
+
+		Log("Got URL %s\n", URL.buf_head);
+		Log("Calling make_full_url()\n");
+
 		make_full_url(http, &URL, &full_URL);
 
-		if (!__url_acceptable(http, tree_archived, &full_URL))
+		Log("Made full URL: %s\n", full_URL.buf_head);
+
+		if (!URL_acceptable(http, tree_archived, &full_URL))
 		{
+			Log("URL is not acceptable\n");
 			savep = ++p;
 			continue;
 		}
 
-		if (QUEUE_enqueue(URL_queue, (void *)URL.buf_head, URL.data_len) < 0)
+		if (QUEUE_enqueue(URL_queue, (void *)full_URL.buf_head, full_URL.data_len) < 0)
 			goto fail_destroy_bufs;
+
+		Log("Added URL to queue: %d items in queue\n", URL_queue->nr_items);
 
 		savep = ++p;
 		++nr_urls_call;
@@ -974,16 +983,21 @@ crawl(struct http_t *http, queue_obj_t *URL_queue, btree_obj_t *tree_archived)
 		if (!item)
 			break;
 
+		Log("Dequeued item from queue\n");
+
 		assert(item->data_len < HTTP_URL_MAX);
 		strcpy(http->URL, (char *)item->data);
 		http->URL_len = item->data_len;
 
+		Log("Searching dead URL cache\n");
 		if ((dead = search_dead_URL(Dead_URL_cache, http->URL)))
 		{
+			Log("Dead link: %s\n", http->URL);
 			++dead->times_seen;
 			continue;
 		}
 
+		Log("Requesting %s\n", http->URL);
 		//http->ops->URL_parse_host(http->URL, http->host);
 		http->ops->URL_parse_page(http->URL, http->page);
 
@@ -1011,11 +1025,22 @@ crawl(struct http_t *http, queue_obj_t *URL_queue, btree_obj_t *tree_archived)
 				goto next;
 		}
 
-		archive_page(http);
 		BTREE_put_data(tree_archived, (void *)http->URL, http->URL_len);
 
+		//if (URL_parseable(http->URL))
+		Log("Parsing URLs from page\n");
+
 		if (URL_parseable(http->URL))
+		{
 			parse_URLs(http, URL_queue, tree_archived);
+
+			Log("Finished parsing URLs - calling replace_with_local_URLs\n");
+			replace_with_local_URLs(http);
+			Log("Finished transforming URLs\n");
+		}
+
+		Log("Archiving document locally\n");
+		archive_page(http);
 
 	next:
 
