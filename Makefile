@@ -20,10 +20,12 @@ PRIMARY_OBJS := \
 	$(TOP_DIR)/screen_utils.o
 
 MM_OBJS := \
+	$(MM_DIR)/btree.o \
 	$(MM_DIR)/buffer.o \
 	$(MM_DIR)/cache.o \
 	$(MM_DIR)/hash_bucket.o \
-	$(MM_DIR)/malloc.o
+	$(MM_DIR)/malloc.o \
+	$(MM_DIR)/queue.o
 
 HTTP_OBJS := \
 	$(HTTP_DIR)/http.o
