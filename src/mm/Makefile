@@ -5,16 +5,20 @@ DEBUG := 0
 INCLUDE_DIR := ../../include
 
 MM_DEPENDENCIES = \
+	$(INCLUDE_DIR)/btree.h \
 	$(INCLUDE_DIR)/buffer.h \
 	$(INCLUDE_DIR)/cache.h \
 	$(INCLUDE_DIR)/hash_bucket.h \
-	$(INCLUDE_DIR)/malloc.h
+	$(INCLUDE_DIR)/malloc.h \
+	$(INCLUDE_DIR)/queue.h
 
 MM_SOURCE = \
+	btree.c \
 	buffer.c \
 	cache.c \
 	hash_bucket.c \
-	malloc.c
+	malloc.c \
+	queue.c
 
 MM_OBJS := $(MM_SOURCE:.c=.o)
 
