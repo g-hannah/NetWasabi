@@ -112,6 +112,8 @@ struct http_t
 	char *URL;
 	char *primary_host;
 
+	size_t URL_len;
+
 	struct HTTP_methods *ops;
 };
 
