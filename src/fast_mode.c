@@ -30,7 +30,7 @@ typedef pthread_mutex_t mutex_t
 #elif defined __MSWINDOWS__
 typedef HANDLE worker_t
 typedef HANDLE mutex_t
-typedef worker_func_return_t DWORD
+typedef DWORD worker_func_return_t 
 # define thread_create(id, attribute, thread_func, func_args) \
 	CreateThread(NULL, 0, (thread_func), NULL, 0, NULL)
 # define mutex_lock(m) \
