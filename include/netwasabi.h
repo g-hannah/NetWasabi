@@ -1,6 +1,7 @@
 #ifndef NETWASABI_H
 #define NETWASABI_H 1
 
+#include <pthread.h>
 #include <stdint.h>
 #include <string.h>
 #include <sys/ioctl.h>
@@ -9,10 +10,16 @@
 #include "cache.h"
 #include "graph.h"
 #include "http.h"
+#include "queue.h"
 
 #define NETWASABI_BUILD		"0.0.3"
 #define NETWASABI_DIR		"NetWasabi_Crawled"
 
+/* XXX
+ * Should probably just vendor in
+ * the libcurses library to deal
+ * with the terminal screen drawing...
+ */
 #define COL_ORANGE	"\x1b[38;5;208m"
 #define COL_RED		"\x1b[38;5;9m"
 #define COL_BLUE	"\x1b[38;5;12m"
@@ -67,6 +74,13 @@
 
 #define __ALIGN(size) (((size) + 0xf) & ~(0xf))
 
+/*
+ * XXX	This doesn't even check for a NULL
+ *	return from calloc(). We should
+ *	just make a module for dealing
+ *	with this stuff and put it in
+ *	mm.
+ */
 #define MATRIX_INIT(PTR, NUM, ALEN, TYPE) \
 do {\
 	int i;\
@@ -281,11 +295,11 @@ void put_error_msg(const char *, ...) __nonnull ((1));
 int check_local_dirs(struct http_t *, buf_t *) __nonnull((1,2)) __wur;
 void replace_with_local_urls(struct http_t *, buf_t *) __nonnull((1,2));
 int archive_page(struct http_t *) __nonnull((1)) __wur;
-int parse_links(struct http_t *, struct cache_ctx *, struct cache_ctx *) __nonnull((1,2,3)) __wur;
-void deconstruct_btree(URL_t *, cache_t *) __nonnull((1,2));
-int do_request(struct http_t *) __nonnull((1)) __wur;
+int parse_URLs(struct http_t *, queue_obj_t *, btree_obj_t *) __nonnull((1,2,3)) __wur;
+//void deconstruct_btree(URL_t *, cache_t *) __nonnull((1,2));
+//int do_request(struct http_t *) __nonnull((1)) __wur;
 
-int crawl(struct http_t *, struct cache_ctx *, struct cache_ctx *) __nonnull((1,2,3)) __wur;
+int crawl(struct http_t *, queue_obj_t *, btree_obj_t *) __nonnull((1,2,3)) __wur;
 
 #define TOKEN_MAX 64
 
