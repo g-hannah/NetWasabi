@@ -11,16 +11,18 @@
 #include <sys/stat.h>
 #include <time.h>
 #include <unistd.h>
+#include "btree.h"
 #include "buffer.h"
 #include "cache.h"
 #include "cache_management.h"
 #include "fast_mode.h"
 #include "http.h"
 #include "malloc.h"
+#include "netwasabi.h"
+#include "queue.h"
 #include "robots.h"
 #include "screen_utils.h"
 #include "utils_url.h"
-#include "netwasabi.h"
 
 static int get_opts(int, char *[]) __nonnull((2)) __wur;
 
@@ -28,8 +30,6 @@ static int get_opts(int, char *[]) __nonnull((2)) __wur;
  * Global vars.
  */
 struct netwasabi_ctx nwctx = {0};
-struct cache_ctx cache1_ctx = {0};
-struct cache_ctx cache2_ctx = {0};
 
 size_t httplen;
 size_t httpslen;
@@ -38,11 +38,12 @@ pthread_t thread_screen_tid;
 pthread_attr_t thread_screen_attr;
 pthread_mutex_t screen_mutex;
 
+static queue_obj_t *URL_queue = NULL;
+static btree_obj_t *tree_archived = NULL;
+
 static volatile sig_atomic_t screen_updater_stop = 0;
 
 struct winsize winsize;
-struct graph_ctx *allowed;
-struct graph_ctx *forbidden;
 
 struct url_types url_types[] =
 {
@@ -91,7 +92,8 @@ __dtor __wr_fini(void)
 void *
 screen_updater_thread(void *arg)
 {
-	static int go_right = 1;
+	int go_right = 1;
+
 	static char *string_collection[] =
 	{
 		"Things you own end up owning you.",
@@ -106,9 +108,10 @@ screen_updater_thread(void *arg)
 		"To the poet a pearl is a tear of the sea.",
 		NULL
 	};
-	static int string_idx = 0;
-	static int max_right;
-	static size_t len;
+
+	int string_idx = 0;
+	int max_right;
+	size_t len;
 
 	len = strlen(string_collection[0]);
 	max_right = (OUTPUT_TABLE_COLUMNS - (int)len);
@@ -439,8 +442,6 @@ main(int argc, char *argv[])
 	}
 
 	struct http_t *http;
-	//int status_code;
-	//int do_not_archive = 0;
 	int rv;
 	size_t url_len;
 	buf_t *rbuf = NULL;
@@ -460,6 +461,7 @@ main(int argc, char *argv[])
 	url_len = strlen(argv[1]);
 	assert(url_len < HTTP_URL_MAX);
 	strcpy(http->URL, argv[1]);
+	http->URL_len = url_len;
 
 	http->ops->URL_parse_host(argv[1], http->host);
 	http->ops->URL_parse_page(argv[1], http->page);
@@ -471,23 +473,6 @@ main(int argc, char *argv[])
 
 	rbuf = &http_rbuf(http);
 	wbuf = &http_wbuf(http);
-
-	/*
-	 * Create a new cache for URL_t objects.
-	 */
-	cache1_ctx.cache = cache_create(
-			"http_link_cache",
-			sizeof(URL_t),
-			0,
-			URL_cache_ctor,
-			URL_cache_dtor);
-
-	cache2_ctx.cache = cache_create(
-			"http_link_cache2",
-			sizeof(URL_t),
-			0,
-			URL_cache_ctor,
-			URL_cache_dtor);
 
 	/*
 	 * Catch SIGINT and SIGQUIT so we can release cache memory, etc.
@@ -503,6 +488,14 @@ main(int argc, char *argv[])
 	 * Check if the webserver has a robots.txt file
 	 * and if so, use it to create a directed network
 	 * of URL tokens.
+	 *
+	 * XXX	Update: We will create a regex module
+	 *	specifically for dealing abiding by
+	 *	the rules in the robots.txt file
+	 *	on webservers. Also, we can then
+	 *	use it for other features such
+	 *	as only archiving pages containing
+	 *	certain text, etc.
 	 */
 	//if (__get_robots(&conn) < 0)
 		//put_error_msg("No robots.txt file");
@@ -511,6 +504,9 @@ main(int argc, char *argv[])
 	buf_clear(wbuf);
 
 	update_current_url(http->URL);
+
+	URL_queue = QUEUE_object_new();
+	tree_archived = BTREE_object_new();
 
 	http->ops->send_request(http);
 	http->ops->recv_response(http);
@@ -523,27 +519,18 @@ main(int argc, char *argv[])
 		goto out_disconnect;
 	}
 
-	parse_links(http, &cache1_ctx, &cache2_ctx);
-	update_cache1_count(cache_nr_used(cache1_ctx.cache));
 	archive_page(http); // This should check for existence...
+	BTREE_put_data(tree_archived, (void *)http->URL, http->URL_len);
 
-#if 0
-	if (!do_not_archive)
-	{
-		archive_page(http);
-	}
-#endif
+	parse_URLs(http, URL_queue, tree_archived);
 
-	if (!cache_nr_used(cache1_ctx.cache))
+	if (!URL_queue->nr_items)
 	{
-		//update_operation_status("Parsed no URLs from page (already archived)");
+		update_operation_status("Parsed no URLs from page (already archived)");
 		goto out_disconnect;
 	}
 
-	cache1_ctx.state = DRAINING;
-	cache2_ctx.state = FILLING;
-
-	rv = crawl(http, &cache1_ctx, &cache2_ctx);
+	rv = crawl(http, URL_queue, tree_archived);
 
 	if (rv < 0)
 	{
@@ -552,53 +539,29 @@ main(int argc, char *argv[])
 
 	update_operation_status("Finished crawling site");
 
-	out_disconnect:
+out_disconnect:
+
 	http_disconnect(http);
 	HTTP_delete(http);
-
-	if (cache_nr_used(cache1_ctx.cache) > 0)
-		cache_clear_all(cache1_ctx.cache);
-	if (cache_nr_used(cache2_ctx.cache) > 0)
-		cache_clear_all(cache2_ctx.cache);
-
-	cache_destroy(cache1_ctx.cache);
-	cache_destroy(cache2_ctx.cache);
-
-	if (allowed)
-		destroy_graph(allowed);
-
-	if (forbidden)
-		destroy_graph(forbidden);
 
 	sigaction(SIGINT, &old_sigint, NULL);
 	sigaction(SIGQUIT, &old_sigquit, NULL);
 
-	out:
+out:
+
 	screen_updater_stop = 1;
 
 	usleep(100000);
 	exit(EXIT_SUCCESS);
 
-	fail_disconnect:
+fail_disconnect:
+
 	screen_updater_stop = 1;
 	http_disconnect(http);
 	HTTP_delete(http);
 
-	if (cache_nr_used(cache1_ctx.cache) > 0)
-		cache_clear_all(cache1_ctx.cache);
-	if (cache_nr_used(cache2_ctx.cache) > 0)
-		cache_clear_all(cache2_ctx.cache);
+fail:
 
-	cache_destroy(cache1_ctx.cache);
-	cache_destroy(cache2_ctx.cache);
-
-	if (allowed)
-		destroy_graph(allowed);
-
-	if (forbidden)
-		destroy_graph(forbidden);
-
-	fail:
 	fprintf(stderr, "Failed...\n");
 	sigaction(SIGINT, &old_sigint, NULL);
 	sigaction(SIGQUIT, &old_sigquit, NULL);
