@@ -32,5 +32,7 @@ int BUCKET_reset_buckets(bucket_obj_t *bObj);
 void BUCKET_clear_bucket(bucket_obj_t *bObj, char *key);
 bucket_t *BUCKET_get_bucket(bucket_obj_t *bObj, char *key);
 bucket_t *BUCKET_get_bucket_from_list(bucket_t *bucket, char *key);
+bucket_t *BUCKET_get_list_bucket_for_value(bucket_t *bucket, void *data, size_t data_len);
+char *BUCKET_get_key_for_value(bucket_t *bucket, void *data, size_t data_len);
 
 #endif /* !defined __HASH_BUCKET_H__ */

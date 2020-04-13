@@ -334,6 +334,46 @@ BUCKET_get_bucket_from_list(bucket_t *bucket, char *key)
 	return NULL;
 }
 
+bucket_t *
+BUCKET_get_list_bucket_for_value(bucket_t *bucket, void *data, size_t data_len)
+{
+	assert(bucket);
+	assert(data);
+
+	if (!data_len)
+		return NULL;
+
+	while (bucket)
+	{
+		if (!memcmp(data, bucket->data, data_len))
+			return bucket;
+
+		bucket = bucket->next;
+	}
+
+	return NULL;
+}
+
+char *
+BUCKET_get_key_for_value(bucket_t *bucket, void *data, size_t data_len)
+{
+	assert(bucket);
+	assert(data);
+
+	if (!data_len)
+		return NULL;
+
+	while (bucket)
+	{
+		if (!memcmp(data, bucket->data, data_len))
+			return bucket->key;
+
+		bucket = bucket->next;
+	}
+
+	return NULL;
+}
+
 bucket_obj_t *
 BUCKET_object_new(void)
 {
