@@ -8,6 +8,7 @@
 #include <stdlib.h>
 #include <string.h>
 #include <unistd.h>
+#include "btree.h"
 #include "buffer.h"
 #include "cache.h"
 #include "cache_management.h"
@@ -33,36 +34,42 @@ struct worker_thread
 	unsigned int cache_thresh;
 };
 
+static queue_obj_t *URL_queue = NULL;
+static btree_obj_t *tree_archived = NULL;
+
 static struct worker_thread workers[FAST_MODE_NR_WORKERS];
 static pthread_attr_t attr;
 static pthread_barrier_t start_barrier;
 static pthread_once_t once = PTHREAD_ONCE_INIT;
 static pthread_cond_t cache_switch_cond;
-static pthread_mutex_t eoc_mtx;
-static pthread_mutex_t fin_mtx;
-static pthread_mutex_t recon_mtx;
+
+#define queue_lock(pthread_mutex_lock(&Mutex_Queue))
+#define queue_unlock(pthread_mutex_lock(&Mutex_Queue))
+#define tree_lock(pthread_mutex_lock(&Mutex_Tree))
+#define tree_unlock(pthread_mutex_unlock(&Mutex_Tree))
+static pthread_mutex_t Mutex_Queue;
+static pthread_mutex_t Mutex_Tree;
+//static pthread_mutex_t eoc_mtx;
+static pthread_mutex_t Mutex_Finished;
+static pthread_mutex_t Mutex_Reconnect;
+
+static volatile long unsigned Initializing_Worker = 0;
+static volatile int Threads_Exit = 0;
+static volatile int Nr_Threads_Working = FAST_MODE_NR_WORKERS;
+
 static volatile int nr_workers_eoc = 0;
-static volatile long unsigned __initialising_thread = 0;
-static volatile int __threads_exit = 0;
-static volatile int nr_draining = 0;
-static volatile int nr_filling = 0;
-static volatile int fill = 1;
-static volatile int NR_EXTANT_WORKERS = FAST_MODE_NR_WORKERS;
 
 static volatile int nr_reconnected = 0;
 static volatile sig_atomic_t __do_reconnect = 0;
 static struct sigaction __old_sigpipe;
 static struct sigaction __new_sigpipe;
 
-static cache_t *filling;
-static cache_t *draining;
 static cache_t *Dead_URL_cache;
 
-struct cache_ctx cache1;
-struct cache_ctx cache2;
-
-#define WLOG_FILE "./fast_mode_log.txt"
+#ifdef DEBUG
+# define WLOG_FILE "./fast_mode_log.txt"
 FILE *wlogfp = NULL;
+#endif
 
 /**
  * A worker may write to a broken pipe after the
@@ -143,14 +150,14 @@ __dtor __fast_mode_fini(void)
 static void
 init_worker_environ(void)
 {
-	draining = cache1.cache;
-	filling = cache2.cache;
+	//draining = cache1.cache;
+	//filling = cache2.cache;
 
-	cache1.state = DRAINING;
-	cache2.state = FILLING;
+	//cache1.state = DRAINING;
+	//cache2.state = FILLING;
 
-	update_cache_status(1, FL_CACHE_STATUS_DRAINING);
-	update_cache_status(2, FL_CACHE_STATUS_FILLING);
+	//update_cache_status(1, FL_CACHE_STATUS_DRAINING);
+	//update_cache_status(2, FL_CACHE_STATUS_FILLING);
 
 	__initialising_thread = pthread_self();
 
@@ -159,7 +166,7 @@ init_worker_environ(void)
 
 /**
  * worker_signal_eoc - signal that thread has reached end of a cycle
- */
+ *
 static inline void
 worker_signal_eoc(void)
 {
@@ -168,6 +175,7 @@ worker_signal_eoc(void)
 	pthread_mutex_unlock(&eoc_mtx);
 	return;
 }
+*/
 
 /**
  * worker_signal_fin - signal that thread has finished and is exiting
@@ -175,9 +183,9 @@ worker_signal_eoc(void)
 static inline void
 worker_signal_fin(struct worker_thread *wt)
 {
-	pthread_mutex_lock(&fin_mtx);
-	--NR_EXTANT_WORKERS;
-	pthread_mutex_unlock(&fin_mtx);
+	pthread_mutex_lock(&Mutex_Finished);
+	--Nr_Threads_Working;
+	pthread_mutex_unlock(&Mutex_Finished);
 
 	wt->active = 0;
 
@@ -202,8 +210,7 @@ worker_signal_recon(void)
 /**
  * __get_next_link - get next URL from the URL cache
  * @ctx: the cache context containing the cache and the binary tree root
- */
-
+ *
 static URL_t *__get_next_link(struct cache_ctx *ctx)
 {
 	URL_t *nptr = ctx->root;
@@ -214,7 +221,7 @@ static URL_t *__get_next_link(struct cache_ctx *ctx)
 
 /*
  * Search the binary tree in post-order.
- */
+ *
 	while (1)
 	{
 		if (!nptr->left && !nptr->right)
@@ -243,7 +250,7 @@ static URL_t *__get_next_link(struct cache_ctx *ctx)
  *
  * The main thread will actually call cache_clear_all()
  * when toggling the cache states.
- */
+ *
 
 	if (parent)
 	{
@@ -259,19 +266,25 @@ static URL_t *__get_next_link(struct cache_ctx *ctx)
 
 	return nptr;
 }
+*/
 
 static void *
 worker_crawl(void *args)
 {
 	struct worker_thread *wt = (struct worker_thread *)args;
-	char *main_url;
-	URL_t *link = NULL;
 	struct http_t *http = NULL;
+	queue_item_t *item = NULL;
+	dead_url_t *dead = NULL;
+	//URL_t *link = NULL;
+
+	char *main_url;
+	char URL[HTTP_URL_MAX];
 	int status_code;
+	size_t URL_len;
 
 	main_url = wt->main_url;
 
-	if (!(http = HTTP_new((uint64_t)pthread_self())))
+	if (!(http = HTTP_new((uint32_t)pthread_self())))
 	{
 		put_error_msg("failed to get new HTTP object");
 		goto thread_fail;
@@ -282,11 +295,8 @@ worker_crawl(void *args)
 
 	strcpy(http->URL, main_url);
 
-	if (!http->ops->URL_parse_host(http->URL, http->host))
-		goto thread_fail;
-
-	if (!http->ops->URL_parse_page(http->URL, http->page))
-		goto thread_fail;
+	http->ops->URL_parse_host(http->URL, http->host);
+	http->ops->URL_parse_page(http->URL, http->page);
 
 	strcpy(http->primary_host, http->host);
 
@@ -306,7 +316,7 @@ worker_crawl(void *args)
  */
 	pthread_once(&once, init_worker_environ);
 
-	if (__initialising_thread == pthread_self())
+	if (Initializing_Worker == pthread_self())
 	{
 		http->ops->send_request(http);
 		http->ops->recv_response(http);
@@ -316,29 +326,21 @@ worker_crawl(void *args)
 		if (HTTP_OK != status_code)
 		{
 			wlog("[0x%lx] HTTP status code = %d\n", pthread_self(), status_code);
-			__threads_exit = 1;
+			Threads_Exit = 1;
 		}
 		else
 		{
 			wlog("[0x%lx] calling parse_links()\n", pthread_self());
-			if ((nr_draining = parse_links(http, &cache1, &cache2)) < 0)
+			parse_links(http, URL_queue, tree_archived);
+
+			if (!URL_queue->nr_items)
 			{
-				wlog("[0x%lx] failed to parse URLs from page\n", pthread_self());
-				put_error_msg("Failed to get URLs from start page");
-				__threads_exit = 1;
+				wlog("No URLs parsed from initial page\n");
+				Threads_Exit = 1;
 			}
 			else
 			{
-				if (nr_draining > 0)
-					assert(cache1.root != NULL);
-				else
-				{	
-					update_operation_status("Parsed no URLs from initial page");
-					wlog("[0x%lx] Parsed no URLs from initial page\n", pthread_self());
-					__threads_exit = 1;
-				}
-				nr_filling = 0;
-				wlog("[0x%lx] %d in cache1\n", pthread_self(), nr_draining);
+				wlog("Parsed %d URLs from initial page\n", URL_queue->nr_items);
 			}
 		}
 	}
@@ -350,7 +352,7 @@ worker_crawl(void *args)
 	wlog("[0x%lx] Calling pthread_barrier_wait()\n", pthread_self());
 	pthread_barrier_wait(&start_barrier);
 
-	if (__threads_exit)
+	if (Threads_Exit)
 	{
 		wlog("[0x%lx] __threads_exit == 1 ; jumping to label thread_exit\n", pthread_self());
 		goto thread_exit;
@@ -358,149 +360,84 @@ worker_crawl(void *args)
 
 	while (1)
 	{
-		cache_lock(draining);
+		queue_lock();
 
-		link = __get_next_link(cache1.state == DRAINING ? &cache1 : &cache2);
+		item = QUEUE_dequeue(URL_queue);
+
+		queue_unlock();
+
+		if (!item)
+		{
+			goto thread_exit;
+		}
+
+		URL_len = item->data_len;
+		strncpy(URL, (char *)item->data, URL_len);
+		URL[URL_len] = 0;
 
 		cache_lock(Dead_URL_cache);
-		Dead_URL_t *dead = search_dead_URL(Dead_URL_cache, link->URL);
+		// O(n)
+		dead = search_dead_URL(Dead_URL_cache, link->URL);
 
 		if (dead)
 		{
 			cache_unlock(Dead_URL_cache);
-			cache_unlock(draining);
 			continue;
 		}
 
 		cache_unlock(Dead_URL_cache);
 
-		if (!link || nr_draining <= 0)
+		tree_lock();
+		// ~O(logN)
+		if (BTREE_search_data(tree_archived, (void *)URL, URL_len))
 		{
-			wlog("[0x%lx] __get_next_link gave me NULL (nr_draining = %d)\n", pthread_self());
-
-			cache_lock(filling);
-
-			if (!cache_nr_used(filling))
-			{
-				cache_unlock(filling);
-/*
- * There are no remaining URLs in the DRAINING cache, and we didn't
- * add any new ones to the FILLING cache. So it's time to exit now.
- */
-				wlog("[0x%lx] URLs in draining = %d\n", pthread_self(), cache_nr_used(draining));
-				wlog("[0x%lx] Unlocking cache and jumping to thread_exit\n", pthread_self());
-				cache_unlock(draining);
-				goto thread_exit;
-			}
-
-			cache_unlock(filling);
-
-/*
- * The DRAINING cache is now empty. We have URLs in the FILLING cache that
- * we will get once the main thread switches the cache states. So workers
- * will signal end of cache (EOC) by calling worker_signal_eoc(). When the
- * number of workers that have signaled EOC == FAST_MODE_NR_WORKERS, the main
- * thread will switch the cache states and adjust our pointers and then
- * broadcast to the workers that the condition has been met. The kernel will
- * wake them back up and they can continue to work on the URLs in the
- * now-DRAINING cache.
- */
-			wlog("[0x%lx] Draining cache empty. Calling worker_signal_eoc()\n", pthread_self());
-			wlog("[0x%lx] Waiting for main thread to broadcast condition\n", pthread_self());
-			worker_signal_eoc();
-			pthread_cond_wait(&cache_switch_cond, &draining->lock);
-/*
- * When the workers return from pthread_cond_wait(), they compete automatically
- * for the mutex that was associated with the condition, which was in the
- * DRAINING cache_ctx but which has now become the FILLING cache_ctx. So each of
- * them in turn will get to own the mutex after this, so each of them in turn
- * has to unlock it.
- */
-			cache_unlock(filling);
+			tree_unlock();
 			continue;
 		}
-		else
-		{
-			wlog("[0x%lx] Got \"%s\" from cache\n", pthread_self(), link->URL);
-			cache_unlock(draining);
-		}
 
-		strcpy(http->URL, link->URL);
+		tree_unlock();
+
+		strcpy(http->URL, URL);
 
 		http->ops->URL_parse_host(link->URL, http->host);
 		http->ops->URL_parse_page(link->URL, http->page);
 
-		wlog("[0x%lx] Calling do_request()\n", pthread_self());
-		//status_code = do_request(http);
-
 		http->ops->send_request(http);
 		http->ops->recv_response(http);
 
-		update_current_url(link->URL);
+		update_current_url(URL);
 
 		switch(http->code)
 		{
 			case HTTP_OK:
+
 				break;
+
 			case HTTP_NOT_FOUND:
+
 				cache_lock(Dead_URL_cache);
 				cache_dead_URL(Dead_URL_cache, http->URL, http->code);
 				cache_unlock(Dead_URL_cache);
-				//goto next;
+
 			default:
+
 				goto next;
 		}
 
-/*
- * The global volatile FILL variable controls whether
- * we are still filling the FILLING cache or not.
- */
-		if (fill)
-		{
-			if (parse_links(http, cache1.state == FILLING ? &cache1 : &cache2, cache1.state == DRAINING ? &cache1 : &cache2) < 0)
-			{
-				wlog("[0x%lx] Failed to parse URLs from %s\n", pthread_self(), link->URL);
-				put_error_msg("0x%lx: failed to parse URLs from page", pthread_self());
-			}
-
-			cache_lock(filling);
-
-			nr_filling = cache_nr_used(filling);
-
-			if (filling == cache1.cache)
-				update_cache1_count(nr_filling);
-			else
-				update_cache2_count(nr_filling);
-
-			if (__option_set(wt, OPT_CACHE_THRESHOLD))
-			{
-				if (nr_filling >= __threshold(wt))
-				{
-					fill = 0;
-					update_cache_status(cache1.state == FILLING ? 1 : 2, FL_CACHE_STATUS_FULL);
-				}
-			}
-
-			cache_unlock(filling);
-		}
-
-		wlog("[0x%lx] Archiving page\n", pthread_self());
 		archive_page(http);
 
-		cache_lock(draining);
+		queue_lock();
+		tree_lock();
 
-		--nr_draining;
-		if (cache1.state == DRAINING)
-			update_cache1_count(nr_draining);
-		else
-			update_cache2_count(nr_draining);
+		BTREE_put_data(tree_archived, (void *)URL, strlen(URL));
+		parse_links(http, URL_queue, tree_archived);
 
-		cache_unlock(draining);
+		tree_unlock();
+		queue_unlock();
 
 	next:
-	//check_reconnect:
 
-		pthread_mutex_lock(&recon_mtx);
+		pthread_mutex_lock(&Mutex_Reconnect);
 
 		if (__do_reconnect)
 		{
@@ -518,10 +455,10 @@ worker_crawl(void *args)
 			}
 		}
 
-		pthread_mutex_unlock(&recon_mtx);
+		pthread_mutex_unlock(&Mutex_Reconnect);
 	}
 
-	thread_exit:
+thread_exit:
 
 	wlog("[0x%lx] Exiting\n", pthread_self());
 
@@ -532,15 +469,15 @@ worker_crawl(void *args)
 	}
 
 	worker_signal_fin(wt);
-	worker_signal_eoc();
+	//worker_signal_eoc();
 
 	pthread_exit((void *)0);
 
-	thread_fail:
+thread_fail:
 
 	wlog("[0x%lx] Failed -- exiting\n", pthread_self());
 	worker_signal_fin(wt);
-	worker_signal_eoc();
+	//worker_signal_eoc();
 
 	if (http)
 	{
@@ -586,12 +523,122 @@ respawn_dead_threads(void)
 			else
 			{
 				wlog("[main] Respawned dead thread\n");
-				pthread_mutex_lock(&fin_mtx);
-				++NR_EXTANT_WORKERS;
-				pthread_mutex_unlock(&fin_mtx);
+				pthread_mutex_lock(&Mutex_Finished);
+				++Nr_Threads_Working;
+				pthread_mutex_unlock(&Mutex_Finished);
 			}
 		}
 	}
+}
+
+int
+do_fast_mode(char *remote_host)
+{
+	pthread_attr_init(&attr);
+	pthread_attr_setdetachstate(&attr, PTHREAD_CREATE_DETACHED);
+
+	URL_queue = QUEUE_object_new();
+	tree_archived = BTREE_object_new();
+
+	if (!(Dead_URL_cache = cache_create(
+			"dead_url_cache",
+			sizeof(Dead_URL_t),
+			0,
+			Dead_URL_cache_ctor,
+			Dead_URL_cache_dtor)))
+	{
+		fprintf(stderr, "__fast_mode_init: failed to create dead url cache\n");
+		goto fail;
+	}
+
+	pthread_barrier_init(&start_barrier, NULL, FAST_MODE_NR_WORKERS);
+
+	pthread_mutex_init(&Mutex_Queue);
+	pthread_mutex_init(&Mutex_Tree);
+	//pthread_mutex_init(&eoc_mtx, NULL);
+	pthread_mutex_init(&Mutex_Finished, NULL);
+	pthread_mutex_init(&Mutex_Reconnect, NULL);
+
+	//pthread_cond_init(&cache_switch_cond, NULL);
+
+	for (i = 0; i < FAST_MODE_NR_WORKERS; ++i)
+	{
+		workers[i].active = 1;
+		workers[i].idx = i;
+		workers[i].main_url = strdup(remote_host); /* give each their own copy of the main URL */
+		workers[i].runtime_options = runtime_options;
+
+		if (option_set(OPT_CACHE_THRESHOLD))
+			workers[i].cache_thresh = nwctx.config.cache_thresh;
+		else
+			workers[i].cache_thresh = UINT_MAX;
+
+		if ((err = pthread_create(&workers[i].tid, &attr, worker_crawl, (void *)&workers[i])) != 0)
+		{
+			fprintf(stderr, "do_fast_mode: failed to create worker thread (%s)\n", strerror(err));
+			goto fail_release_mem;
+		}
+	}
+
+	while (1)
+	{
+		pthread_mutex_lock(&Mutex_Finished);
+		if (!Nr_Threads_Working)
+		{
+			pthread_mutex_unlock(&Mutex_Finished);
+			break;
+		}
+		else
+		{
+			pthread_mutex_unlock(&Mutex_Finished);
+			usleep(1000);
+			continue;
+		}
+	}
+
+	for (i = 0; i < FAST_MODE_NR_WORKERS; ++i)
+		free(workers[i].main_url);
+
+	pthread_attr_destroy(&attr);
+
+	pthread_mutex_destroy(&Mutex_Queue);
+	pthread_mutex_destroy(&Mutex_Tree);
+	//pthread_mutex_destroy(&eoc_mtx);
+	pthread_mutex_destroy(&Mutex_Finished);
+	pthread_mutex_destroy(&Mutex_Reconnect);
+
+	//pthread_cond_destroy(&cache_switch_cond);
+
+	pthread_barrier_destroy(&start_barrier);
+
+	cache_clear_all(Dead_URL_cache);
+	cache_destroy(Dead_URL_cache);
+
+	return 0;
+
+fail_release_mem:
+
+	for (i = 0; i < FAST_MODE_NR_WORKERS; ++i)
+		free(workers[i].main_url);
+
+	pthread_attr_destroy(&attr);
+
+	pthread_mutex_destroy(&Mutex_Queue);
+	pthread_mutex_destroy(&Mutex_Tree);
+	//pthread_mutex_destroy(&eoc_mtx);
+	pthread_mutex_destroy(&Mutex_Finished);
+	pthread_mutex_destroy(&Mutex_Reconnect);
+
+	//pthread_cond_destroy(&cache_switch_cond);
+
+	pthread_barrier_destroy(&start_barrier);
+
+fail:
+
+	if (Dead_URL_cache)
+		cache_destroy(Dead_URL_cache);
+
+	return -1;
 }
 
 /**
@@ -599,7 +646,7 @@ respawn_dead_threads(void)
  *				controlling the switching of caches from DRAINING to FILLING.
  *
  * @remote_host: the target website to crawl
- */
+ *
 int
 do_fast_mode(char *remote_host)
 {
@@ -671,7 +718,7 @@ do_fast_mode(char *remote_host)
 	{
 		workers[i].active = 1;
 		workers[i].idx = i;
-		workers[i].main_url = strdup(remote_host); /* give each their own copy of the main URL */
+		workers[i].main_url = strdup(remote_host); /* give each their own copy of the main URL *
 		workers[i].runtime_options = runtime_options;
 
 		if (option_set(OPT_CACHE_THRESHOLD))
@@ -708,7 +755,7 @@ do_fast_mode(char *remote_host)
  * Here there's no need to use the mutex because all the workers
  * have called pthread_cond_wait(), so there cannot be any
  * contention.
- */
+ *
 		nr_workers_eoc = 0;
 
 		usleep(1000);
@@ -727,7 +774,7 @@ do_fast_mode(char *remote_host)
  * Otherwise, we have NR_EXTANT_WORKERS workers waiting for the main
  * thread to switch the cache states and call pthread_cond_broadcast().
  * Respawn the dead threads first and then toggle the cache states.
- */
+ *
 			int nr_respawn = (FAST_MODE_NR_WORKERS - NR_EXTANT_WORKERS);
 
 			pthread_barrier_destroy(&start_barrier);
@@ -745,7 +792,7 @@ do_fast_mode(char *remote_host)
  * in postorder and when they find a node they adjust the pointer
  * in their parent node that points to them by setting it to %NULL.
  * So we call cache_clear_all() here to actually empty the cache.
- */
+ *
 			deconstruct_btree(cache1.root, cache1.cache);
 			cache_clear_all(cache1.cache);
 
@@ -829,3 +876,4 @@ do_fast_mode(char *remote_host)
 
 	return -1;
 }
+*/
