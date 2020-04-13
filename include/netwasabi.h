@@ -4,6 +4,7 @@
 #include <stdint.h>
 #include <string.h>
 #include <sys/ioctl.h>
+#include "btree.h"
 #include "buffer.h"
 #include "cache.h"
 #include "graph.h"
@@ -209,6 +210,7 @@ enum state
 struct cache_ctx
 {
 	cache_t *cache;
+	//btree_obj_t *btree;
 	URL_t *root;
 	enum state state;
 };
