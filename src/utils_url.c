@@ -223,7 +223,7 @@ make_local_url(struct http_t *http, buf_t *url, buf_t *path)
 
 	char *home = getenv("HOME");
 	char *p;
-	static char tmp_page[1024];
+	char tmp_page[2048];
 	buf_t tmp_full;
 
 	buf_init(&tmp_full, HTTP_URL_MAX);
