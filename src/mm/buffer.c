@@ -6,6 +6,7 @@
 #include <openssl/ssl.h>
 #include <setjmp.h>
 #include <signal.h>
+#include <stdarg.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -16,6 +17,20 @@
 #include "malloc.h"
 
 #define BUF_ALIGN_SIZE(s) (((s) + 0xf) & ~(0xf))
+
+static void
+bLog(char *fmt, ...)
+{
+#ifdef DEBUG
+	va_list args;
+
+	va_start(args, fmt);
+	vfprintf(stderr, fmt, args);
+	va_end(args);
+#else
+	(void)fmt;
+#endif
+}
 
 static inline void
 __buf_reset_head(buf_t *buf)
@@ -481,36 +496,15 @@ buf_read_tls(SSL *ssl, buf_t *buf, size_t toread)
 	ssize_t n;
 	ssize_t total = 0;
 
-#if 0
 	int ssl_error = 0;
 	int slept_for = 0;
 	struct timeval timeout = {0};
 	int read_socket;
 	fd_set rdfds;
-#endif
-
-#if 0
-	int sock_flags;
-	int read_socket;
-
-	if (!SET_SSL_SOCK_FLAG_ONCE)
-	{
-		read_socket = SSL_get_rfd(ssl);
-		sock_flags = fcntl(read_socket, F_GETFL);
-
-		if (!(sock_flags & O_NONBLOCK))
-		{
-			//__SET_ALARM(1, 0);
-			fcntl(read_socket, F_SETFL, sock_flags | O_NONBLOCK);
-			//alarm(0);
-			//__RESET_ALARM();
-		}
-
-		SET_SSL_SOCK_FLAG_ONCE = 1;
-	}
-#endif
 
 	slack = buf_slack(buf);
+
+	bLog("in buf_read_tls: need to read %lu bytes\n", toread);
 
 	if (toread)
 	{
@@ -526,6 +520,7 @@ buf_read_tls(SSL *ssl, buf_t *buf, size_t toread)
 
 			if (!n)
 			{
+				bLog("SSL_read returned 0\n");
 				break;
 			}
 			else
@@ -533,21 +528,30 @@ buf_read_tls(SSL *ssl, buf_t *buf, size_t toread)
 			{
 				if (errno == EINTR)
 				{
+					bLog("SSL_read was interrupted: trying again\n");
 					continue;
 				}
 				else
 				{
 					return total;
-#if 0
+
 					ssl_error = SSL_get_error(ssl, n);
 
 					switch(ssl_error)
 					{
 						case SSL_ERROR_NONE:
+
 							continue;
+
 						case SSL_ERROR_WANT_READ:
+
+							bLog("SSL_ERROR_WANT_READ\n");
+
 							FD_ZERO(&rdfds);
 							FD_SET(read_socket, &rdfds);
+
+							bLog("Calling select() with time limit of 1 second\n");
+
 							timeout.tv_sec = 1;
 							slept_for = select(read_socket+1, &rdfds, NULL, NULL, &timeout);
 
@@ -565,11 +569,13 @@ buf_read_tls(SSL *ssl, buf_t *buf, size_t toread)
 							{
 								continue;
 							}
+
 							break;
+
 						default:
+
 							goto fail;
 					}
-#endif
 				}
 			}
 			else
@@ -613,7 +619,7 @@ buf_read_tls(SSL *ssl, buf_t *buf, size_t toread)
 				else
 				{
 					return total;
-#if 0
+
 					ssl_error = SSL_get_error(ssl, n);
 
 					switch(ssl_error)
@@ -643,7 +649,6 @@ buf_read_tls(SSL *ssl, buf_t *buf, size_t toread)
 						default:
 							goto fail;
 					}
-#endif
 				}
 			}
 			else
@@ -662,12 +667,13 @@ buf_read_tls(SSL *ssl, buf_t *buf, size_t toread)
 		} /* while (1) */
 	}
 
-	out:
+out:
 
 	BUF_NULL_TERMINATE(buf);
 	return total;
 
-	//fail:
+fail:
+
 	return -1;
 	
 }
@@ -722,6 +728,9 @@ buf_write_socket(int sock, buf_t *buf)
 
 		if (!n)
 		{
+#ifdef DEBUG
+			bLog("SSL_write returned 0\n");
+#endif
 			break;
 		}
 		else
@@ -744,6 +753,10 @@ buf_write_socket(int sock, buf_t *buf)
 	__buf_reset_head(buf);
 
 	BUF_NULL_TERMINATE(buf);
+
+#ifdef DEBUG
+	bLog("wrote total of %ld bytes\n", total);
+#endif
 	return total;
 
 	fail:
@@ -768,8 +781,12 @@ buf_write_tls(SSL *ssl, buf_t *buf)
 	while (towrite > 0)
 	{
 		n = SSL_write(ssl, buf->buf_head, towrite);
+
 		if (!n)
 		{
+#ifdef DEBUG
+			bLog("SSL_write returned 0");
+#endif
 			break;
 		}
 		else
