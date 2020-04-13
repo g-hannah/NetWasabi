@@ -50,6 +50,26 @@ BTREE_put_data(btree_obj_t *btree_obj, void *data, size_t data_len)
 	btree_node_t *node = btree_obj->root;
 	int cmp = 0;
 
+/*
+ * This was missing before. Instant segfault.
+ */
+	if (!node)
+	{
+		node = new_node();
+
+		node->data = calloc(BTREE_ALIGN_SIZE(data_len), 1);
+		if (!node->data)
+		{
+			free(node);
+			return -1;
+		}
+
+		memcpy(node->data, data, data_len);
+		node->data_len = data_len;
+
+		return 0;
+	}
+
 	while (1)
 	{
 		cmp = memcmp(data, node->data, data_len);
