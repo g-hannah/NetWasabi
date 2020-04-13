@@ -1854,7 +1854,6 @@ append_cookies_1_1(struct http_t *http)
 
 	p -= 2;
 
-	int index = 0;
 	buf_init(&tmp, HTTP_COOKIE_MAX+256);
 
 	while (bucket)
