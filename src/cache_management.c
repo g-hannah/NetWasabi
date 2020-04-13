@@ -102,18 +102,18 @@ search_dead_URL(cache_t *cache, const char *URL)
 	assert(URL);
 
 	Dead_URL_t *dead = NULL;
-	int objUsed = 0;
+	int i;
+	int capacity = cache->capacity;
 	size_t URL_len = strlen(URL);
 
 	dead = (Dead_URL_t *)cache->cache;
 
-	while (1)
+	for (dead = (Dead_URL_t *)cache->cache, i = 0;
+		i < capacity;
+		++i, ++dead)
 	{
-		while ((objUsed = cache_obj_used(cache, (void *)dead)) != 0)
-			++dead;
-
-		if (objUsed < 0)
-			break;
+		if (!cache_obj_used(cache, (void *)dead))
+			continue;
 
 		if (!memcmp((void *)dead->URL, (void *)URL, URL_len))
 			return dead; 
