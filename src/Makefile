@@ -15,6 +15,7 @@ PRIMARY_DEPENDENCIES = \
 	$(INCLUDE_DIR)/malloc.h \
 	$(INCLUDE_DIR)/robots.h \
 	$(INCLUDE_DIR)/screen_utils.h \
+	$(INCLUDE_DIR)/string_utils.h \
 	$(INCLUDE_DIR)/utils_url.h
 
 PRIMARY_SOURCE = \
@@ -25,6 +26,7 @@ PRIMARY_SOURCE = \
 	netwasabi.c \
 	robots.c \
 	screen_utils.c \
+	string_utils.c \
 	utils_url.c
 
 PRIMARY_OBJS := $(PRIMARY_SOURCE:.c=.o)
