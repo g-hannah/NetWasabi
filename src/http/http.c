@@ -93,7 +93,7 @@ do {\
 
 #define set_verb(h, v) ((h)->verb = (v))
 
-#define HTTP_SMALL_READ_BLOCK 8
+#define HTTP_SMALL_READ_BLOCK 256
 #define HTTP_MAX_WAIT_TIME 6
 
 #define CREATION_FLAGS O_RDWR|O_CREAT|O_TRUNC
@@ -461,6 +461,8 @@ parse_response_header_1_1(struct http_t *http)
 
 	sol = buf->buf_head;
 
+	BUCKET_reset_buckets(private->headers);
+
 /*
  * Skip the initial line showing the status of the request (200 OK...)
  */
@@ -486,17 +488,6 @@ parse_response_header_1_1(struct http_t *http)
 		memcpy((void *)field_name, (void *)p, (q - p));
 		field_name[q - p] = 0;
 		to_lower_case(field_name);
-
-		/*
-		 * If we encounter a set-cookie header, check
-		 * for and clear any old ones. Otherwise, we'll
-		 * end up with a long linked list of cookies
-		 * that we keep adding to our request headers.
-		 */
-		if (!memcmp((void *)field_name, (void *)"set-cookie", 10))
-		{
-			BUCKET_clear_bucket(private->headers, field_name);
-		}
 
 		p = ++q;
 
@@ -524,11 +515,13 @@ parse_response_header_1_1(struct http_t *http)
 #ifdef DEBUG
 		bucket_t *bucket = BUCKET_get_bucket(private->headers, field_name);
 		assert(bucket);
-		if (bucket->next != NULL)
-		{
-			bucket = BUCKET_get_bucket_from_list(bucket, field_name);
-		}
-		assert(!memcmp((void *)bucket->data, (void *)field_value, bucket->data_len));
+
+		size_t value_len = strlen(field_value);
+		char *k = BUCKET_get_key_for_value(bucket, (void *)field_value, value_len);
+		bucket_t *b = BUCKET_get_list_bucket_for_value(bucket, (void *)field_value, value_len);
+
+		assert(!memcmp((void *)k, (void *)field_name, strlen(field_name)));
+		assert(!memcmp((void *)field_value, b->data, value_len));
 #endif
 	}
 
@@ -732,12 +725,16 @@ read_until_eoh(struct http_t *http, char **p)
 	buf_t *buf = &http->conn.read_buf;
 	register int cycles = 0;
 
+	_log("In read_until_eoh\n");
+
 	while (!(*p))
 	{
 		++cycles;
 
 		if (cycles >= CYCLES_MAX)
+		{
 			return HTTP_OPERATION_TIMEOUT;
+		}
 
 		if (http->usingSecure)
 			n = buf_read_tls(http_tls(http), buf, HTTP_SMALL_READ_BLOCK);
@@ -745,18 +742,30 @@ read_until_eoh(struct http_t *http, char **p)
 			n = buf_read_socket(http_socket(http), buf, HTTP_SMALL_READ_BLOCK);
 
 		if (n == -1)
+		{
+			_log("buf_read_%s returned -1...\n", http->usingSecure ? "tls" : "socket");
 			return -1;
+		}
 
 		switch(n)
 		{
 			case 0:
+
+				//_log("Read 0 bytes: continuing\n");
 				continue;
 				break;
+
 			default:
+
+				_log("read %d bytes\n", n);
+
 				bytes += (int)n;
+
 				if (!strstr(buf->buf_head, "HTTP/") && strncmp("\r\n", buf->buf_head, 2))
 					goto out;
+
 				*p = strstr(buf->buf_head, HTTP_EOH_SENTINEL);
+
 				if (*p)
 				{
 					is_http = 1;
@@ -765,7 +774,7 @@ read_until_eoh(struct http_t *http, char **p)
 		}
 	}
 
-	out:
+out:
 
 	if (is_http)
 	{
@@ -773,6 +782,7 @@ read_until_eoh(struct http_t *http, char **p)
 		*p += strlen(HTTP_EOH_SENTINEL);
 	}
 
+	_log("Returning %d bytes\n", bytes);
 	return bytes;
 }
 
@@ -1283,6 +1293,13 @@ rp_receive:
 
 	total_bytes = 0;
 	buf_clear(&http->conn.read_buf);
+/*
+ * This wasn't being reset to NULL, so everytime
+ * we tried to follow a redirect, read_until_eoh()
+ * sent back 0 since the while loop was never
+ * entered.
+ */
+	p = NULL;
 
 	bytes = read_until_eoh(http, &p);
 
@@ -1823,15 +1840,11 @@ append_cookies_1_1(struct http_t *http)
 
 	struct HTTP_private *private = (struct HTTP_private *)http;
 
-	if (!private->cookies)
+	bucket_t *bucket = BUCKET_get_bucket(private->headers, "set-cookie");
+
+	if (!bucket)
 		return;
 
-	int nr_cookies = cache_nr_used(private->cookies);
-
-	if (!nr_cookies)
-		return;
-
-	cookie_t *cookie = (cookie_t *)private->cookies->cache;
 	buf_t *buf = &http->conn.write_buf;
 	buf_t tmp;
 	char *p = HTTP_EOH(buf);
@@ -1844,19 +1857,10 @@ append_cookies_1_1(struct http_t *http)
 	int index = 0;
 	buf_init(&tmp, HTTP_COOKIE_MAX+256);
 
-	while (1)
+	while (bucket)
 	{
-		while (!cache_obj_used(private->cookies, (void *)cookie))
-		{
-			++cookie;
-			++index;
-		}
-
-		if (index >= private->cookies->capacity)
-			break;
-
 		buf_append(&tmp, "Cookie: ");
-		buf_append(&tmp, cookie->whole_cookie);
+		buf_append_ex(&tmp, (char *)bucket->data, bucket->data_len);
 		buf_append_ex(&tmp, HTTP_EOL, 2);
 
 		buf_shift(buf, (off_t)(p - buf->buf_head), tmp.data_len);
@@ -1865,12 +1869,9 @@ append_cookies_1_1(struct http_t *http)
 
 		p += tmp.data_len;
 
-		--nr_cookies;
-
-		if (nr_cookies <= 0)
-			break;
-
 		buf_clear(&tmp);
+
+		bucket = bucket->next;
 	}
 
 	buf_destroy(&tmp);
