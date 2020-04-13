@@ -121,7 +121,6 @@ struct HTTP_methods
 	int (*recv_response)(struct http_t *);
 	int (*build_header)(struct http_t *);
 	int (*append_header)(struct http_t *, char *, char *);
-	//int (*check_header)(buf_t *, const char *, off_t, off_t *);
 	char *(*fetch_header)(struct http_t *, char *);
 	char *(*URL_parse_host)(char *, char *);
 	char *(*URL_parse_page)(char *, char *);
@@ -130,24 +129,6 @@ struct HTTP_methods
 
 size_t httplen;
 size_t httpslen;
-
-/*
-int http_build_request_header(struct http_t *) __nonnull((1)) __wur;
-int http_send_request(struct http_t *) __nonnull((1)) __wur;
-int http_recv_response(struct http_t *) __nonnull((1)) __wur;
-
-int http_append_header(buf_t *, http_header_t *) __nonnull((1,2)) __wur;
-int http_status_code_int(buf_t *) __nonnull((1)) __wur;
-ssize_t http_response_header_len(buf_t *) __nonnull((1)) __wur;
-
-const char *http_status_code_string(int) __wur;
-int http_check_header(buf_t *, const char *, off_t, off_t *) __nonnull((1,2,4)) __wur;
-char *http_fetch_header(buf_t *, const char *, http_header_t *, off_t) __nonnull((1,2,3)) __wur;
-char *http_parse_host(char *, char *) __nonnull((1,2)) __wur;
-char *http_parse_page(char *, char *) __nonnull((1,2)) __wur;
-
-int http_connection_closed(struct http_t *) __nonnull((1)) __wur;
-*/
 
 struct http_t *HTTP_new(uint32_t) __wur;
 void HTTP_delete(struct http_t *) __nonnull((1));
