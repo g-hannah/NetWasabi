@@ -64,6 +64,7 @@ __attribute__((destructor)) STACK_impl_fini(void)
 
 STACK_ALL_TYPES_DECLARE();
 
+/*
 int
 main(void)
 {
@@ -86,3 +87,4 @@ main(void)
 
 	return 0;
 }
+*/
