@@ -296,10 +296,8 @@ int check_local_dirs(struct http_t *, buf_t *) __nonnull((1,2)) __wur;
 void replace_with_local_urls(struct http_t *, buf_t *) __nonnull((1,2));
 int archive_page(struct http_t *) __nonnull((1)) __wur;
 int parse_URLs(struct http_t *, queue_obj_t *, btree_obj_t *) __nonnull((1,2,3)) __wur;
-//void deconstruct_btree(URL_t *, cache_t *) __nonnull((1,2));
-//int do_request(struct http_t *) __nonnull((1)) __wur;
 
-int crawl(struct http_t *, queue_obj_t *, btree_obj_t *) __nonnull((1,2,3)) __wur;
+int Crawl_WebSite(struct http_t *, queue_obj_t *, btree_obj_t *) __nonnull((1,2,3)) __wur;
 
 #define TOKEN_MAX 64
 
