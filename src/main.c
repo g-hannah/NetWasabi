@@ -519,18 +519,21 @@ main(int argc, char *argv[])
 		goto out_disconnect;
 	}
 
-	archive_page(http); // This should check for existence...
 	BTREE_put_data(tree_archived, (void *)http->URL, http->URL_len);
 
-	parse_URLs(http, URL_queue, tree_archived);
-
-	if (!URL_queue->nr_items)
+	if (URL_parseable(http->URL))
 	{
-		update_operation_status("Parsed no URLs from page (already archived)");
+		parse_URLs(http, URL_queue, tree_archived);
+		transform_document_URLs(http);
+		archive_page(http);
+	}
+	else
+	{
+		update_operation_status("No URLs to parse from document");
 		goto out_disconnect;
 	}
 
-	rv = crawl(http, URL_queue, tree_archived);
+	rv = Crawl_WebSite(http, URL_queue, tree_archived);
 
 	if (rv < 0)
 	{
