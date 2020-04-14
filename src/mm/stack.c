@@ -8,6 +8,8 @@
 
 #define STACK_ALIGN_SIZE(s) (((s) + 0xf) & ~(0xf))
 
+#if 0
+
 #ifdef DEBUG
 # define STACK_LOG_FILE "./stack_log.txt"
 FILE *elog_fp = NULL;
@@ -43,7 +45,7 @@ static void
 __attribute__((constructor)) STACK_impl_init(void)
 {
 #ifdef DEBUG
-	elog_fp = fdopen(open(STACK_LOG_FILE, O_RDWR));
+	elog_fp = fdopen(open(STACK_LOG_FILE, O_RDWR), "r+");
 	if (!elog_fp)
 	{
 		elog_fp = stderr;
@@ -61,6 +63,8 @@ __attribute__((destructor)) STACK_impl_fini(void)
 #endif
 	return;
 }
+
+#endif // 0
 
 STACK_ALL_TYPES_DECLARE();
 
