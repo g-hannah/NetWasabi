@@ -10,7 +10,8 @@ MM_DEPENDENCIES = \
 	$(INCLUDE_DIR)/cache.h \
 	$(INCLUDE_DIR)/hash_bucket.h \
 	$(INCLUDE_DIR)/malloc.h \
-	$(INCLUDE_DIR)/queue.h
+	$(INCLUDE_DIR)/queue.h \
+	$(INCLUDE_DIR)/stack.h
 
 MM_SOURCE = \
 	btree.c \
@@ -18,7 +19,8 @@ MM_SOURCE = \
 	cache.c \
 	hash_bucket.c \
 	malloc.c \
-	queue.c
+	queue.c \
+	stack.c
 
 MM_OBJS := $(MM_SOURCE:.c=.o)
 

@@ -26,7 +26,8 @@ MM_OBJS := \
 	$(MM_DIR)/cache.o \
 	$(MM_DIR)/hash_bucket.o \
 	$(MM_DIR)/malloc.o \
-	$(MM_DIR)/queue.o
+	$(MM_DIR)/queue.o \
+	$(MM_DIR)/stack.o
 
 HTTP_OBJS := \
 	$(HTTP_DIR)/http.o
