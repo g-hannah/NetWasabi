@@ -413,16 +413,24 @@ worker_crawl(void *args)
 				goto next;
 		}
 
-		archive_page(http);
-
-		queue_lock();
 		tree_lock();
-
 		BTREE_put_data(tree_archived, (void *)URL, strlen(URL));
-		parse_URLs(http, URL_queue, tree_archived);
-
 		tree_unlock();
-		queue_unlock();
+
+		if (URL_parseable(http->URL))
+		{
+			queue_lock();
+			tree_lock();
+
+			parse_URLs(http, URL_queue, tree_archived);
+
+			tree_unlock();
+			queue_unlock();
+
+			transform_document_URLs(http);
+		}
+
+		archive_page(http);
 
 	next:
 
