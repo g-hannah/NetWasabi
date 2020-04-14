@@ -1,5 +1,6 @@
 #include <assert.h>
 #include <errno.h>
+#include <stdarg.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -22,6 +23,36 @@ struct url_encodings url_encodings[] =
 	{ '*', "%2c" },
 	{ 0, "" }
 };
+
+char *no_url_files[] =
+{
+	".jpg",
+	".jpeg",
+	".png",
+	".gif",
+	".js",
+	".css",
+	".pdf",
+	".svg",
+	".ico",
+	NULL
+};
+
+#if 0
+static void
+Log(char *fmt, ...)
+{
+#ifdef DEBUG
+	va_list args;
+
+	va_start(args, fmt);
+	vfprintf(stderr, fmt, args);
+	va_end(args);
+#else
+	(void)fmt;
+#endif
+}
+#endif // 0
 
 void
 encode_url(buf_t *url)
@@ -150,7 +181,7 @@ make_full_url(struct http_t *http, buf_t *in, buf_t *out)
 /*
  * Handle relative URLs.
  */
-	if (option_set(OPT_USE_TLS))
+	if (http->usingSecure)
 		buf_append(out, "https://");
 	else
 		buf_append(out, "http://");
@@ -225,6 +256,12 @@ make_local_url(struct http_t *http, buf_t *url, buf_t *path)
 	char *p;
 	char tmp_page[2048];
 	buf_t tmp_full;
+
+	if (!strncmp(url->buf_head, "file://", 7))
+	{
+		fprintf(stderr, "Already a local URL!! (%s)\n", url->buf_head);
+		assert(0);
+	}
 
 	buf_init(&tmp_full, HTTP_URL_MAX);
 	http->ops->URL_parse_page(url->buf_head, tmp_page);
@@ -382,3 +419,178 @@ has_extension(char *page)
 		return 1;
 }
 
+/**
+ * Transform embedded URLs in HTML into local
+ * URLs (i.e., file:///path_to_archived_html_document)
+ */
+void
+transform_document_URLs(struct http_t *http)
+{
+	assert(http);
+
+	buf_t *buf = &http->conn.read_buf;
+	char *tail = buf->buf_tail;
+	char *p;
+	char *savep;
+	char *url_start;
+	char *url_end;
+	off_t url_start_off;
+	off_t url_end_off;
+	off_t savep_off;
+	off_t poff;
+	size_t range;
+	buf_t url;
+	buf_t path;
+	buf_t full;
+	int url_type_idx;
+
+	buf_init(&url, HTTP_URL_MAX);
+	buf_init(&path, HTTP_URL_MAX);
+	buf_init(&full, HTTP_URL_MAX);
+
+#define save_pointers()\
+do {\
+	savep_off = (savep - buf->buf_head);\
+	poff = (savep - buf->buf_head);\
+	url_start_off = (url_start - buf->buf_head);\
+	url_end_off = (url_end - buf->buf_head);\
+} while (0)
+
+#define restore_pointers()\
+do {\
+	savep = (buf->buf_head + savep_off);\
+	p = (buf->buf_head + poff);\
+	url_start = (buf->buf_head + url_start_off);\
+	url_end = (buf->buf_head + url_end_off);\
+} while (0)
+
+	savep = buf->buf_head;
+	url_type_idx = 0;
+
+	while (1)
+	{
+		buf_clear(&url);
+
+		assert(buf->buf_tail <= buf->buf_end);
+		assert(buf->buf_head >= buf->data);
+
+		p = strstr(savep, url_types[url_type_idx].string);
+
+		if (!p || p >= tail)
+		{
+			++url_type_idx;
+
+			if (url_types[url_type_idx].delim == 0)
+				break;
+
+			savep = buf->buf_head;
+			continue;
+		}
+
+		url_start = (p += url_types[url_type_idx].len);
+		url_end = memchr(url_start, url_types[url_type_idx].delim, (tail - url_start));
+
+		if (!url_end)
+		{
+			++url_type_idx;
+
+			if (url_types[url_type_idx].delim == 0)
+				break;
+
+			savep = buf->buf_head;
+			continue;
+		}
+
+		assert(buf->buf_tail <= buf->buf_end);
+		assert(url_start < buf->buf_tail);
+		assert(url_end < buf->buf_tail);
+		assert(p < buf->buf_tail);
+		assert(savep < buf->buf_tail);
+		assert((tail - buf->buf_head) == (buf->buf_tail - buf->buf_head));
+
+		range = (url_end - url_start);
+
+		if (!range)
+		{
+			++savep;
+			continue;
+		}
+
+		if (!strncmp("http://", url_start, range) || !strncmp("https://", url_start, range))
+		{
+			savep = ++url_end;
+			continue;
+		}
+
+		if (range >= HTTP_URL_MAX)
+		{
+			savep = ++url_end;
+			continue;
+		}
+
+		assert(range < HTTP_URL_MAX);
+
+		buf_append_ex(&url, url_start, range);
+		BUF_NULL_TERMINATE(&url);
+
+		if (range)
+		{
+			//fprintf(stderr, "turning %s into full url\n", url.buf_head);
+			make_full_url(http, &url, &full);
+			//fprintf(stderr, "made %s\n", full.buf_head);
+
+			if (make_local_url(http, &full, &path) == 0)
+			{
+				//fprintf(stderr, "made local url %s\n", path.buf_head);
+				buf_collapse(buf, (off_t)(url_start - buf->buf_head), range);
+				tail = buf->buf_tail;
+
+				save_pointers();
+
+				assert(path.data_len < path_max);
+
+				if (path.data_len >= buf->buf_size)
+				{
+					savep = ++url_end;
+					continue;
+				}
+
+				buf_shift(buf, (off_t)(url_start - buf->buf_head), path.data_len);
+				tail = buf->buf_tail;
+
+				restore_pointers();
+
+				assert((url_start - buf->buf_head) == url_start_off);
+				assert((url_end - buf->buf_head) == url_end_off);
+				assert((p - buf->buf_head) == poff);
+				assert((savep - buf->buf_head) == savep_off);
+
+				strncpy(url_start, path.buf_head, path.data_len);
+			}
+		}
+
+		assert(buf_integrity(&url));
+		assert(buf_integrity(&full));
+		assert(buf_integrity(&path));
+
+		//++savep;
+		savep = ++url_end;
+
+		if (savep >= tail)
+			break;
+	}
+}
+
+int
+URL_parseable(char *url)
+{
+	int i;
+
+	for (i = 0; no_url_files[i] != NULL; ++i)
+	{
+		if (strstr(url, no_url_files[i]))
+			return 0;
+	}
+
+	return 1;
+}
