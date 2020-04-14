@@ -66,6 +66,7 @@ BTREE_put_data(btree_obj_t *btree_obj, void *data, size_t data_len)
 
 		memcpy(node->data, data, data_len);
 		node->data_len = data_len;
+		++btree_obj->nr_nodes;
 
 		return 0;
 	}
@@ -86,7 +87,7 @@ BTREE_put_data(btree_obj_t *btree_obj, void *data, size_t data_len)
 				memcpy(node->left->data, data, data_len);
 				node->left->data_len = data_len;
 
-				return 0;
+				break;
 			}
 			else
 			{
@@ -107,7 +108,7 @@ BTREE_put_data(btree_obj_t *btree_obj, void *data, size_t data_len)
 				memcpy(node->right->data, data, data_len);
 				node->right->data_len = data_len;
 
-				return 0;
+				break;
 			}
 			else
 			{
@@ -120,6 +121,9 @@ BTREE_put_data(btree_obj_t *btree_obj, void *data, size_t data_len)
 			return 0;
 		}
 	}
+
+	++btree_obj->nr_nodes;
+	return 0;
 }
 
 btree_node_t *
