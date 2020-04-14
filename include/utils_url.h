@@ -17,4 +17,7 @@ int is_xdomain(struct http_t *, buf_t *) __nonnull((1,2)) __wur;
 int local_archive_exists(struct http_t *, char *) __nonnull((1)) __wur;
 int has_extension(char *) __nonnull((1)) __wur;
 
+int URL_parseable(char *);
+void transform_document_URLs(struct http_t *);
+
 #endif /* !defined UTILS_URL_H */
