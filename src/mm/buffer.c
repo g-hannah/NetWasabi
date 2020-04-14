@@ -504,8 +504,6 @@ buf_read_tls(SSL *ssl, buf_t *buf, size_t toread)
 
 	slack = buf_slack(buf);
 
-	bLog("in buf_read_tls: need to read %lu bytes\n", toread);
-
 	if (toread)
 	{
 		if (toread >= slack)
