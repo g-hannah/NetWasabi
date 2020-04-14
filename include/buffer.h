@@ -4,6 +4,10 @@
 #include <openssl/ssl.h>
 #include <stdlib.h>
 
+#ifdef __cplusplus
+extern "C" {
+#endif
+
 #define DEFAULT_BUFSIZE 16384
 #define BUFFER_MAGIC 0x12344321
 
@@ -48,5 +52,9 @@ ssize_t buf_read_tls(SSL *, buf_t *, size_t) __nonnull((1,2)) __wur;
 ssize_t buf_write_fd(int, buf_t *) __nonnull((2)) __wur;
 ssize_t buf_write_socket(int, buf_t *) __nonnull((2)) __wur;
 ssize_t buf_write_tls(SSL *, buf_t *) __nonnull((1,2)) __wur;
+
+#ifdef __cplusplus
+}
+#endif
 
 #endif /* !defined __BUFFER_H__ */

@@ -5,6 +5,10 @@
 #include <stdint.h>
 #include <sys/types.h>
 
+#ifdef __cplusplus
+extern "C" {
+#endif
+
 #define CACHE_SIZE 4096
 #define CACHE_MAX_NAME 64
 
@@ -47,5 +51,9 @@ int cache_capacity(cache_t *) __nonnull((1)) __wur;
 void cache_clear_all(cache_t *) __nonnull((1));
 void cache_lock(cache_t *) __nonnull((1));
 void cache_unlock(cache_t *) __nonnull((1));
+
+#ifdef __cplusplus
+}
+#endif
 
 #endif /* CACHE_H */
