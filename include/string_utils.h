@@ -6,5 +6,8 @@
 
 void to_lower_case(char *);
 time_t date_string_to_timestamp(char *);
+char *str_replace(char *str, char *replace, char *replacement);
+char *str_match(char *str, char *pattern);
+char *str_find(char *str, char *pattern);
 
 #endif /* !defined __STRING_UTILS_H__ */

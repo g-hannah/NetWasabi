@@ -1,8 +1,12 @@
 #include <assert.h>
 #include <ctype.h>
+#include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <regex.h>
 #include "string_utils.h"
+
+#define ALIGN_SIZE(s) (((s) + 0xf) & ~(0xf))
 
 void
 to_lower_case(char *string)
@@ -167,4 +171,142 @@ date_string_to_timestamp(char *str)
 	time_st.tm_sec = atoi(t);
 
 	return (time_t)mktime(&time_st);
+}
+
+char *
+str_replace(char *s, char *replace, char *replacement)
+{
+	assert(s);
+	assert(replace);
+	assert(replacement);
+
+	char *p, *q, *e;
+	char *result;
+	size_t r1len = strlen(replace);
+	size_t r2len = strlen(replacement);
+	size_t alloclen = 1024;
+	size_t inlen = strlen(s);
+	size_t currentlen;
+	int diff;
+	off_t off;
+
+	if (strlen(s) > alloclen)
+		alloclen *= 2;
+
+	result = calloc(alloclen, 1);
+	if (!result)
+		return NULL;
+
+	strncpy(result, s, inlen);
+	e = result + inlen;
+	*e = 0;
+
+	diff = r1len - r2len;
+	if (diff < 0)
+		diff *= -1;
+
+	const int longer = (r2len > r1len);
+
+	p = q = result;
+
+	while (1)
+	{
+		p = strstr(q, replace);
+		if (!p || p > e)
+			break;
+
+		off = (p - result);
+		currentlen = (e - result);
+
+		if (longer)
+		{
+			if ((currentlen + diff) >= alloclen)
+			{
+				result = realloc(result, (alloclen <<= 1));
+				e = result + currentlen;
+				p = result + off;
+			}
+
+			q = p + r1len;
+			memmove((void *)((char *)q + diff), (void *)q, (e - q));
+			memcpy((void *)p, (void *)replacement, r2len);
+			e += diff;
+			*e = 0;
+
+			q = (p += r2len);
+		}
+		else
+		{
+			q = p + r2len;
+			memmove((void *)((char *)q - diff), (void *)q, (e - q));
+			e -= diff;
+			memset(e, 0, diff);
+			memcpy((void *)p, (void *)replacement, r2len);
+
+			q = (p += r2len);
+		}
+	}
+
+	currentlen = (e - result);
+	result = realloc(result, currentlen + 16);
+
+	return result;
+}
+
+/**
+ * Return a heap-allocated string that contains
+ * the part of the input string that matches
+ * the regex pattern.
+ */
+char *
+str_match(char *s, char *pattern)
+{
+	regex_t regex;
+	regmatch_t match[1];
+	char *buffer = NULL;
+	int ret;
+	size_t match_len;
+
+	if (regcomp(&regex, pattern, 0) != 0)
+		return NULL;
+
+	ret = regexec(&regex, s, 1, match, 0);
+
+	if (!ret)
+	{
+		match_len = (match[0].rm_eo - match[0].rm_so);
+		buffer = calloc(ALIGN_SIZE(match_len), 1);
+		memcpy((void *)buffer, (void *)((char *)s + match[0].rm_so), match_len);
+		buffer[match_len] = 0;
+	}
+
+	regfree(&regex);
+
+	return buffer;
+}
+
+/**
+ * Return a pointer to the start of the part
+ * of the input string that matches the regex
+ * pattern.
+ */
+char *
+str_find(char *s, char *pattern)
+{
+	regex_t regex;
+	regmatch_t match[1];
+	char *ptr;
+	int ret;
+
+	if (regcomp(&regex, pattern, 0) != 0)
+		return NULL;
+
+	ret = regexec(&regex, s, 1, match, 0);
+	if (!ret)
+	{
+		ptr = (s + match[0].rm_so);
+		return ptr;
+	}
+
+	return NULL;
 }
