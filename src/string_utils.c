@@ -38,8 +38,8 @@ date_string_to_timestamp(char *str)
 	char *p = NULL;
 	char *q = NULL;
 	char *end = NULL;
-	char DOM[3];
-	char t[6];
+	char DOM[16];
+	char t[16];
 	struct tm time_st;
 	size_t len = strlen(str);
 
@@ -237,11 +237,13 @@ str_replace(char *s, char *replace, char *replacement)
 		}
 		else
 		{
-			q = p + r2len;
+			q = p + r1len;
 			memmove((void *)((char *)q - diff), (void *)q, (e - q));
 			e -= diff;
 			memset(e, 0, diff);
-			memcpy((void *)p, (void *)replacement, r2len);
+
+			if (r2len != 0)
+				memcpy((void *)p, (void *)replacement, r2len);
 
 			q = (p += r2len);
 		}
@@ -249,6 +251,90 @@ str_replace(char *s, char *replace, char *replacement)
 
 	currentlen = (e - result);
 	result = realloc(result, currentlen + 16);
+
+	return result;
+}
+
+char *
+str_replace_regex(char *s, char *pattern, char *replacement)
+{
+	regex_t regex;
+	regmatch_t match[1];
+	int ret;
+	char *p, *q, *e;
+	size_t rlen = strlen(replacement);
+	size_t mlen;
+	size_t alloclen = 1024;
+	size_t currentlen;
+	size_t inlen = strlen(s);
+	int longer = 0;
+	int diff;
+	char *result = NULL;
+
+	if (regcomp(&regex, pattern, 0) != 0)
+		return NULL;
+
+	if (inlen > alloclen)
+		alloclen = ALIGN_SIZE(inlen+1);
+
+	result = calloc(alloclen, 1);
+	if (!result)
+		return NULL;
+
+	strcpy(result, s);
+	e = result + inlen;
+	currentlen = inlen;
+
+	while (1)
+	{
+		ret = regexec(&regex, result, 1, match, 0);
+		if (ret)
+			break;
+
+		mlen = match[0].rm_eo - match[0].rm_so;
+		if (!mlen)
+			break;
+
+		diff = rlen - mlen;
+		if (diff < 0)
+			diff *= -1;
+
+		longer = (rlen > mlen);
+
+		if (longer)
+		{
+			if ((currentlen + diff) >= alloclen)
+			{
+				result = realloc(result, (alloclen <<= 1));
+				e = result + currentlen;
+			}
+
+			p = result + match[0].rm_so;
+			q = p + mlen;
+			memmove((void *)((char *)q + diff), (void *)q, (e - q));
+			memcpy((void *)p, (void *)replacement, rlen);
+			e += diff;
+			*e = 0;
+		}
+		else
+		{
+			p = result + match[0].rm_so;
+			q = p + mlen;
+
+			memmove((void *)((char *)p + rlen), (void *)q, (e - q));
+			e -= diff;
+			memset(e, 0, diff);
+			memcpy((void *)p, (void *)replacement, rlen);
+		}
+
+		fprintf(stderr, "%s\n", result);
+		currentlen = (e - result);
+	}
+
+	*e = 0;
+	currentlen = (e - result);
+	result = realloc(result, ALIGN_SIZE(currentlen+1));
+	regfree(&regex);
 
 	return result;
 }
@@ -310,3 +396,14 @@ str_find(char *s, char *pattern)
 
 	return NULL;
 }
+#if 0
+enum
+{
+};
+
+char *
+str_hash(char *s, int type)
+{
+	assert(str);	
+}
+#endif
