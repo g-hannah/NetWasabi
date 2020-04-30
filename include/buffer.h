@@ -34,6 +34,7 @@ void buf_shift(buf_t *, off_t, size_t) __nonnull((1));
 int buf_extend(buf_t *, size_t) __nonnull((1)) __wur;
 int buf_append(buf_t *, char *) __nonnull((1,2)) __wur;
 int buf_append_ex(buf_t *, char *, size_t) __nonnull((1,2)) __wur;
+void buf_append_fmt(buf_t *, char *, ...) __nonnull((1,2));
 void buf_snip(buf_t *, size_t) __nonnull((1));
 void buf_clear(buf_t *) __nonnull((1));
 void buf_replace(buf_t *, char *, char *) __nonnull((1,2,3));
@@ -41,6 +42,8 @@ void buf_push_head(buf_t *, size_t) __nonnull((1));
 void buf_pull_head(buf_t *, size_t) __nonnull((1));
 void buf_push_tail(buf_t *, size_t) __nonnull((1));
 void buf_pull_tail(buf_t *, size_t) __nonnull((1));
+
+char *buf_find(buf_t *, char *);
 
 /* return a buf_t object from the heap duplicate of argument */
 buf_t *buf_dup(buf_t *) __nonnull((1)) __wur;

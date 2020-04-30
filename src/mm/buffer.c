@@ -4,6 +4,7 @@
 #include <limits.h>
 #include <openssl/err.h>
 #include <openssl/ssl.h>
+#include <regex.h>
 #include <setjmp.h>
 #include <signal.h>
 #include <stdarg.h>
@@ -210,6 +211,40 @@ buf_append(buf_t *buf, char *str)
 	__buf_pull_tail(buf, len);
 
 	return 0;
+}
+
+void
+buf_append_fmt(buf_t *buf, char *fmt, ...)
+{
+	va_list args;
+
+	size_t len;
+	size_t slack = buf_slack(buf);
+	char *formatted = NULL;
+
+#define BUF_SIZE 8192
+	formatted = calloc(BUF_SIZE, 1);
+	assert(formatted);
+
+	va_start(args, fmt);
+	vsnprintf(formatted, BUF_SIZE, fmt, args);
+	va_end(args);
+
+	len = strlen(formatted);
+
+	assert(len < BUF_SIZE);
+	if (len >= slack)
+	{
+		buf_extend(buf, BUF_ALIGN_SIZE(((len - slack) << 1)));
+	}
+
+	strcat(buf->buf_tail, formatted);
+	
+	__buf_pull_tail(buf, len);
+
+	free(formatted);
+
+	return;
 }
 
 int
@@ -852,9 +887,9 @@ buf_dup(buf_t *copy)
 {
 	assert(copy);
 
-	buf_t *new = nw_malloc(sizeof(buf_t));
+	buf_t *new = malloc(sizeof(buf_t));
 
-	new->data = nw_calloc(copy->buf_size, 1);
+	new->data = calloc(copy->buf_size, 1);
 	memcpy(new->data, copy->data, copy->buf_size);
 	new->buf_end = (new->data + copy->buf_size);
 	new->buf_head = (new->data + (copy->buf_head - copy->data));
@@ -890,31 +925,83 @@ buf_replace(buf_t *buf, char *pattern, char *with)
 	assert(pattern);
 	assert(with);
 
-	size_t pattern_len = strlen(pattern);
-	size_t replace_len = strlen(with);
-	char *p;
-	off_t poff;
+	regex_t regex;
+	regmatch_t match[1];
+	int ret;
+	int longer = 0;
+	size_t rlen = strlen(with);
+	size_t mlen;
+	off_t off;
+	char *p, *q;
+	int diff;
 
-	p = strstr(buf->buf_head, pattern);
-
-	if (!p)
+	if (regcomp(&regex, pattern, 0) != 0)
 		return;
 
-	if (pattern_len > replace_len)
+	ret = 0;
+	while (1)
 	{
-		strncpy(p, with, replace_len);
-		p += replace_len;
-		buf_collapse(buf, (off_t)(p - buf->buf_head), (pattern_len - replace_len));
-	}
-	else
-	{
-		poff = (p - buf->buf_head);
-		buf_shift(buf, (off_t)(p - buf->buf_head), (replace_len - pattern_len));
-		p = (buf->buf_head + poff);
-		strncpy(p, with, replace_len);
+		ret = regexec(&regex, buf->buf_head, 1, match, 0);
+		if (ret)
+			break;
+
+		mlen = match[0].rm_eo - match[0].rm_so;
+
+		if (!mlen)
+			break;
+
+		diff = rlen - mlen;
+		if (diff < 0)
+			diff *= -1;
+		longer = rlen > mlen;
+
+#ifdef DEBUG
+		fprintf(stderr, "Substring length: %lu\n", mlen);
+		fprintf(stderr, "Matched substring \"%*.*s\"\n", (int)mlen, (int)mlen, buf->buf_head + match[0].rm_so);
+#endif
+
+		if (longer)
+		{
+			buf_shift(buf, (off_t)match[0].rm_so, diff);
+			strncpy(buf->buf_head + match[0].rm_so, with, rlen);
+		}
+		else
+		{
+			if (diff)
+				buf_collapse(buf, (off_t)match[0].rm_so, diff);
+
+			strncpy(buf->buf_head + match[0].rm_so, with, rlen);
+		}
 	}
 
+	regfree(&regex);
 	return;
+}
+
+char *
+buf_find(buf_t *buf, char *pattern)
+{
+	assert(buf);
+	assert(pattern);
+
+	regex_t regex;
+	regmatch_t match[1];
+	int ret;
+	char *m = NULL;
+	char *p = buf->buf_head;
+
+	if (regcomp(&regex, pattern, 0) != 0)
+		return NULL;
+
+	ret = regexec(&regex, buf->buf_head, 1, match, 0);
+	if (ret)
+		goto out;
+
+	m = buf->buf_head + match[0].rm_so;
+
+out:
+	regfree(&regex);
+	return m;
 }
 
 void
