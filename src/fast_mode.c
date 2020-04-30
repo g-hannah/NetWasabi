@@ -18,6 +18,7 @@
 #include "queue.h"
 #include "screen_utils.h"
 #include "netwasabi.h"
+#include "utils_url.h"
 
 typedef pthread_t worker_t;
 typedef pthread_mutex_t mutex_t;
