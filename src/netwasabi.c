@@ -19,6 +19,9 @@
 #include "netwasabi.h"
 #include "queue.h"
 
+#define CREATE_FLAGS O_RDWR|O_CREAT|O_TRUNC
+#define CREATE_MODE S_IRUSR|S_IWUSR
+
 static cache_t *Dead_URL_cache = NULL;
 
 #ifdef DEBUG
@@ -47,7 +50,7 @@ Log(const char *fmt, ...)
 static void
 __ctor __dbg_init(void)
 {
-	logfp = fdopen(open(__LOG_FILE__, O_RDWR|O_TRUNC|O_CREAT, S_IRUSR|S_IWUSR), "r+");
+	logfp = fdopen(open(__LOG_FILE__, CREATE_FLAGS, CREATE_MODE), "r+");
 
 	assert(logfp);
 
@@ -839,6 +842,10 @@ Crawl_WebSite(struct http_t *http, queue_obj_t *URL_queue, btree_obj_t *tree_arc
 
 		Log("Adding URL to archived documents tree\n");
 		BTREE_put_data(tree_archived, (void *)http->URL, http->URL_len);
+#ifdef DEBUG
+		btree_node_t *node = BTREE_search_data(tree_archived, (void *)http->URL, http->URL_len);
+		assert(node);
+#endif
 		Log("%d archived documents\n", tree_archived->nr_nodes);
 
 		if (URL_parseable(http->URL))
