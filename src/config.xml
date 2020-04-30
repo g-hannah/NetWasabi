@@ -1,0 +1,7 @@
+<?xml version="1.0"?>
+<options>
+	<cross-domain>true</cross-domain>
+	<depth>5</depth>
+	<queue-max>1000</queue-max>
+</options>
+
