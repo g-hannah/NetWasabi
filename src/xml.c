@@ -7,15 +7,25 @@
 #include <stdlib.h>
 #include <sys/stat.h>
 #include <unistd.h>
-#include "../include/string_utils.h"
-#include "../include/xml.h"
+#include "string_utils.h"
+#include "xml.h"
 
-#define INFILE "./config.xml"
+/*
+ * TODO
+ *
+ * Handle XML comments: <!-- comment -->
+ */
+
+//#define INFILE "./config.xml"
 
 #define __ctor __attribute__((constructor))
 #define __dtor __attribute__((destructor))
 #define ALIGN16(s) (((s) + 0xf) & ~(0xf))
 #define clear_struct(s) memset(s, 0, sizeof(*s))
+
+#ifndef max
+# define max(a,b) (a) > (b) ? (a) : (b)
+#endif
 
 #define error(m) fprintf(stderr, "%s\n", (m))
 
@@ -49,7 +59,7 @@ static int matches(int);
 static void advance(void);
 static void parse_token(void);
 static void parse_terminal(void);
-static void parse_tagname(void);
+//static void parse_tagname(void);
 
 static void Debug(char *, ...);
 
@@ -202,7 +212,7 @@ add_child(node_ptr parent, node_ptr child)
 
 static int indent = 1;
 static void
-walk_xml_tree(node_ptr root)
+__attribute__((unused)) walk_xml_tree(node_ptr root)
 {
 	fprintf(stderr, "%*sNode @ %p has %d child%s\n",
 		indent, " ",
@@ -261,19 +271,6 @@ do_free_tree(node_ptr root)
 	}
 
 	return;
-}
-
-void
-free_xml_tree(xml_tree_t *tree)
-{
-	do_free_tree(tree->x_root);
-
-	Debug("Freeing tree root\n");
-	free(tree->x_root);
-	memset(tree, 0, sizeof(*tree));
-
-	Debug("Freeing tree object\n");
-	free(tree);
 }
 
 static void
@@ -369,6 +366,7 @@ repeat:
 	return;
 }
 
+#if 0
 static void
 parse_tagname(void)
 {
@@ -385,6 +383,7 @@ parse_tagname(void)
 
 	return;
 }
+#endif
 
 static void
 parse_terminal(void)
@@ -499,6 +498,10 @@ do_parse(xml_tree_t *tree)
 	assert(tree);
 
 	tree->x_root = new_node();
+
+	NSET_VALUE(tree->x_root, "XML_ROOT_NODE");
+	NSET_TYPE(tree->x_root, XML_TYPE_NODE);
+
 	parent = tree->x_root;
 
 	//stack = STACK_object_new_char_ptr();
@@ -610,7 +613,72 @@ do_parse(xml_tree_t *tree)
 	return 0;
 }
 
-#if 0
+static xml_node_t *
+do_find_node(xml_node_t *root, char *search)
+{
+	assert(root);
+	assert(search);
+
+	size_t len = strlen(search);
+	xml_node_t *found = NULL;
+
+	if (!memcmp((void *)NVALUE(root), (void *)search, max(len,strlen(NVALUE(root)))))
+		return root;
+	else
+	if (!NCH(root))
+		return NULL;
+	else
+	{
+		int i;
+		xml_node_t *n;
+
+		for (i = 0; i < NCH(root); ++i)
+		{
+			n = CHILD(root, i);
+
+			assert(n);
+			assert(NVALUE(n));
+
+			if (!memcmp((void *)NVALUE(n), (void *)search, max(len,strlen(NVALUE(n)))))
+				return n;
+
+			if (NCH(n))
+				found = do_find_node(n, search);
+
+			if (found)
+				return found;
+		}
+	}
+
+	return NULL;
+}
+
+void
+free_xml_tree(xml_tree_t *tree)
+{
+	do_free_tree(tree->x_root);
+
+	Debug("Freeing tree root\n");
+
+	free(NVALUE(tree->x_root)); // the strdup of "XML_ROOT_NODE"
+	free(tree->x_root);
+
+	Debug("Freeing tree object\n");
+	free(tree);
+}
+
+xml_node_t *
+XML_find_node(xml_tree_t *tree, char *search)
+{
+	assert(tree);
+	assert(search);
+
+	xml_node_t *n = tree->x_root;
+
+	return do_find_node(n, search);
+}
+
+#define XML_VERSION_PATTERN "<?xml version=\"[^\"]*\"\\( [a-zA-Z]*=\"[^\"]*\"\\)*?>"
 xml_tree_t *
 parse_xml_file(char *path)
 {
@@ -620,14 +688,19 @@ parse_xml_file(char *path)
 		goto fail;
 	}
 
-	int fd = -1;
-
-	if ((fd = setup(path)) < 0)
+	if (setup(path) < 0)
 		goto fail;
+
+	if (!str_find(buffer, XML_VERSION_PATTERN))
+	{
+		fprintf(stderr, "Not an XML file\n");
+		goto fail;
+	}
 
 	xml_tree_t *tree = NULL;
 
 	tree = malloc(sizeof(xml_tree_t));
+
 	if (!tree)
 		goto fail;
 
@@ -639,21 +712,15 @@ parse_xml_file(char *path)
 fail:
 	return NULL;
 }
-#endif
 
-#define XML_VERSION_PATTERN "<?xml version=\"[^\"]*\"\\( [a-zA-Z]*=\"[^\"]*\"\\)*?>"
-#define pr(m) fprintf(stderr, "%s\n", (m))
+#if 0
 int
 main(int argc, char *argv[])
 {
 	if (setup(argv[1]) < 0)
 		goto fail;
 
-	if (!str_find(buffer, XML_VERSION_PATTERN))
-	{
-		fprintf(stderr, "Not an XML file\n");
-		goto fail;
-	}
+
 
 	xml_tree_t *tree = NULL;
 
@@ -674,3 +741,4 @@ main(int argc, char *argv[])
 fail:
 	return -1;
 }
+#endif
