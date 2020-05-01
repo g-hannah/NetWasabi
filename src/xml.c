@@ -75,22 +75,46 @@ static char token[TOK_MAX];
 
 #define TOK_LEN_OK(l) ((l) < TOK_MAX)
 
-typedef struct Node
+enum
 {
-	char *value;
-	int type;
-	struct Node *children;
-	int nr_children;
-} Node;
+	XML_TYPE_NODE = 1,
+	XML_TYPE_VALUE
+};
 
-static Node *root = NULL;
-static Node *parent = NULL;
-static Node *node = NULL;
+typedef struct XML_Node
+{
+	char *n_value;
+	int n_type;
+	struct XML_Node **n_children; // array of node pointers
+	int n_nr_children;
+} xml_node_t;
 
-static Node *node_stack[256];
+typedef xml_node_t *node_ptr;
+
+typedef struct XML_Tree
+{
+	xml_node_t *x_root;
+	int x_nr_nodes;
+} xml_tree_t;
+
+#define NCH(n) ((n)->n_nr_children)
+#define CHILD(n,i) ((n)->n_children[(i)])
+#define LAST_CHILD(n) CHILD(n,NCH(n)-1)
+#define FIRST_CHILD(n) CHILD(n, 0)
+#define NVALUE(n) ((n)->n_value)
+#define NTYPE(n) ((n)->n_type)
+
+#define NSET_VALUE(n,v) ((n)->n_value = strdup((v)))
+#define NSET_TYPE(n,t) ((n)->n_type = (t))
+
+static xml_tree_t XML_tree;
+static node_ptr parent = NULL;
+static node_ptr node = NULL;
+
+static node_ptr node_stack[256];
 static int pnode_idx = 0;
 
-#define CLEAR_NODE_STACK() memset(node_stack, 0, sizeof(Node *) * 256)
+#define CLEAR_NODE_STACK() memset(node_stack, 0, sizeof(node_ptr) * 256)
 #define PUSH_PARENT(p) (assert(pnode_idx < 256), node_stack[pnode_idx++] = (p))
 #define POP_PARENT() \
 ({ \
@@ -102,23 +126,10 @@ static int pnode_idx = 0;
 	node_stack[--pnode_idx]; \
 })
 
-#define NCH(n) ((n)->nr_children)
-#define CHILD(n,i) (&((n)->children[(i)]))
-#define LAST_CHILD(n) CHILD((n), NCH(n)-1)
-#define FIRST_CHILD(n) CHILD((n), 0)
-#define NTYPE(n) ((n)->type)
-#define NAME(n) ((n)->name)
-
-#define NSET_VALUE(n,v) ((n)->value = strdup((v)))
-#define NSET_TYPE(n,t) ((n)->type = (t))
-
-#define TYPE_NODE	1
-#define TYPE_VALUE	2
-
-static Node *
+static node_ptr
 new_node(void)
 {
-	Node *node = malloc(sizeof(Node));
+	node_ptr node = malloc(sizeof(xml_node_t));
 	if (!node)
 		return NULL;
 
@@ -126,19 +137,83 @@ new_node(void)
 	return node;
 }
 
+/**
+ * Add pointer to child node to
+ * parent's array of xml_node_t
+ * pointers.
+ */
 static void
-add_child(Node *parent, Node *child)
+add_child(node_ptr parent, node_ptr child)
 {
 	assert(parent);
 	assert(child);
 
-	parent->children = realloc(parent->children, sizeof(Node) * (NCH(parent) + 1));
-	assert(parent->children);
+	parent->n_children = realloc(parent->n_children, sizeof(node_ptr) * (NCH(parent) + 1));
+	assert(parent->n_children);
 
-	Node *node = CHILD(parent, NCH(parent));
-	memcpy((void *)node, (void *)child, sizeof(*node));
-	free(child);
+	CHILD(parent, NCH(parent)) = child;
 	++NCH(parent);
+
+	return;
+}
+
+static int indent = 1;
+static void
+walk_xml_tree(node_ptr root)
+{
+	fprintf(stderr, "%*sNode @ %p has %d child%s\n",
+		indent, " ",
+		root,
+		NCH(root),
+		NCH(root) == 1 ? "" : "ren");
+
+	if (!NCH(root))
+		return;
+
+	node_ptr n;
+	int i;
+
+	for (i = 0; i < NCH(root); ++i)
+	{
+		n = CHILD(root, i);
+
+		fprintf(stderr, "%*sChild node: type \"%s\" --> \"%s\"\n",
+			indent, " ",
+			NTYPE(n) == XML_TYPE_NODE ? "XML Node" : "Node Value",
+			NVALUE(n));
+
+		if (NCH(n))
+		{
+			indent += 4;
+			walk_xml_tree(n);
+			indent -= 4;
+		}
+	}
+
+	return;
+}
+
+static void
+free_xml_tree(node_ptr root)
+{
+	if (!NCH(root))
+	{
+		return;
+	}
+
+	node_ptr n;
+	int i;
+
+	for (i = 0; i < NCH(root); ++i, ++n)
+	{
+		n = CHILD(root, i);
+
+		if (NCH(n))
+			free_xml_tree(n);
+
+		free(NVALUE(n));
+		free(n);
+	}
 
 	return;
 }
@@ -402,17 +477,17 @@ main(void)
 		goto fail;
 	}
 
-	memset(&state, 0, sizeof(state));
+	memset(&XML_tree, 0, sizeof(xml_tree_t));
 
 	stack = STACK_object_new_char_ptr();
 	assert(stack);
 
 	CLEAR_NODE_STACK();
 
-	root = new_node();
-	assert(root);
+	XML_tree.x_root = new_node();
+	assert(XML_tree.x_root);
 
-	parent = root;
+	parent = XML_tree.x_root;
 
 #if 0
 	TOK_OPEN = 1,
@@ -449,13 +524,13 @@ main(void)
 
 					if (!last_opened)
 					{
-						fprintf(stderr, "Unexpected closing tag\n");
+						error("Unexpected closing tag");
 						abort();
 					}
 
 					if (memcmp(last_opened, terminal, strlen(terminal)))
 					{
-						fprintf(stderr, "Closing tag and opening tag do not correspond (%s & %s)\n",
+						fprintf(stderr, "Open/close tag mismatch (<%s> & </%s>)\n",
 							last_opened, terminal);
 						abort();
 					}
@@ -475,7 +550,7 @@ main(void)
 				node = new_node();
 
 				NSET_VALUE(node, terminal);
-				NSET_TYPE(node, TYPE_NODE);
+				NSET_TYPE(node, XML_TYPE_NODE);
 
 				Debug("Adding xml-node type node to parent @ %p\n", parent);
 				add_child(parent, node);
@@ -508,7 +583,7 @@ main(void)
 				node = new_node();
 
 				NSET_VALUE(node, token);
-				NSET_TYPE(node, TYPE_VALUE);
+				NSET_TYPE(node, XML_TYPE_VALUE);
 
 				Debug("Adding value node to parent @ %p\n", parent);
 				add_child(parent, node);
@@ -524,6 +599,9 @@ main(void)
 		advance();
 	}
 
+	walk_xml_tree(XML_tree.x_root);
+	free_xml_tree(XML_tree.x_root);
+	free(XML_tree.x_root);
 	STACK_object_destroy_char_ptr(stack);
 
 	return 0;
