@@ -638,124 +638,12 @@ main(void)
 	xml_tree_t *tree = NULL;
 
 	tree = malloc(sizeof(xml_tree_t));
+
 	if (!tree)
 		goto fail;
 
 	if (do_parse(tree) != 0)
 		goto fail;
-
-#if 0
-	stack = STACK_object_new_char_ptr();
-	assert(stack);
-
-	CLEAR_NODE_STACK();
-
-	XML_tree.x_root = new_node();
-	assert(XML_tree.x_root);
-
-	parent = XML_tree.x_root;
-
-	advance();
-
-	while (ptr < end)
-	{
-		switch(lookahead)
-		{
-			case TOK_OPEN:
-
-				//pr("opening tag");
-				advance();
-
-				if (matches(TOK_META))
-				{
-					//pr("opening meta tag");
-					meta_expr();
-					break;
-				}
-				else
-				if (matches(TOK_SLASH))
-				{
-					parse_terminal();
-					char *last_opened = STACK_pop_char_ptr(stack);
-
-					if (!last_opened)
-					{
-						error("Unexpected closing tag");
-						abort();
-					}
-
-					if (memcmp(last_opened, terminal, strlen(terminal)))
-					{
-						fprintf(stderr, "Open/close tag mismatch (<%s> & </%s>)\n",
-							last_opened, terminal);
-						abort();
-					}
-
-					free(last_opened);
-
-					parent = POP_PARENT();
-					Debug("Popped parent - at %p\n", parent);
-
-					Debug("Closing tag -> %s\n", terminal);
-					break;
-				}
-
-				parse_terminal();
-
-				STACK_push_char_ptr(stack, terminal, strlen(terminal));
-				node = new_node();
-
-				NSET_VALUE(node, terminal);
-				NSET_TYPE(node, XML_TYPE_NODE);
-
-				Debug("Adding xml-node type node to parent @ %p\n", parent);
-				add_child(parent, node);
-
-				Debug("Pushing parent @ %p\n", parent);
-				PUSH_PARENT(parent);
-				parent = LAST_CHILD(parent);
-				Debug("Parent now @ %p\n", parent);
-
-				++state.tag_depth;
-				break;
-
-			case TOK_CLOSE:
-
-				//pr("closing tag");
-
-				--state.tag_depth;
-				//fprintf(stderr, "depth: %d\n", state.tag_depth);
-				break;
-
-			case TOK_META:
-
-				//pr("meta symbol");
-				break;
-
-			case TOK_CHARSEQ:
-
-				parse_token();
-
-				node = new_node();
-
-				NSET_VALUE(node, token);
-				NSET_TYPE(node, XML_TYPE_VALUE);
-
-				Debug("Adding value node to parent @ %p\n", parent);
-				add_child(parent, node);
-				//pr("character sequence");
-
-				break;
-
-			default:
-					;
-				//pr("unknown...");
-		}
-
-		advance();
-	}
-
-#endif
 
 	walk_xml_tree(tree->x_root);
 	free_xml_tree(tree);
