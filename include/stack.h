@@ -193,6 +193,34 @@ STACK_push_ ## type ## _ptr (STACK_OBJ_TYPE_PTR(type) *obj, type *data, size_t s
 	return; \
 }
 
+#define STACK_PUSH_TYPE_PTR_FUNC_NO_COPY(type) \
+void \
+STACK_push_ ## type ## _ptr_no_copy (STACK_OBJ_TYPE_PTR(type) *obj, type *data) \
+{ \
+	assert((obj)); \
+	STACK_ITEM_TYPE_PTR(type) *item = malloc(sizeof(STACK_ITEM_TYPE_PTR(type))); \
+	if (!item) \
+		return; \
+	memset(item, 0, sizeof(*item)); \
+	item->data = (data); \
+	if (!(obj)->top) \
+	{ \
+		(obj)->top = (item); \
+		(obj)->bottom = (item); \
+		(item)->next = NULL; \
+		(item)->prev = NULL; \
+	} \
+	else \
+	{ \
+		(obj)->top->next = (item); \
+		(item)->prev = (obj)->top; \
+		(item)->next = NULL; \
+		(obj)->top = (item); \
+	} \
+	++(obj)->nr_items; \
+	return; \
+}
+
 #define STACK_ALL_TYPE(type) \
 	STACK_ITEM_OF_TYPE(type) \
 	STACK_ITEM_OF_TYPE_PTR(type) \
@@ -204,6 +232,7 @@ STACK_push_ ## type ## _ptr (STACK_OBJ_TYPE_PTR(type) *obj, type *data, size_t s
 	STACK_DESTROY_OBJ_OF_TYPE_PTR_FUNC(type) \
 	STACK_PUSH_TYPE_FUNC(type) \
 	STACK_PUSH_TYPE_PTR_FUNC(type) \
+	STACK_PUSH_TYPE_PTR_FUNC_NO_COPY(type) \
 	STACK_POP_TYPE_FUNC(type) \
 	STACK_POP_TYPE_PTR_FUNC(type)
 
