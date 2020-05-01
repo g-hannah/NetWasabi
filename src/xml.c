@@ -9,13 +9,14 @@
 #include <unistd.h>
 #include "../include/string_utils.h"
 #include "../include/stack.h"
-//#include "xml.h"
+#include "../include/xml.h"
 
 #define INFILE "./config.xml"
 
 #define __ctor __attribute__((constructor))
 #define __dtor __attribute__((destructor))
 #define ALIGN16(s) (((s) + 0xf) & ~(0xf))
+#define clear_struct(s) memset(s, 0, sizeof(*s))
 
 #define error(m) fprintf(stderr, "%s\n", (m))
 
@@ -81,22 +82,6 @@ enum
 	XML_TYPE_VALUE
 };
 
-typedef struct XML_Node
-{
-	char *n_value;
-	int n_type;
-	struct XML_Node **n_children; // array of node pointers
-	int n_nr_children;
-} xml_node_t;
-
-typedef xml_node_t *node_ptr;
-
-typedef struct XML_Tree
-{
-	xml_node_t *x_root;
-	int x_nr_nodes;
-} xml_tree_t;
-
 #define NCH(n) ((n)->n_nr_children)
 #define CHILD(n,i) ((n)->n_children[(i)])
 #define LAST_CHILD(n) CHILD(n,NCH(n)-1)
@@ -111,20 +96,52 @@ static xml_tree_t XML_tree;
 static node_ptr parent = NULL;
 static node_ptr node = NULL;
 
-static node_ptr node_stack[256];
+#define STACK_MAX_DEPTH 256
+static node_ptr node_stack[STACK_MAX_DEPTH];
 static int pnode_idx = 0;
 
-#define CLEAR_NODE_STACK() memset(node_stack, 0, sizeof(node_ptr) * 256)
-#define PUSH_PARENT(p) (assert(pnode_idx < 256), node_stack[pnode_idx++] = (p))
+#define CLEAR_NODE_STACK() memset(node_stack, 0, sizeof(node_ptr) * STACK_MAX_DEPTH)
+
+/*
+ * The following macros are only used in
+ * do_parse(), so we can safely have the
+ * return statement in here.
+ */
+#define PUSH_PARENT(p) \
+do { \
+	if (pnode_idx >= STACK_MAX_DEPTH) \
+	{ \
+		error("stack overflow"); \
+		return -1; \
+	} \
+	node_stack[pnode_idx++] = (p); \
+} while (0)
+
 #define POP_PARENT() \
 ({ \
 	if (!pnode_idx) \
 	{ \
 		error("stack underflow"); \
-		abort(); \
+		return -1; \
 	} \
 	node_stack[--pnode_idx]; \
 })
+
+static void
+Debug(char *fmt, ...)
+{
+#ifdef DEBUG
+	va_list args;
+
+	va_start(args, fmt);
+	vfprintf(stderr, fmt, args);
+	va_end(args);
+#else
+	(void)fmt;
+#endif
+
+	return;
+}
 
 static node_ptr
 new_node(void)
@@ -194,7 +211,7 @@ walk_xml_tree(node_ptr root)
 }
 
 static void
-free_xml_tree(node_ptr root)
+do_free_tree(node_ptr root)
 {
 	if (!NCH(root))
 	{
@@ -204,18 +221,33 @@ free_xml_tree(node_ptr root)
 	node_ptr n;
 	int i;
 
-	for (i = 0; i < NCH(root); ++i, ++n)
+	for (i = 0; i < NCH(root); ++i)
 	{
 		n = CHILD(root, i);
 
 		if (NCH(n))
-			free_xml_tree(n);
+			do_free_tree(n);
 
+		Debug("Freeing node value %s\n", NVALUE(n));
 		free(NVALUE(n));
+		Debug("Freeing node\n");
 		free(n);
 	}
 
 	return;
+}
+
+void
+free_xml_tree(xml_tree_t *tree)
+{
+	do_free_tree(tree->x_root);
+
+	Debug("Freeing tree root\n");
+	free(tree->x_root);
+	memset(tree, 0, sizeof(*tree));
+
+	Debug("Freeing tree object\n");
+	free(tree);
 }
 
 STACK_ALL_TYPE(char)
@@ -226,22 +258,6 @@ typedef struct Parse_State
 	int tag_depth;
 	int dquote_depth;
 } parse_state_t;
-
-static void
-Debug(char *fmt, ...)
-{
-#ifdef DEBUG
-	va_list args;
-
-	va_start(args, fmt);
-	vfprintf(stderr, fmt, args);
-	va_end(args);
-#else
-	(void)fmt;
-#endif
-
-	return;
-}
 
 static void
 __dtor xml_fini(void)
@@ -460,14 +476,156 @@ lex(void)
 	}
 }
 
+int
+do_parse(xml_tree_t *tree)
+{
+	assert(tree);
+
+	tree->x_root = new_node();
+	parent = tree->x_root;
+
+	stack = STACK_object_new_char_ptr();
+	assert(stack);
+
+	CLEAR_NODE_STACK();
+
+	advance();
+
+	while (ptr < end)
+	{
+		switch(lookahead)
+		{
+			case TOK_OPEN:
+
+				//pr("opening tag");
+				advance();
+
+				if (matches(TOK_META))
+				{
+					//pr("opening meta tag");
+					meta_expr();
+					break;
+				}
+				else
+				if (matches(TOK_SLASH))
+				{
+					parse_terminal();
+					char *last_opened = STACK_pop_char_ptr(stack);
+
+					if (!last_opened)
+					{
+						error("Unexpected closing tag");
+						return -1;
+					}
+
+					if (memcmp(last_opened, terminal, strlen(terminal)))
+					{
+						fprintf(stderr, "Open/close tag mismatch (<%s> & </%s>)\n",
+							last_opened, terminal);
+						return -1;
+					}
+
+					free(last_opened);
+
+					parent = POP_PARENT();
+					Debug("Popped parent - at %p\n", parent);
+
+					Debug("Closing tag -> %s\n", terminal);
+					break;
+				}
+
+				parse_terminal();
+
+				STACK_push_char_ptr(stack, terminal, strlen(terminal));
+				node = new_node();
+
+				NSET_VALUE(node, terminal);
+				NSET_TYPE(node, XML_TYPE_NODE);
+
+				Debug("Adding xml-node type node to parent @ %p\n", parent);
+				add_child(parent, node);
+
+				Debug("Pushing parent @ %p\n", parent);
+				PUSH_PARENT(parent);
+				parent = LAST_CHILD(parent);
+				Debug("Parent now @ %p\n", parent);
+
+				break;
+
+			case TOK_CLOSE:
+
+				//pr("closing tag");
+
+				//fprintf(stderr, "depth: %d\n", state.tag_depth);
+				break;
+
+			case TOK_META:
+
+				//pr("meta symbol");
+				break;
+
+			case TOK_CHARSEQ:
+
+				parse_token();
+
+				node = new_node();
+
+				NSET_VALUE(node, token);
+				NSET_TYPE(node, XML_TYPE_VALUE);
+
+				Debug("Adding value node to parent @ %p\n", parent);
+				add_child(parent, node);
+				//pr("character sequence");
+
+				break;
+
+			default:
+					;
+				//pr("unknown...");
+		}
+
+		advance();
+	}
+
+	return 0;
+}
+
+#if 0
+xml_tree_t *
+parse_xml_file(char *path)
+{
+	if (access(path, F_OK) != 0)
+	{
+		perror("access");
+		goto fail;
+	}
+
+	int fd = -1;
+
+	if ((fd = setup(path)) < 0)
+		goto fail;
+
+	xml_tree_t *tree = NULL;
+
+	tree = malloc(sizeof(xml_tree_t));
+	if (!tree)
+		goto fail;
+
+	if (do_parse(tree) != 0)
+		goto fail;
+
+	return tree;
+
+fail:
+	return NULL;
+}
+#endif
+
 #define XML_VERSION_PATTERN "<?xml version=\"[^\"]*\"?>"
 #define pr(m) fprintf(stderr, "%s\n", (m))
 int
 main(void)
 {
-	parse_state_t state;
-	int depth = 0;
-
 	if (setup(INFILE) < 0)
 		goto fail;
 
@@ -477,8 +635,16 @@ main(void)
 		goto fail;
 	}
 
-	memset(&XML_tree, 0, sizeof(xml_tree_t));
+	xml_tree_t *tree = NULL;
 
+	tree = malloc(sizeof(xml_tree_t));
+	if (!tree)
+		goto fail;
+
+	if (do_parse(tree) != 0)
+		goto fail;
+
+#if 0
 	stack = STACK_object_new_char_ptr();
 	assert(stack);
 
@@ -488,16 +654,6 @@ main(void)
 	assert(XML_tree.x_root);
 
 	parent = XML_tree.x_root;
-
-#if 0
-	TOK_OPEN = 1,
-	TOK_CLOSE,
-	TOK_META,
-	TOK_META_OPEN,
-	TOK_META_CLOSE,
-	TOK_DQUOTE,
-	TOK_CHARSEQ
-#endif
 
 	advance();
 
@@ -599,10 +755,12 @@ main(void)
 		advance();
 	}
 
-	walk_xml_tree(XML_tree.x_root);
-	free_xml_tree(XML_tree.x_root);
-	free(XML_tree.x_root);
-	STACK_object_destroy_char_ptr(stack);
+#endif
+
+	walk_xml_tree(tree->x_root);
+	free_xml_tree(tree);
+
+	//STACK_object_destroy_char_ptr(stack);
 
 	return 0;
 fail:
