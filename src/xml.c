@@ -1,12 +1,14 @@
 #include <assert.h>
 #include <ctype.h>
 #include <fcntl.h>
+#include <stdarg.h>
 #include <stdio.h>
 #include <string.h>
 #include <stdlib.h>
 #include <sys/stat.h>
 #include <unistd.h>
 #include "../include/string_utils.h"
+#include "../include/stack.h"
 //#include "xml.h"
 
 #define INFILE "./config.xml"
@@ -15,39 +17,39 @@
 #define __dtor __attribute__((destructor))
 #define ALIGN16(s) (((s) + 0xf) & ~(0xf))
 
+#define error(m) fprintf(stderr, "%s\n", (m))
+
 // single chars
 #define OTAG		'<'
 #define ETAG		'>'
 #define DQUOTE		'\"'
 #define META		'?'
 #define ASSIGNMENT	'='
+#define BSLASH		'\\'
+#define SLASH		'/'
+#define SPACE		' '
 
-// char seqs
-#define META_OTAG	"<?"
-#define META_ETAG	"?>"
-#define OTAG_CLOSING	"</"
+#define iscntrlspace(p) ((p) == '\t' || (p) == '\r' || (p) == '\n')
 
-#define iswhitespace(p) (isspace((p)) || (p) == '\r' || (p) == '\n')
-
-#define error(m) fprintf(stderr, "%s\n", (m))
-#ifdef DEBUG
-# define pr(m) fprintf(stderr, "%s\n", (m))
-#else
-# define pr(m)
-#endif
-
-#define isterminalchar(c) \
+#define istagnamechar(c) \
 	isalnum((c)) || \
 	(c) == '.' || \
 	(c) == '-' || \
 	(c) == '_' || \
 	(c) == '/'
 
+#define istokenchar(c) \
+	isascii((c)) && \
+	(c) != OTAG && \
+	(c) != ETAG && \
+	(c) != DQUOTE
+
 static int lex(void);
 static int matches(int);
 static void advance(void);
 static void parse_token(void);
 static void parse_terminal(void);
+static void parse_tagname(void);
 
 enum
 {
@@ -55,9 +57,9 @@ enum
 	TOK_CLOSE,
 	TOK_META,
 	TOK_ASSIGN,
-	TOK_META_OPEN,
-	TOK_META_CLOSE,
 	TOK_DQUOTE,
+	TOK_SPACE,
+	TOK_SLASH,
 	TOK_CHARSEQ
 };
 
@@ -66,8 +68,45 @@ static int lookahead = -1;
 static char *ptr = NULL;
 static char *buffer = NULL;
 static char *end = NULL;
-static char terminal[1024];
-static char token[1024];
+
+#define TOK_MAX 1024
+static char terminal[TOK_MAX];
+static char token[TOK_MAX];
+
+#define TOK_LEN_OK(l) ((l) < TOK_MAX)
+
+typedef struct Node
+{
+	char *name;
+	int tok;
+	struct Node *children;
+	int nr_children;
+} Node;
+
+static Node *root = NULL;
+static Node *node = NULL;
+
+#define NCH(n) ((n)->nr_children)
+#define CHILD(n,i) (&((n)->children[(i)]))
+#define NTYPE(n) ((n)->tok)
+#define NAME(n) ((n)->name)
+
+#define N_SET_TYPE(n,t) ((n)->tok = (t))
+#define N_SET_NAME(n,s) ((n)->name = strdup((s)))
+
+static Node *
+new_node(void)
+{
+	Node *node = malloc(sizeof(Node));
+	if (!node)
+		return NULL;
+
+	memset(node, 0, sizeof(*node));
+	return node;
+}
+
+STACK_ALL_TYPE(char)
+STACK_OBJ_TYPE_PTR(char) *stack = NULL;
 
 typedef struct Parse_State
 {
@@ -76,10 +115,29 @@ typedef struct Parse_State
 } parse_state_t;
 
 static void
+Debug(char *fmt, ...)
+{
+#ifdef DEBUG
+	va_list args;
+
+	va_start(args, fmt);
+	vfprintf(stderr, fmt, args);
+	va_end(args);
+#else
+	(void)fmt;
+#endif
+
+	return;
+}
+
+static void
 __dtor xml_fini(void)
 {
 	if (NULL != buffer)
+	{
 		free(buffer);
+		buffer = NULL;
+	}
 
 	return;
 }
@@ -147,21 +205,37 @@ parse_token(void)
 	char *s = ptr;
 
 repeat:
-	while (isascii(*ptr) && *ptr != '\"' && *ptr != OTAG)
+	while (istokenchar(*ptr))
 		++ptr;
 
-	if (*ptr == '\"' && *(ptr - 1) == '\\')
+	if (*ptr == DQUOTE && *(ptr - 1) == BSLASH)
 	{
 		++ptr;
 		goto repeat;
 	}
 
+	assert(TOK_LEN_OK(ptr - s));
 	strncpy(token, s, ptr - s);
 	token[ptr - s] = 0;
 
-#ifdef DEBUG
-	fprintf(stderr, "parse_token -> %s\n", token);
-#endif
+	Debug("parse_token -> %s\n", token);
+
+	return;
+}
+
+static void
+parse_tagname(void)
+{
+	char *s = ptr;
+
+	while (istagnamechar(*ptr))
+		++ptr;
+
+	assert(TOK_LEN_OK(ptr - s));
+	strncpy(token, s, ptr - s);
+	token[ptr - s] = 0;
+
+	Debug("parse_tagname -> %s\n", token);
 
 	return;
 }
@@ -171,14 +245,14 @@ parse_terminal(void)
 {
 	char *s = ptr;
 
-	while (isterminalchar(*ptr))
+	while (istagnamechar(*ptr))
 		++ptr;
 
+	assert(TOK_LEN_OK(ptr - s));
 	strncpy(terminal, s, ptr - s);
 	terminal[ptr - s] = 0;
-#ifdef DEBUG
-	fprintf(stderr, "parse_terminal -> %s\n", terminal);
-#endif
+
+	Debug("parse_terminal -> %s\n", terminal);
 
 	return;
 }
@@ -190,11 +264,11 @@ static void
 meta_expr(void)
 {
 	parse_terminal();
-	++ptr;
+	++ptr; // skip SP
 
 get_expr:
-	parse_terminal();
-	advance();
+	parse_terminal(); // parse attribute
+	advance(); // set lookahead to next char (should be '=')
 
 	if (!matches(TOK_ASSIGN))
 	{
@@ -211,13 +285,29 @@ get_expr:
 		abort();
 	}
 
-	parse_token();
+	parse_token(); // parses until DQUOTE
 
-	++ptr;
 	advance();
 
-	if (!matches(TOK_META))
+	if (!matches(TOK_DQUOTE))
+	{
+		error("Missing '\"' symbol");
+		abort();
+	}
+
+	advance();
+
+	/*
+	 * <?target attribute="value" attribute2="value2"?>
+	 */
+	if (matches(TOK_SPACE))
 		goto get_expr;
+
+	if (!matches(TOK_META))
+	{
+		error("Missing '?' symbol");
+		abort();
+	}
 
 	return;
 }
@@ -225,9 +315,7 @@ get_expr:
 static int
 lex(void)
 {
-	char *s;
-
-	while (iswhitespace(*ptr))
+	while (iscntrlspace(*ptr)) // skip CR NL TAB
 		++ptr;
 
 	switch(*ptr)
@@ -247,7 +335,13 @@ lex(void)
 		case ASSIGNMENT:
 			++ptr;
 			return TOK_ASSIGN;
-		default:
+		case SPACE:
+			++ptr;
+			return TOK_SPACE;
+		case SLASH:
+			++ptr;
+			return TOK_SLASH;
+		default: // do not consume anything
 
 			return TOK_CHARSEQ;
 	}
@@ -270,6 +364,11 @@ main(void)
 	}
 
 	memset(&state, 0, sizeof(state));
+
+	stack = STACK_object_new_char_ptr();
+	assert(stack);
+	//root = new_node();
+	//assert(root);
 
 #if 0
 	TOK_OPEN = 1,
@@ -298,8 +397,32 @@ main(void)
 					meta_expr();
 					break;
 				}
+				else
+				if (matches(TOK_SLASH))
+				{
+					parse_terminal();
+					char *last_opened = STACK_pop_char_ptr(stack);
+
+					if (!last_opened)
+					{
+						fprintf(stderr, "Unexpected closing tag\n");
+						abort();
+					}
+
+					if (memcmp(last_opened, terminal, strlen(terminal)))
+					{
+						fprintf(stderr, "Closing tag and opening tag do not correspond (%s & %s)\n",
+							last_opened, terminal);
+						abort();
+					}
+
+					Debug("Closing tag -> %s\n", terminal);
+					break;
+				}
 
 				parse_terminal();
+
+				STACK_push_char_ptr(stack, terminal, strlen(terminal));
 
 				++state.tag_depth;
 				break;
@@ -331,6 +454,8 @@ main(void)
 
 		advance();
 	}
+
+	STACK_object_destroy_char_ptr(stack);
 
 	return 0;
 fail:
