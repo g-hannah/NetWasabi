@@ -77,22 +77,43 @@ static char token[TOK_MAX];
 
 typedef struct Node
 {
-	char *name;
-	int tok;
+	char *value;
+	int type;
 	struct Node *children;
 	int nr_children;
 } Node;
 
 static Node *root = NULL;
+static Node *parent = NULL;
 static Node *node = NULL;
+
+static Node *node_stack[256];
+static int pnode_idx = 0;
+
+#define CLEAR_NODE_STACK() memset(node_stack, 0, sizeof(Node *) * 256)
+#define PUSH_PARENT(p) (assert(pnode_idx < 256), node_stack[pnode_idx++] = (p))
+#define POP_PARENT() \
+({ \
+	if (!pnode_idx) \
+	{ \
+		error("stack underflow"); \
+		abort(); \
+	} \
+	node_stack[--pnode_idx]; \
+})
 
 #define NCH(n) ((n)->nr_children)
 #define CHILD(n,i) (&((n)->children[(i)]))
-#define NTYPE(n) ((n)->tok)
+#define LAST_CHILD(n) CHILD((n), NCH(n)-1)
+#define FIRST_CHILD(n) CHILD((n), 0)
+#define NTYPE(n) ((n)->type)
 #define NAME(n) ((n)->name)
 
-#define N_SET_TYPE(n,t) ((n)->tok = (t))
-#define N_SET_NAME(n,s) ((n)->name = strdup((s)))
+#define NSET_VALUE(n,v) ((n)->value = strdup((v)))
+#define NSET_TYPE(n,t) ((n)->type = (t))
+
+#define TYPE_NODE	1
+#define TYPE_VALUE	2
 
 static Node *
 new_node(void)
@@ -103,6 +124,23 @@ new_node(void)
 
 	memset(node, 0, sizeof(*node));
 	return node;
+}
+
+static void
+add_child(Node *parent, Node *child)
+{
+	assert(parent);
+	assert(child);
+
+	parent->children = realloc(parent->children, sizeof(Node) * (NCH(parent) + 1));
+	assert(parent->children);
+
+	Node *node = CHILD(parent, NCH(parent));
+	memcpy((void *)node, (void *)child, sizeof(*node));
+	free(child);
+	++NCH(parent);
+
+	return;
 }
 
 STACK_ALL_TYPE(char)
@@ -353,6 +391,7 @@ int
 main(void)
 {
 	parse_state_t state;
+	int depth = 0;
 
 	if (setup(INFILE) < 0)
 		goto fail;
@@ -367,8 +406,13 @@ main(void)
 
 	stack = STACK_object_new_char_ptr();
 	assert(stack);
-	//root = new_node();
-	//assert(root);
+
+	CLEAR_NODE_STACK();
+
+	root = new_node();
+	assert(root);
+
+	parent = root;
 
 #if 0
 	TOK_OPEN = 1,
@@ -416,6 +460,11 @@ main(void)
 						abort();
 					}
 
+					free(last_opened);
+
+					parent = POP_PARENT();
+					Debug("Popped parent - at %p\n", parent);
+
 					Debug("Closing tag -> %s\n", terminal);
 					break;
 				}
@@ -423,6 +472,18 @@ main(void)
 				parse_terminal();
 
 				STACK_push_char_ptr(stack, terminal, strlen(terminal));
+				node = new_node();
+
+				NSET_VALUE(node, terminal);
+				NSET_TYPE(node, TYPE_NODE);
+
+				Debug("Adding xml-node type node to parent @ %p\n", parent);
+				add_child(parent, node);
+
+				Debug("Pushing parent @ %p\n", parent);
+				PUSH_PARENT(parent);
+				parent = LAST_CHILD(parent);
+				Debug("Parent now @ %p\n", parent);
 
 				++state.tag_depth;
 				break;
@@ -443,6 +504,14 @@ main(void)
 			case TOK_CHARSEQ:
 
 				parse_token();
+
+				node = new_node();
+
+				NSET_VALUE(node, token);
+				NSET_TYPE(node, TYPE_VALUE);
+
+				Debug("Adding value node to parent @ %p\n", parent);
+				add_child(parent, node);
 				//pr("character sequence");
 
 				break;
