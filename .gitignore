@@ -4,6 +4,7 @@
 *.gch
 *.txt
 *.html
+*.xml
 *.log
 core
 netwasabi
