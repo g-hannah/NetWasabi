@@ -8,7 +8,6 @@
 #include <sys/stat.h>
 #include <unistd.h>
 #include "../include/string_utils.h"
-#include "../include/stack.h"
 #include "../include/xml.h"
 
 #define INFILE "./config.xml"
@@ -52,6 +51,8 @@ static void parse_token(void);
 static void parse_terminal(void);
 static void parse_tagname(void);
 
+static void Debug(char *, ...);
+
 enum
 {
 	TOK_OPEN = 1,
@@ -92,13 +93,38 @@ enum
 #define NSET_VALUE(n,v) ((n)->n_value = strdup((v)))
 #define NSET_TYPE(n,t) ((n)->n_type = (t))
 
-static xml_tree_t XML_tree;
 static node_ptr parent = NULL;
 static node_ptr node = NULL;
 
 #define STACK_MAX_DEPTH 256
 static node_ptr node_stack[STACK_MAX_DEPTH];
+static char *stack[STACK_MAX_DEPTH];
 static int pnode_idx = 0;
+static int stack_idx = 0;
+
+#define CLEAR_STACK() memset(stack, 0, sizeof(char *) * STACK_MAX_DEPTH)
+
+#define PUSH_TAG(t) \
+do { \
+	if (stack_idx >= STACK_MAX_DEPTH) \
+	{ \
+		error("stack overflow"); \
+		return -1; \
+	} \
+	stack[stack_idx++] = strdup((t)); \
+	Debug(":::Stack Depth::: => %d\n", stack_idx); \
+} while (0)
+
+#define POP_TAG() \
+({ \
+	if (!stack_idx) \
+	{ \
+		error("stack underflow"); \
+		return -1; \
+	} \
+	Debug(":::Stack Depth::: => %d\n", stack_idx-1); \
+	stack[--stack_idx]; \
+})
 
 #define CLEAR_NODE_STACK() memset(node_stack, 0, sizeof(node_ptr) * STACK_MAX_DEPTH)
 
@@ -127,7 +153,7 @@ do { \
 	node_stack[--pnode_idx]; \
 })
 
-static void
+void
 Debug(char *fmt, ...)
 {
 #ifdef DEBUG
@@ -249,15 +275,6 @@ free_xml_tree(xml_tree_t *tree)
 	Debug("Freeing tree object\n");
 	free(tree);
 }
-
-STACK_ALL_TYPE(char)
-STACK_OBJ_TYPE_PTR(char) *stack = NULL;
-
-typedef struct Parse_State
-{
-	int tag_depth;
-	int dquote_depth;
-} parse_state_t;
 
 static void
 __dtor xml_fini(void)
@@ -484,9 +501,10 @@ do_parse(xml_tree_t *tree)
 	tree->x_root = new_node();
 	parent = tree->x_root;
 
-	stack = STACK_object_new_char_ptr();
-	assert(stack);
+	//stack = STACK_object_new_char_ptr();
+	//assert(stack);
 
+	CLEAR_STACK();
 	CLEAR_NODE_STACK();
 
 	advance();
@@ -510,7 +528,8 @@ do_parse(xml_tree_t *tree)
 				if (matches(TOK_SLASH))
 				{
 					parse_terminal();
-					char *last_opened = STACK_pop_char_ptr(stack);
+					char *last_opened = POP_TAG();
+					//char *last_opened = STACK_pop_char_ptr(stack);
 
 					if (!last_opened)
 					{
@@ -536,7 +555,8 @@ do_parse(xml_tree_t *tree)
 
 				parse_terminal();
 
-				STACK_push_char_ptr(stack, terminal, strlen(terminal));
+				PUSH_TAG(terminal);
+				//STACK_push_char_ptr(stack, terminal, strlen(terminal));
 				node = new_node();
 
 				NSET_VALUE(node, terminal);
@@ -621,12 +641,12 @@ fail:
 }
 #endif
 
-#define XML_VERSION_PATTERN "<?xml version=\"[^\"]*\"?>"
+#define XML_VERSION_PATTERN "<?xml version=\"[^\"]*\"\\( [a-zA-Z]*=\"[^\"]*\"\\)*?>"
 #define pr(m) fprintf(stderr, "%s\n", (m))
 int
-main(void)
+main(int argc, char *argv[])
 {
-	if (setup(INFILE) < 0)
+	if (setup(argv[1]) < 0)
 		goto fail;
 
 	if (!str_find(buffer, XML_VERSION_PATTERN))
