@@ -48,11 +48,13 @@
 #define HTTP_PORT	80
 #define HTTPS_PORT	443
 
-#define HTTP_EOH(BUF)\
+#define HTTP_EOH(BUF) \
 ({\
-	char *___p_t_r = strstr((BUF)->buf_head, HTTP_EOH_SENTINEL);\
-	___p_t_r += strlen(HTTP_EOH_SENTINEL);\
-	___p_t_r;\
+	char *___p_t_r = NULL; \
+	__p_t_r = strstr((BUF)->buf_head, HTTP_EOH_SENTINEL); \
+	if (NULL != __p_t_r) \
+		___p_t_r += strlen(HTTP_EOH_SENTINEL); \
+	___p_t_r; \
 })
 
 #define HTTP_ALIGN_SIZE(s) (((s) + 0xf) & ~(0xf))
