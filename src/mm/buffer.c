@@ -931,8 +931,6 @@ buf_replace(buf_t *buf, char *pattern, char *with)
 	int longer = 0;
 	size_t rlen = strlen(with);
 	size_t mlen;
-	off_t off;
-	char *p, *q;
 	int diff;
 
 	if (regcomp(&regex, pattern, 0) != 0)
@@ -988,7 +986,6 @@ buf_find(buf_t *buf, char *pattern)
 	regmatch_t match[1];
 	int ret;
 	char *m = NULL;
-	char *p = buf->buf_head;
 
 	if (regcomp(&regex, pattern, 0) != 0)
 		return NULL;
