@@ -18,7 +18,8 @@ PRIMARY_OBJS := \
 	$(TOP_DIR)/robots.o \
 	$(TOP_DIR)/utils_url.o \
 	$(TOP_DIR)/screen_utils.o \
-	$(TOP_DIR)/string_utils.o
+	$(TOP_DIR)/string_utils.o \
+	$(TOP_DIR)/xml.o
 
 MM_OBJS := \
 	$(MM_DIR)/btree.o \
