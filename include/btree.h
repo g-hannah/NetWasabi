@@ -26,6 +26,7 @@ btree_obj_t *BTREE_object_new(void);
 void BTREE_object_destroy(btree_obj_t *);
 int BTREE_put_data(btree_obj_t *, void *, size_t);
 btree_node_t *BTREE_search_data(btree_obj_t *, void *, size_t);
+void BTREE_remove_node(btree_obj_t *, void *, size_t);
 
 #ifdef __cplusplus
 }
