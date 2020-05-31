@@ -16,6 +16,7 @@
 #include "cache.h"
 #include "cache_management.h"
 #include "fast_mode.h"
+#include "hash_bucket.h"
 #include "http.h"
 #include "malloc.h"
 #include "netwasabi.h"
@@ -23,8 +24,11 @@
 #include "robots.h"
 #include "screen_utils.h"
 #include "utils_url.h"
+#include "xml.h"
 
 static int get_opts(int, char *[]) __nonnull((2)) __wur;
+
+static char *home_dir = NULL;
 
 /*
  * Global vars.
@@ -72,6 +76,8 @@ __ctor __wr_init(void)
 
 	httplen = strlen("http://");
 	httpslen = strlen("https://");
+
+	home_dir = strdup(getenv("HOME"));
 
 /*
  * For calling fcntl() once only in buf_read_socket/tls()
@@ -250,6 +256,42 @@ else
 	return;
 }
 
+//static bucket_obj_t *bObj = NULL;
+
+static void
+get_config(void)
+{
+	char config_file[1024];
+
+	sprintf(config_file, "%s/.NetWasabi/config.xml", home_dir);
+	if (access(config_file, F_OK) != 0)
+		return;
+
+	xml_tree_t *tree = parse_xml_file(config_file);
+
+	if (!tree)
+		return;
+
+	xml_node_t *node = XML_find_node(tree, "options");
+	if (!node)
+		goto fail;
+
+	fprintf(stderr, "Found node with value \"options\": %s\n", XML_NODE_VALUE(node));
+
+#if 0
+
+	bObj = BUCKET_object_new();
+	assert(bObj);
+#endif
+
+	//free_xml_tree(tree);
+fail:
+	free_xml_tree(tree);
+	//BUCKET_object_destroy(bObj);
+
+	return;
+}
+
 static void
 catch_signal(int signo)
 {
@@ -262,11 +304,10 @@ catch_signal(int signo)
 static void
 check_directory(void)
 {
-	char *home = getenv("HOME");
 	buf_t tmp;
 
 	buf_init(&tmp, path_max);
-	buf_append(&tmp, home);
+	buf_append(&tmp, home_dir);
 	buf_append(&tmp, "/" NETWASABI_DIR);
 
 	if (access(tmp.buf_head, F_OK) != 0)
@@ -376,6 +417,9 @@ main(int argc, char *argv[])
 	{
 		usage(EXIT_FAILURE);
 	}
+
+	get_config();
+	return 0;
 
 	if (get_opts(argc, argv) < 0)
 	{
