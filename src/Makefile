@@ -1,5 +1,5 @@
 CC := gcc
-CFLAGS := -Wall -Werror -D_FORTIFY_SOURCE=2 -fstack-protector-all --param ssp-buffer-size=4 -Wl,-z,relro
+CFLAGS := -Wall -D_FORTIFY_SOURCE=2 -fstack-protector-all --param ssp-buffer-size=4 -Wl,-z,relro
 DEBUG := 0
 
 INCLUDE_DIR := ../include
@@ -16,7 +16,8 @@ PRIMARY_DEPENDENCIES = \
 	$(INCLUDE_DIR)/robots.h \
 	$(INCLUDE_DIR)/screen_utils.h \
 	$(INCLUDE_DIR)/string_utils.h \
-	$(INCLUDE_DIR)/utils_url.h
+	$(INCLUDE_DIR)/utils_url.h \
+	$(INCLUDE_DIR)/xml.h
 
 PRIMARY_SOURCE = \
 	main.c \
@@ -27,7 +28,8 @@ PRIMARY_SOURCE = \
 	robots.c \
 	screen_utils.c \
 	string_utils.c \
-	utils_url.c
+	utils_url.c \
+	xml.c
 
 PRIMARY_OBJS := $(PRIMARY_SOURCE:.c=.o)
 
