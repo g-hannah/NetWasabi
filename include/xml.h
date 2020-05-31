@@ -17,11 +17,15 @@ typedef struct XML_Tree
 	int x_nr_nodes;
 } xml_tree_t;
 
+#define XML_NODE_VALUE(n) ((n)->n_value)
+
 /*
  * Parse XML data in file specified by PATH.
  * Return an XML tree object.
  */
 xml_tree_t *parse_xml_file(char *path);
+xml_node_t *XML_find_node(xml_tree_t *, char *);
+char *XML_node_get_value(xml_node_t *);
 void free_xml_tree(xml_tree_t *);
 
 #endif /* !defined __XML_h__ */
