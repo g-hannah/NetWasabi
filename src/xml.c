@@ -9,31 +9,6 @@
 #include <unistd.h>
 #include "xml.h"
 
-struct XML
-{
-	xml_node_t *root;
-	int nr_nodes;
-
-	int (*parse)(struct XML *, char *); // xml->parse(xml, "sample.xml");
-	xml_node_t *(*find)(struct XML *, char *); // xml->find(xml, "options/crawl-delay");
-	void (*walk_tree)(struct XML *); // xml->walk_tree(xml->root);
-	void (*free_tree)(struct XML *); // xml->free_tree(xml->root);
-};
-
-struct XML_result
-{
-	xml_node_t *nodes;
-	int nr_nodes;
-};
-
-/*
- * TODO
- *
- * Handle XML comments: <!-- comment -->
- */
-
-//#define INFILE "./config.xml"
-
 #define __ctor __attribute__((constructor))
 #define __dtor __attribute__((destructor))
 #define ALIGN16(s) (((s) + 0xf) & ~(0xf))
@@ -91,8 +66,7 @@ static int lex(void);
 static int matches(int);
 static void advance(void);
 static void parse_token(void);
-static void parse_terminal(void);
-//static void parse_tagname(void);
+static void parse_tagname(void);
 
 static void Debug(char *, ...);
 
@@ -792,8 +766,6 @@ XML_get_node_value(xml_node_t *root, char *name)
 		if (!cmp)
 			return node->value;
 
-	recur:
-
 		value = XML_get_node_value(node, name);
 		if (NULL != value)
 			return value;
@@ -1102,7 +1074,7 @@ do_parse(struct XML *xml)
 	return 0;
 }
 
-#define XML_VERSION_PATTERN "<?xml version=\"[^\"]*\"\\( [a-zA-Z]*=\"[^\"]*\"\\)*?>"
+//#define XML_VERSION_PATTERN "<?xml version=\"[^\"]*\"\\( [a-zA-Z]*=\"[^\"]*\"\\)*?>"
 int
 XML_parse_file(struct XML *xml, char *path)
 {
