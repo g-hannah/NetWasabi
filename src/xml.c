@@ -774,6 +774,28 @@ XML_get_node_value(xml_node_t *root, char *name)
 	return NULL;
 }
 
+void
+XML_for_each_child(xml_node_t *root, XML_cb_t func)
+{
+	assert(root);
+	assert(func);
+
+	int i;
+	int nch = NCH(root);
+	node_ptr node = NULL;
+
+	if (0 == nch)
+		return;
+
+	for (i = 0; i < nch; ++i)
+	{
+		node = CHILD(root, i);
+		(*func)(node);
+	}
+
+	return;
+}
+
 static int
 matches(int tok)
 {

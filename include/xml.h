@@ -29,11 +29,14 @@ struct XML
 
 typedef xml_node_t *node_ptr;
 
+typedef void(*XML_cb_t)(xml_node_t *);
+
 struct XML *XML_new(void);
 int XML_parse_file(struct XML *, char *);
 xml_node_t *XML_find_by_path(struct XML *, char *);
 xml_node_t *XML_find_parent_node_for_value(xml_node_t *, char *);
 char *XML_get_node_value(xml_node_t *, char *);
 void XML_free(struct XML *);
+void XML_for_each_child(xml_node_t *, XML_cb_t);
 
 #endif /* !defined __XML_h__ */
