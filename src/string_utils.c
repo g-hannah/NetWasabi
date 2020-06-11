@@ -396,6 +396,14 @@ str_find(char *s, char *pattern)
 
 	return NULL;
 }
+
+static char stringified[128];
+char *
+to_string(int n)
+{
+	sprintf(stringified, "%d", n);
+	return stringified;
+}
 #if 0
 enum
 {
