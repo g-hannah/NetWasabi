@@ -13,7 +13,6 @@
 #include "cache_management.h"
 #include "http.h"
 #include "malloc.h"
-#include "robots.h"
 #include "screen_utils.h"
 #include "utils_url.h"
 #include "netwasabi.h"
@@ -816,7 +815,7 @@ Crawl_WebSite(struct http_t *http, queue_obj_t *URL_queue, btree_obj_t *tree_arc
 		http->ops->URL_parse_page(http->URL, http->page);
 
 		BLOCK_SIGNAL(SIGINT);
-		sleep(crawl_delay(&nwctx));
+		sleep(nwctx.config.crawl_delay);
 		UNBLOCK_SIGNAL(SIGINT);
 
 		http->ops->send_request(http);
