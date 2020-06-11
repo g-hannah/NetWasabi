@@ -15,7 +15,7 @@
  * of empty buckets to use.
  */
 
-#define HASHING_PRIME 1610612741u
+//#define HASHING_PRIME 1610612741u
 #define ALIGN_SIZE(s) (((s) + 0xf) & ~(0xf))
 
 #define BUCKET(h, n) ((h)%(n))
@@ -41,6 +41,7 @@ Log(char *fmt, ...)
 	return;
 }
 
+/*
 static void
 rotate_byte_left(char *c, int amount)
 {
@@ -54,7 +55,9 @@ rotate_byte_left(char *c, int amount)
 
 	return;
 }
+*/
 
+#define GOLDEN_RATIO32 2654435769u
 static uint32_t
 hash_Object(char *data)
 {
@@ -62,19 +65,34 @@ hash_Object(char *data)
 	//assert(nrBuckets > 0);
 
 	size_t len = strlen(data);
-	char *p = data;
-	char c = (char)0;
-	char *limit = data + len;
+	int words = (len/sizeof(uint32_t));
+	int rem = (len%sizeof(uint32_t));
 	uint64_t rax = 0;
+	uint32_t *ptr = NULL;
 
-	while (p < limit)
+	ptr = (uint32_t *)data;
+
+	while (words--)
 	{
-		c ^= *p++;
-		rotate_byte_left(&c, 3);
+		//*ptr ^= *ptr >> 24;
+		rax ^= (GOLDEN_RATIO32 * *ptr) >> 24;
+		++ptr;
 	}
 
-	rax = (c * HASHING_PRIME);
-	//rcx >>= (sizeof(uint32_t)*8);
+	if (rem)
+	{
+		char *p = data + (words*4);
+		uint32_t tmp = 0;
+		int s = (rem-1)*8;
+
+		while (rem--)
+		{
+			tmp |= (*p++ << s);
+			s -= 8;
+		}
+
+		rax ^= (GOLDEN_RATIO32 * tmp) >> 24;
+	}
 
 	return (uint32_t)rax;
 }
