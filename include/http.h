@@ -51,8 +51,8 @@
 #define HTTP_EOH(BUF) \
 ({\
 	char *___p_t_r = NULL; \
-	__p_t_r = strstr((BUF)->buf_head, HTTP_EOH_SENTINEL); \
-	if (NULL != __p_t_r) \
+	___p_t_r = strstr((BUF)->buf_head, HTTP_EOH_SENTINEL); \
+	if (NULL != ___p_t_r) \
 		___p_t_r += strlen(HTTP_EOH_SENTINEL); \
 	___p_t_r; \
 })
