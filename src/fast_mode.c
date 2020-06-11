@@ -92,7 +92,7 @@ struct worker_thread
 	int idx;
 	char *main_url;
 	uint32_t runtime_options;
-	unsigned int cache_thresh;
+	unsigned int max_queue;
 };
 
 static queue_obj_t *URL_queue = NULL;
@@ -571,9 +571,9 @@ do_fast_mode(char *remote_host)
 		workers[i].runtime_options = runtime_options;
 
 		if (option_set(OPT_CACHE_THRESHOLD))
-			workers[i].cache_thresh = nwctx.config.cache_thresh;
+			workers[i].max_queue = nwctx.config.max_queue;
 		else
-			workers[i].cache_thresh = UINT_MAX;
+			workers[i].max_queue = UINT_MAX;
 
 		if ((err = thread_create(&workers[i].tid, &attr, worker_crawl, (void *)&workers[i])) != 0)
 		{
