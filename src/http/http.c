@@ -461,7 +461,7 @@ parse_response_header_1_1(struct http_t *http)
 
 	sol = buf->buf_head;
 
-	BUCKET_reset_buckets(private->headers);
+	BUCKET_reset_buckets(private->headers, 0);
 
 /*
  * Skip the initial line showing the status of the request (200 OK...)
@@ -504,11 +504,26 @@ parse_response_header_1_1(struct http_t *http)
 			break;
 		}
 
-		memcpy((void *)field_value, (void *)p, (eol - p));
-		field_value[eol - p] = 0;
+		size_t value_len = (eol - p);
+		memcpy((void *)field_value, (void *)p, value_len);
+		field_value[value_len] = 0;
 
 		_log("Putting header field \"%s\" (%s) into hash table\n", field_name, field_value);
-		BUCKET_put_data(private->headers, field_name, field_value);
+
+		/*
+		 * BUCKET_put_data(bucket_obj_t *bObj, char *key, void *data, size_t len, int flags);
+		 * Flags available:
+		 *
+		 * BUCKET_FL_NO_FREE
+		 *	If we allocated memory on the heap and copied the data from DATA,
+		 *	then we would pass this flag when freeing buckets.
+		 *
+		 * BUCKET_FL_NO_COPY
+		 *	If we use this flag, the data pointed to by DATA will not be copied.
+		 *	The value of the pointer in DATA itself will just be stored.
+		 *
+		 */
+		BUCKET_put_data(private->headers, field_name, (void *)field_value, value_len, 0);
 
 		sol = eol + 2;
 
@@ -2025,7 +2040,7 @@ fail:
 	buf_destroy(&http->conn.read_buf);
 
 	if (private->headers)
-		BUCKET_object_destroy(private->headers);
+		BUCKET_object_destroy(private->headers, 0);
 
 	if (private->cookies)
 		cache_destroy(private->cookies);
@@ -2075,7 +2090,7 @@ HTTP_delete(struct http_t *http)
 	free(http->conn.host_ipv4);
 	free(http->URL);
 
-	BUCKET_object_destroy(private->headers);
+	BUCKET_object_destroy(private->headers, 0);
 	cache_clear_all(private->cookies);
 	cache_destroy(private->cookies);
 
@@ -2177,7 +2192,7 @@ http_connect(struct http_t *http)
  * pthread_once() to do it once only.
  */
 		pthread_once(&__ossl_init_once, __init_openssl);
-		http->conn.ssl_ctx = SSL_CTX_new(TLS_client_method());
+		http->conn.ssl_ctx = SSL_CTX_new(TLSv1_2_client_method());
 		http_tls(http) = SSL_new(http->conn.ssl_ctx);
 
 		SSL_set_fd(http_tls(http), http_socket(http)); /* Set the socket for reading/writing */
@@ -2277,7 +2292,7 @@ http_reconnect(struct http_t *http)
 
 	if (http->usingSecure)
 	{
-		http->conn.ssl_ctx = SSL_CTX_new(TLS_client_method());
+		http->conn.ssl_ctx = SSL_CTX_new(TLSv1_2_client_method());
 		http_tls(http) = SSL_new(http->conn.ssl_ctx);
 
 		SSL_set_fd(http_tls(http), http_socket(http)); // Set the socket for reading/writing
