@@ -170,17 +170,21 @@ struct url_types
 	size_t len;
 };
 
-#define CACHE_DEFAULT_THRESHOLD 500
+#define CRAWL_DELAY_OPTION_NAME "crawlDelay"
+#define CRAWL_DEPTH_OPTION_NAME "crawlDepth"
+#define MAX_QUEUE_OPTION_NAME "queueMax"
+#define FAST_MODE_OPTION_NAME "fastMode"
+#define XDOMAIN_OPTION_NAME "xdomain"
 
 #define stats_nr_bytes(n) ((n)->stats.nr_bytes)
 #define stats_nr_requests(n) ((n)->stats.nr_requests)
 #define stats_nr_archived(n) ((n)->stats.nr_archived)
 #define stats_nr_errors(n) ((n)->stats.nr_errors)
 
-#define crawl_delay(n) ((n)->config.crawl_delay)
-#define crawl_depth(n) ((n)->config.crawl_depth)
-#define cache_thresh(n) ((n)->config.cache_thresh)
-#define have_rgraph(n) ((n)->config.have_rgraph)
+#define CONFIG_CRAWL_DELAY(n, v) ((n)->config.crawl_delay = (v))
+#define CONFIG_CRAWL_DEPTH(n, v) ((n)->config.crawl_depth = (v))
+#define CONFIG_MAX_QUEUE(n, v) ((n)->config.max_queue = (v))
+#define CONFIG_CROSS_DOMAIN(n, v) ((n)->config.allow_xdomain = (v))
 
 #define STATS_ADD_BYTES(n, b) ((n)->stats.nr_bytes += (b))
 #define STATS_INC_REQS(n) ++((n)->stats.nr_requests)
@@ -236,6 +240,7 @@ struct netwasabi_ctx
 		unsigned int crawl_delay; // seconds to wait between each request
 		unsigned int crawl_depth; // crawling all URLs from a URL == 1 depth
 		unsigned int max_queue; // maximum number of URLs allowed in the queue
+		unsigned int allow_xdomain; // can we follow URLs that are on another remote server?
 		unsigned int tslash;
 	} config;
 
