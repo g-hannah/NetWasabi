@@ -26,17 +26,16 @@
 #include "utils_url.h"
 #include "xml.h"
 
-static int get_opts(int, char *[]) __nonnull((2)) __wur;
-
 static char *home_dir = NULL;
 
 /*
- * Global vars.
+ * Globally visible, so threads in fast_mode.c
+ * can get a copy of these runtime options.
  */
 struct netwasabi_ctx nwctx = {0};
 
-size_t httplen;
-size_t httpslen;
+size_t httplen; // length of "http://"
+size_t httpslen; // length of "https://"
 
 pthread_t thread_screen_tid;
 pthread_attr_t thread_screen_attr;
@@ -44,6 +43,8 @@ pthread_mutex_t screen_mutex;
 
 static queue_obj_t *URL_queue = NULL;
 static btree_obj_t *tree_archived = NULL;
+
+static int FAST_MODE = 0;
 
 static volatile sig_atomic_t screen_updater_stop = 0;
 
@@ -256,42 +257,6 @@ else
 	return;
 }
 
-//static bucket_obj_t *bObj = NULL;
-
-static void
-get_config(void)
-{
-	char config_file[1024];
-
-	sprintf(config_file, "%s/.NetWasabi/config.xml", home_dir);
-	if (access(config_file, F_OK) != 0)
-		return;
-
-	xml_tree_t *tree = parse_xml_file(config_file);
-
-	if (!tree)
-		return;
-
-	xml_node_t *node = XML_find_node(tree, "options");
-	if (!node)
-		goto fail;
-
-	fprintf(stderr, "Found node with value \"options\": %s\n", XML_NODE_VALUE(node));
-
-#if 0
-
-	bObj = BUCKET_object_new();
-	assert(bObj);
-#endif
-
-	//free_xml_tree(tree);
-fail:
-	free_xml_tree(tree);
-	//BUCKET_object_destroy(bObj);
-
-	return;
-}
-
 static void
 catch_signal(int signo)
 {
@@ -407,24 +372,96 @@ valid_url(char *url)
 	return 1;
 }
 
-/*
- * ./netwasabi <url> [options]
- */
+#define CONFIG_FILENAME "netwasabi.xml"
+static void
+get_configuration(void)
+{
+	char config_file[1024];
+
+	sprintf(config_file, "%s/.NetWasabi/" CONFIG_FILENAME, home_dir);
+
+	if (access(config_file, F_OK) != 0)
+	{
+		crawl_delay(&nwctx) = DEFAULT_CRAWL_DELAY;
+		crawl_depth(&nwctx) = DEFAULT_CRAWL_DEPTH;
+		cache_thresh(&nwctx) = DEFAULT_MAX_QUEUE;
+
+		FAST_MODE = 0;
+
+		return;
+	}
+
+	struct XML *xml = XML_new();
+
+	if (0 != XML_parse_file(xml, config_file))
+	{
+		fprintf(stderr, "Failed to parse config.xml file\n");
+		return;
+	}
+
+	xml_node_t *n = XML_find_by_path(xml, "options");
+	if (!n)
+		return;
+
+	/*
+	 * XXX
+	 *
+	 * Should probably just iterate the nodes and insert
+	 * the values into a hashtable and then query the
+	 * table as and when required. But for now, this will
+	 * suffice.
+	 */
+	char *depth = XML_get_node_value(n, "depth");
+	char *queue_max = XML_get_node_value(n, "queueMax");
+	char *fast_mode = XML_get_node_value(n, "fastMode");
+	char *cdelay = XML_get_node_value(n, "crawlDelay");
+
+	if (depth)
+	{
+		crawl_delay(&nwctx) = atoi(depth);
+		fprintf(stderr, "Max crawl depth: %d\n", atoi(depth));
+	}
+	if (queue_max)
+	{
+		cache_thresh(&nwctx) = atoi(queue_max);
+		fprintf(stderr, "Max URLs in queue: %d\n", atoi(queue_max));
+	}
+	if (fast_mode)
+	{
+		if (!strcasecmp("false", fast_mode))
+			FAST_MODE = 0;
+		else
+			FAST_MODE = 1;
+
+		fprintf(stderr, "Use fast mode: %d\n", FAST_MODE);
+	}
+	if (cdelay)
+	{
+		int d = atoi(cdelay);
+
+		if (d < 0)
+			d = 0;
+
+		crawl_delay(&nwctx) = d;
+		fprintf(stderr, "Crawl delay: %d seconds\n", d);
+	}
+
+	XML_free(xml);
+
+	return;
+
+fail:
+	XML_free(xml);
+
+	return;
+}
+
 int
 main(int argc, char *argv[])
 {
-	if (argc < 2)
+	if (argc < 2) // netwasabi <url>
 	{
 		usage(EXIT_FAILURE);
-	}
-
-	get_config();
-	return 0;
-
-	if (get_opts(argc, argv) < 0)
-	{
-		fprintf(stderr, "main: failed to parse program options\n");
-		goto fail;
 	}
 
 	if (!valid_url(argv[1]))
@@ -432,6 +469,9 @@ main(int argc, char *argv[])
 		fprintf(stderr, "\"%s\" is not a valid URL\n", argv[1]);
 		goto fail;
 	}
+
+	get_configuration();
+	check_directory();
 
 	/*
 	 * Must be done here and not in the constructor function
@@ -447,12 +487,6 @@ main(int argc, char *argv[])
 
 	//pthread_attr_setdetachstate(&thread_screen_attr, PTHREAD_CREATE_DETACHED);
 	//pthread_create(&thread_screen_tid, &thread_screen_attr, screen_updater_thread, NULL);
-
-/*
- * Check for existence of the WR_Reaped directory
- * in the user's home directory.
- */
-	check_directory();
 
 	if (option_set(OPT_FAST_MODE))
 	{
@@ -491,6 +525,12 @@ main(int argc, char *argv[])
 	buf_t *rbuf = NULL;
 	buf_t *wbuf = NULL;
 
+	/*
+	 * HTTP objects have an ID associated with them
+	 * for logging purposes (i.e., if using fast
+	 * mode there are multiple threads so we can
+	 * differentiate between them).
+	 */
 #define MAIN_THREAD_ID 0x4e49414du
 	if (!(http = HTTP_new(MAIN_THREAD_ID)))
 	{
@@ -498,12 +538,13 @@ main(int argc, char *argv[])
 		goto fail;
 	}
 
-	http->followRedirects = 1;
-	http->usingSecure = 1;
-	http->verb = GET;
+	http->followRedirects = 1; // Tell the HTTP module to automatically follow 3XX redirects.
+	http->usingSecure = 1; // Tell the HTTP module to use TLS.
+	http->verb = GET; // We will only be using GET requests anyway.
 
 	url_len = strlen(argv[1]);
 	assert(url_len < HTTP_URL_MAX);
+
 	strcpy(http->URL, argv[1]);
 	http->URL_len = url_len;
 
@@ -519,7 +560,7 @@ main(int argc, char *argv[])
 	wbuf = &http_wbuf(http);
 
 	/*
-	 * Catch SIGINT and SIGQUIT so we can release cache memory, etc.
+	 * Catch SIGINT and SIGQUIT so we can release memory.
 	 */
 	if (sigsetjmp(main_env, 0) != 0)
 	{
@@ -528,28 +569,23 @@ main(int argc, char *argv[])
 		goto out_disconnect;
 	}
 
-	/*
-	 * Check if the webserver has a robots.txt file
-	 * and if so, use it to create a directed network
-	 * of URL tokens.
-	 *
-	 * XXX	Update: We will create a regex module
-	 *	specifically for dealing abiding by
-	 *	the rules in the robots.txt file
-	 *	on webservers. Also, we can then
-	 *	use it for other features such
-	 *	as only archiving pages containing
-	 *	certain text, etc.
-	 */
-	//if (__get_robots(&conn) < 0)
-		//put_error_msg("No robots.txt file");
-
 	buf_clear(rbuf);
 	buf_clear(wbuf);
 
 	update_current_url(http->URL);
 
+	/*
+	 * When we parse URLs from an HTML document, we will
+	 * add those to the back of the queue to be crawled later.
+	 */
 	URL_queue = QUEUE_object_new();
+
+	/*
+	 * Keep a binary tree of already-archived URLs so that
+	 * we can avoid duplicate crawling. We query the tree
+	 * when we take a URL from the queue to see if we already
+	 * downloaded it.
+	 */
 	tree_archived = BTREE_object_new();
 
 	http->ops->send_request(http);
@@ -565,10 +601,14 @@ main(int argc, char *argv[])
 
 	BTREE_put_data(tree_archived, (void *)http->URL, http->URL_len);
 
+	/*
+	 * i.e., it's not an image file or something
+	 * else that has no HTML structure.
+	 */
 	if (URL_parseable(http->URL))
 	{
 		parse_URLs(http, URL_queue, tree_archived);
-		transform_document_URLs(http);
+		transform_document_URLs(http); // turn href links into file://<path to local dir for pages crawled from this site>
 		archive_page(http);
 	}
 	else
@@ -616,6 +656,7 @@ fail:
 	exit(EXIT_FAILURE);
 }
 
+/*
 int
 get_opts(int argc, char *argv[])
 {
@@ -775,3 +816,4 @@ get_opts(int argc, char *argv[])
 
 	return 0;
 }
+*/
