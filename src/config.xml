@@ -1,7 +1,8 @@
 <?xml version="1.0"?>
 <options>
-	<cross-domain>true</cross-domain>
-	<depth>5</depth>
-	<queue-max>1000</queue-max>
+	<xdomain>false</xdomain>
+	<depth>10</depth>
+	<queueMax>1000</queueMax>
+	<fastMode>false</fastMode>
+	<crawlDelay>-1</crawlDelay>
 </options>
-
