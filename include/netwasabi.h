@@ -156,11 +156,11 @@ do {\
 struct netwasabi_ctx nwctx;
 uint32_t runtime_options;
 
-#define CRAWL_DELAY_DEFAULT 3
-#define MAX_CRAWL_DELAY 30
-#define CRAWL_DEPTH_DEFAULT 50
-#define MAX_TIME_WAIT 8
+#define DEFAULT_CRAWL_DELAY 3
+#define DEFAULT_CRAWL_DEPTH 10
+#define DEFAULT_MAX_QUEUE 100
 #define MAX_FAILS 10
+#define MAX_TIME_WAIT 8
 #define RESET_DELAY 3
 
 struct url_types
@@ -233,10 +233,9 @@ struct netwasabi_ctx
 {
 	struct
 	{
-		unsigned int crawl_delay;
-		unsigned int crawl_depth;
-		unsigned int cache_thresh;
-		unsigned int have_rgraph; /* did we build a token graph with robots.txt? */
+		unsigned int crawl_delay; // seconds to wait between each request
+		unsigned int crawl_depth; // crawling all URLs from a URL == 1 depth
+		unsigned int max_queue; // maximum number of URLs allowed in the queue
 		unsigned int tslash;
 	} config;
 
@@ -249,8 +248,6 @@ struct netwasabi_ctx
 		uint16_t depth; /* current depth */
 	} stats;
 };
-
-#define flip_cache_state(c) ((c).state == DRAINING ? (c).state = FILLING : (c).state = DRAINING)
 
 #define NR_URL_TYPES 11
 
