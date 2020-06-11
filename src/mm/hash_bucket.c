@@ -7,14 +7,6 @@
 #include <stdio.h>
 #include "hash_bucket.h"
 
-/*
- * TODO
- * 
- * Improve the hashing algorithm as getting
- * some collisions despite having plenty
- * of empty buckets to use.
- */
-
 //#define HASHING_PRIME 1610612741u
 #define ALIGN_SIZE(s) (((s) + 0xf) & ~(0xf))
 
@@ -62,36 +54,16 @@ static uint32_t
 hash_Object(char *data)
 {
 	assert(data);
-	//assert(nrBuckets > 0);
 
 	size_t len = strlen(data);
-	int words = (len/sizeof(uint32_t));
-	int rem = (len%sizeof(uint32_t));
 	uint64_t rax = 0;
-	uint32_t *ptr = NULL;
+	unsigned char *p = (unsigned char *)data;
+	unsigned char *e = (unsigned char *)data + len;
 
-	ptr = (uint32_t *)data;
-
-	while (words--)
+	while (p < e)
 	{
-		//*ptr ^= *ptr >> 24;
-		rax ^= (GOLDEN_RATIO32 * *ptr) >> 24;
-		++ptr;
-	}
-
-	if (rem)
-	{
-		char *p = data + (words*4);
-		uint32_t tmp = 0;
-		int s = (rem-1)*8;
-
-		while (rem--)
-		{
-			tmp |= (*p++ << s);
-			s -= 8;
-		}
-
-		rax ^= (GOLDEN_RATIO32 * tmp) >> 24;
+		rax ^= ((uint32_t)*p * GOLDEN_RATIO32) >> 24;
+		++p;
 	}
 
 	return (uint32_t)rax;
@@ -365,6 +337,8 @@ BUCKET_get_bucket(bucket_obj_t *bucket_obj, char *key)
 	assert(key);
 
 	uint32_t hash = hash_Object(key);
+
+	Log("got hash of %s: %X\n", key, hash);
 	int index = BUCKET(hash, bucket_obj->nr_buckets);
 	bucket_t *bucket = &bucket_obj->buckets[index];
 
