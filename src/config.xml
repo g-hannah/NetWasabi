@@ -1,8 +1,0 @@
-<?xml version="1.0"?>
-<options>
-	<xdomain>false</xdomain>
-	<depth>10</depth>
-	<queueMax>1000</queueMax>
-	<fastMode>false</fastMode>
-	<crawlDelay>-1</crawlDelay>
-</options>
