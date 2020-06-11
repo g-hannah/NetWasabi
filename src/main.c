@@ -2,6 +2,7 @@
 #include <ctype.h>
 #include <errno.h>
 #include <fcntl.h>
+#include <limits.h>
 #include <pthread.h>
 #include <setjmp.h>
 #include <signal.h>
@@ -42,6 +43,7 @@ pthread_mutex_t screen_mutex;
 
 static queue_obj_t *URL_queue = NULL;
 static btree_obj_t *tree_archived = NULL;
+static bucket_obj_t *bObj_hashed_opts = NULL;
 
 static int FAST_MODE = 0;
 
@@ -77,7 +79,15 @@ __ctor __wr_init(void)
 	httplen = strlen("http://");
 	httpslen = strlen("https://");
 
-	home_dir = strdup(getenv("HOME"));
+	char *h = getenv("HOME");
+
+	if (NULL == h)
+	{
+		fprintf(stderr, "Could not get home directory from HOME environment variable\n");
+		return;
+	}
+
+	home_dir = strdup(h);
 
 /*
  * For calling fcntl() once only in buf_read_socket/tls()
@@ -91,6 +101,9 @@ __ctor __wr_init(void)
 static void
 __dtor __wr_fini(void)
 {
+	if (NULL != home_dir)
+		free(home_dir);
+
 	pthread_mutex_destroy(&screen_mutex);
 }
 
@@ -177,24 +190,43 @@ __noret usage(int exit_status)
 {
 	fprintf(stderr,
 		"netwasabi <url> [options]\n\n"
-		"-cD/--crawl-delay       Delay (seconds) between each request (default is\n"
-		"                        3 seconds; ignored if in fast mode).\n\n"
-		"-D/--depth              Set maximum crawl-depth (one \"layer\" of depth\n"
-		"                        is defined as emptying a single cache of all its\n"
-		"                        URLs and switching to the sibling cache.\n\n"
-		"--cache-set-threshold   Set threshold above which no more URLs will\n"
-		"                        be added to the sibling cache while draining\n"
-		"                        the other.\n\n"
-		"--cache-no-threshold    Remove threshold completely from the cache;\n"
-		"                        an unlimited number of URLs can be placed in the\n"
-		"                        sibling cache while draining the other.\n\n"
-		"-fm/--fast-mode         Request more than one URL per second\n"
-		"                        (this option supercedes any crawl delay\n"
-		"                        specified).\n\n"
-		"-X/--xdomain            Follow URLs into other domains.\n\n"
-		"-B/--blacklist          Blacklist tokens in URLs.\n\n"
-		"-T/--tls                Use a TLS connection.\n\n"
-		"--help/-h               Display this information\n");
+		"\n"
+		"NetWasabi crawls websites and archives the pages on the local machine.\n"
+		"URLs embedded within HTML documents are modified to use the \"file://\"\n"
+		"protocol and point to the absolute path of the document on the local\n"
+		"machine.\n"
+		"\n"
+		"Runtime options can be set in the config.xml file in ${HOME}/.NetWasabi\n"
+		"directory. Runtime options include:\n"
+		"\n"
+		"crawlDelay: the number of seconds to wait before sending another GET\n"
+		"request to the remote web server;\n"
+		"\n"
+		"crawlDepth: the depth at which NetWasabi should stop crawling. For example,\n"
+		"when all the URLs that were parsed from a downloaded document have been\n"
+		"visited, that increments the current depth by 1.\n"
+		"\n"
+		"queueMax: This is the maximum number of URLs allowed to be in the queue\n"
+		"at any one time waiting to be downloaded from the webserver.\n"
+		"\n"
+		"fastMode: this option makes requests to the remote web server as fast as\n"
+		"possible using multiple threads. The crawlDelay option is ignored when\n"
+		"this is set to true.\n"
+		"\n"
+		"xdomain: setting this to true means NetWasabi will make requests to URLs\n"
+		"embedded within an HTML document that belong to another remote web server.\n"
+		"This can result in arching pages from unwanted ads.\n"
+		"\n"
+		"An example of a config.xml file is the following:\n"
+		"\n"
+		"<options>\n"
+		"\t<crawlDelay>0</crawlDelay>\n"
+		"\t<crawlDepth>10</crawlDepth>\n"
+		"\t<queueMax>100</queueMax>\n"
+		"\t<xdomain>false</xdomain>\n"
+		"\t<fastMode>false</fastMode>\n"
+		"</options>\n\n"
+		"* There is no need for the <?xml version=\"1.0\" ?> line in the config file.\n\n");
 
 	exit(exit_status);
 }
@@ -215,7 +247,7 @@ __print_information_layout(void)
 		COL_END);
 
 #define COL_HEADINGS COL_DARKORANGE
-if (!option_set(OPT_FAST_MODE))
+if (!FAST_MODE)
 {
 	fprintf(stderr,
 	" ==========================================================================================\n"
@@ -230,7 +262,7 @@ if (!option_set(OPT_FAST_MODE))
 	" ==========================================================================================\n\n",
 	COL_LIGHTGREY, COL_END,
 	COL_HEADINGS, COL_END, (int)0, COL_HEADINGS, COL_END, (int)0, COL_HEADINGS, COL_END, (size_t)0,
-	COL_HEADINGS, COL_END, crawl_delay(&nwctx), COL_HEADINGS, COL_END, 0,
+	COL_HEADINGS, COL_END, nwctx.config.crawl_delay, COL_HEADINGS, COL_END, 0,
 	COL_DARKGREEN, "(filling)", COL_END, COL_LIGHTGREY, "(empty)", COL_END);
 }
 else
@@ -282,75 +314,6 @@ check_directory(void)
 	return;
 }
 
-#if 0
-static int
-__get_robots(connection_t *conn)
-{
-	assert(http);
-
-	int status_code = 0;
-
-	update_operation_status("Requesting robots.txt file from server");
-
-	strcpy(http->page, "robots.txt");
-
-	buf_t full_url;
-
-	buf_init(&full_url, HTTP_URL_MAX);
-
-	if (option_set(OPT_USE_TLS))
-		buf_append(&full_url, "https://");
-	else
-		buf_append(&full_url, "http://");
-
-	assert(http->host[0]);
-	buf_append(&full_url, http->host);
-	buf_append(&full_url, "/robots.txt");
-
-	assert(full_url.data_len < HTTP_URL_MAX);
-	strcpy(http->full_url, full_url.buf_head);
-
-	buf_destroy(&full_url);
-	nwctx.got_token_graph = 0;
-
-	status_code = __do_request(conn);
-
-	switch(status_code)
-	{
-		case HTTP_OK:
-			update_operation_status("Got robots.txt file");
-			break;
-		default:
-			update_operation_status("No robots.txt file");
-	}
-
-/*
- * This initialises the graphs.
- */
-	allowed = NULL;
-	forbidden = NULL;
-
-	if (create_token_graphs(&allowed, &forbidden, &http_rbuf(http)) < 0)
-	{
-		put_error_msg("Failed to create graph for URL tokens");
-		goto out_destroy_graphs;
-	}
-
-	nwctx.got_token_graph = 1;
-	return 0;
-
-	out_destroy_graphs:
-
-	if (allowed)
-		destroy_graph(allowed);
-
-	if (forbidden)
-		destroy_graph(forbidden);
-
-	return 0;
-}
-#endif
-
 static int
 valid_url(char *url)
 {
@@ -371,19 +334,34 @@ valid_url(char *url)
 	return 1;
 }
 
-#define CONFIG_FILENAME "netwasabi.xml"
+static void
+_config_hash_options(xml_node_t *node)
+{
+	if (NULL == node->value)
+		return;
+
+	BUCKET_put_data(bObj_hashed_opts, node->name, (void *)node->value, strlen(node->value), 0);
+	return;
+}
+
+/**
+ * Parse the config.xml file and add runtime
+ * options to hash bucket to retrieve when needed.
+ */
+#define CONFIG_FILENAME "config.xml"
 static void
 get_configuration(void)
 {
 	char config_file[1024];
 
 	sprintf(config_file, "%s/.NetWasabi/" CONFIG_FILENAME, home_dir);
+	bObj_hashed_opts = NULL;
 
 	if (access(config_file, F_OK) != 0)
 	{
-		crawl_delay(&nwctx) = DEFAULT_CRAWL_DELAY;
-		crawl_depth(&nwctx) = DEFAULT_CRAWL_DEPTH;
-		cache_thresh(&nwctx) = DEFAULT_MAX_QUEUE;
+		CONFIG_CRAWL_DELAY(&nwctx, DEFAULT_CRAWL_DELAY);
+		CONFIG_CRAWL_DEPTH(&nwctx, DEFAULT_CRAWL_DEPTH);
+		CONFIG_MAX_QUEUE(&nwctx, DEFAULT_MAX_QUEUE);
 
 		FAST_MODE = 0;
 
@@ -402,49 +380,13 @@ get_configuration(void)
 	if (!n)
 		return;
 
+	bObj_hashed_opts = BUCKET_object_new();
+	assert(bObj_hashed_opts);
+
 	/*
-	 * XXX
-	 *
-	 * Should probably just iterate the nodes and insert
-	 * the values into a hashtable and then query the
-	 * table as and when required. But for now, this will
-	 * suffice.
+	 * Iterate child nodes of <options> tag and hash the data.
 	 */
-	char *depth = XML_get_node_value(n, "depth");
-	char *queue_max = XML_get_node_value(n, "queueMax");
-	char *fast_mode = XML_get_node_value(n, "fastMode");
-	char *cdelay = XML_get_node_value(n, "crawlDelay");
-
-	if (depth)
-	{
-		crawl_delay(&nwctx) = atoi(depth);
-		fprintf(stderr, "Max crawl depth: %d\n", atoi(depth));
-	}
-	if (queue_max)
-	{
-		cache_thresh(&nwctx) = atoi(queue_max);
-		fprintf(stderr, "Max URLs in queue: %d\n", atoi(queue_max));
-	}
-	if (fast_mode)
-	{
-		if (!strcasecmp("false", fast_mode))
-			FAST_MODE = 0;
-		else
-			FAST_MODE = 1;
-
-		fprintf(stderr, "Use fast mode: %d\n", FAST_MODE);
-	}
-	if (cdelay)
-	{
-		int d = atoi(cdelay);
-
-		if (d < 0)
-			d = 0;
-
-		crawl_delay(&nwctx) = d;
-		fprintf(stderr, "Crawl delay: %d seconds\n", d);
-	}
-
+	XML_for_each_child(n, _config_hash_options);
 	XML_free(xml);
 
 	return;
@@ -655,13 +597,12 @@ fail:
 	exit(EXIT_FAILURE);
 }
 
-/*
 int
 get_opts(int argc, char *argv[])
 {
 	int		i;
 
-	cache_thresh(&nwctx) = CACHE_DEFAULT_THRESHOLD;
+	CONFIG_MAX_QUEUE(&nwctx, DEFAULT_MAX_QUEUE);
 
 	for (i = 1; i < argc; ++i)
 	{
@@ -675,45 +616,6 @@ get_opts(int argc, char *argv[])
 			|| !strcmp("-h", argv[i]))
 		{
 			usage(EXIT_SUCCESS);
-		}
-		else
-		if (!strcmp("--depth", argv[i])
-		|| !strcmp("-D", argv[i]))
-		{
-			++i;
-
-			if (i == argc || argv[i][0] == '-')
-			{
-				fprintf(stderr, "-D/--depth requires an argument\n");
-				usage(EXIT_FAILURE);
-			}
-
-			crawl_depth(&nwctx) = atoi(argv[i]);
-			assert(crawl_depth(&nwctx) > 0);
-			assert(crawl_depth(&nwctx) <= INT_MAX);
-		}
-		else
-		if (!strcmp("--crawl-delay", argv[i])
-		|| !strcmp("-cD", argv[i]))
-		{
-			++i;
-
-			if (i == argc || argv[i][0] == '-')
-			{
-				fprintf(stderr, "-cD/--crawl-delay requires an argument\n");
-				usage(EXIT_FAILURE);
-			}
-
-			crawl_delay(&nwctx) = atoi(argv[i]);
-			assert(crawl_delay(&nwctx) >= 0);
-			assert(crawl_delay(&nwctx) < MAX_CRAWL_DELAY);
-		}
-		else
-		if (!strcmp("--fast-mode", argv[i])
-		|| !strcmp("-fm", argv[i]))
-		{
-			set_option(OPT_FAST_MODE);
-			assert(option_set(OPT_FAST_MODE));
 		}
 #if 0
 		else
@@ -754,65 +656,10 @@ get_opts(int argc, char *argv[])
 		}
 #endif
 		else
-		if (!strcmp("--xdomain", argv[i])
-			|| !strcmp("-X", argv[i]))
-		{
-			set_option(OPT_ALLOW_XDOMAIN);
-		}
-		else
-		if (!strcmp("--cache-no-threshold", argv[i]))
-		{
-			unset_option(OPT_CACHE_THRESHOLD);
-			assert(!option_set(OPT_CACHE_THRESHOLD));
-		}
-		else
-		if (!strcmp("--cache-set-threshold", argv[i]))
-		{
-			++i;
-
-			if (i == argc || argv[i][0] == '-')
-			{
-				fprintf(stderr, "--cache-set-threshold requires an argument\n");
-				usage(EXIT_FAILURE);
-			}
-
-			cache_thresh(&nwctx) = (unsigned int)atoi(argv[i+1]);
-			set_option(OPT_CACHE_THRESHOLD);
-		}
-#if 0
-		else
-		if (!strcmp("-oH", argv[i])
-			|| !strcmp("--req-head", argv[i]))
-		{
-			set_option(OPT_SHOW_REQ_HEADER);
-		}
-		else
-		if (!strcmp("-iH", argv[i])
-			|| !strcmp("--res-head", argv[i]))
-		{
-			set_option(OPT_SHOW_RES_HEADER);
-		}
-#endif
-		else
-		if (!strcmp("-T", argv[i])
-			|| strcmp("--tls", argv[i]))
-		{
-			set_option(OPT_USE_TLS);
-		}
-		else
 		{
 			continue;
 		}
 	}
 
-	if (crawl_delay(&nwctx) > 0 && option_set(OPT_FAST_MODE))
-	{
-			crawl_delay(&nwctx) = 0;
-	}
-
-	if (!crawl_depth(&nwctx))
-		crawl_depth(&nwctx) = CRAWL_DEPTH_DEFAULT;
-
 	return 0;
 }
-*/
