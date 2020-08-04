@@ -577,7 +577,7 @@ static const char *const __disallowed_tokens[] =
 	(char *)NULL
 };
 
-static int nr_urls_call = 0;
+int nr_urls_call = 0;
 
 /**
  *
@@ -668,6 +668,10 @@ parse_URLs(struct http_t *http, queue_obj_t *URL_queue, btree_obj_t *tree_archiv
 	buf_t full_URL;
 	buf_t path;
 
+	nr_urls_call = 0;
+
+	assert(buf->buf_head);
+
 	if (buf_init(&URL, HTTP_URL_MAX) < 0)
 		goto fail;
 
@@ -751,6 +755,9 @@ parse_URLs(struct http_t *http, queue_obj_t *URL_queue, btree_obj_t *tree_archiv
 	buf_destroy(&full_URL);
 	buf_destroy(&path);
 
+#ifdef DEBUG
+	fprintf(stderr, "parse_URLs: returning %d\n", nr_urls_call);
+#endif
 	return nr_urls_call;
 
 fail_destroy_bufs:
@@ -758,6 +765,9 @@ fail_destroy_bufs:
 	buf_destroy(&URL);
 	buf_destroy(&full_URL);
 	buf_destroy(&path);
+#ifdef DEBUG
+	fprintf(stderr, "parse_URLs: failed\n");
+#endif
 
 fail:
 	return -1;
@@ -773,6 +783,14 @@ Crawl_WebSite(struct http_t *http, queue_obj_t *URL_queue, btree_obj_t *tree_arc
 	if (!URL_queue->nr_items)
 		return 0;
 
+#ifdef DEBUG
+	fprintf(stderr,
+			"Entered Crawl_WebSite():\n"
+			"URLs in queue: %d\n"
+			"URLs archived: %d\n",
+			URL_queue->nr_items,
+			tree_archived->nr_nodes);
+#endif
 	queue_item_t *item = NULL;
 	Dead_URL_t *dead = NULL;
 	int code;
@@ -789,14 +807,24 @@ Crawl_WebSite(struct http_t *http, queue_obj_t *URL_queue, btree_obj_t *tree_arc
 		goto fail;
 	}
 
+	btree_node_t *node = NULL;
 	while (1)
 	{
 		buf_clear(&http_rbuf(http));
 		buf_clear(&http_wbuf(http));
 
-		Log("%d items in queue\n", URL_queue->nr_items);
-		item = QUEUE_dequeue(URL_queue);
-		Log("%d items in queue\n", URL_queue->nr_items);
+		do
+		{
+			Log("%d items in queue\n", URL_queue->nr_items);
+			item = QUEUE_dequeue(URL_queue);
+			Log("%d items in queue\n", URL_queue->nr_items);
+			if (NULL == item)
+				break;
+
+#ifdef DEBUG
+			fprintf(stderr, "Dequeued item: %s\n", (char *)item->data);
+#endif
+		} while (NULL != (node = BTREE_search_data(tree_archived, item->data, strlen((char *)item->data))));
 
 		if (!item)
 			break;
@@ -818,10 +846,19 @@ Crawl_WebSite(struct http_t *http, queue_obj_t *URL_queue, btree_obj_t *tree_arc
 		sleep(nwctx.config.crawl_delay);
 		UNBLOCK_SIGNAL(SIGINT);
 
+#ifdef DEBUG
+		fprintf(stderr, "Sending HTTP request for page\n");
+#endif
 		http->ops->send_request(http);
+#ifdef DEBUG
+		fprintf(stderr, "Receiving HTTP response\n");
+#endif
 		http->ops->recv_response(http);
 
 		code = http->code;
+#ifdef DEBUG
+		fprintf(stderr, "Got response [%d]\n", code);
+#endif
 
 		switch (code)
 		{
