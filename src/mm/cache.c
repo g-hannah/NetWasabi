@@ -212,6 +212,7 @@ do {\
 	int ____nr_ = (c)->nr_assigned;\
 	int ____i_d_x;\
 	assert(____nr_ <= (c)->capacity);\
+	fprintf(stderr, "Number of assigned pointers: %d\n", ____nr_); \
 	for (____ctx_p = (c)->assigned_list, ____i_d_x = 0;\
 			____i_d_x < ____nr_;\
 			++____i_d_x)\
@@ -409,6 +410,9 @@ cache_alloc(cache_t *cachep, void *ptr_addr)
 	void *owner_addr = ptr_addr;
 	off_t owner_off;
 
+#ifdef DEBUG
+	fprintf(stderr, "Cache capacity: %d\n", old_capacity);
+#endif
 /*
  * Our bitmap can be deceiving and an index may be return
  * because it found a zero-bit but in fact that has gone
@@ -418,6 +422,9 @@ cache_alloc(cache_t *cachep, void *ptr_addr)
 	{
 		assert(idx < old_capacity);
 		slot = __cache_obj(cachep, idx);
+#ifdef DEBUG
+		fprintf(stderr, "Got slot at %p at index %d\n", slot, idx);
+#endif
 
 		__cache_mark_used(cachep, idx);
 		CACHE_ASSIGN_PTR(cachep, owner_addr, slot);
@@ -428,6 +435,9 @@ cache_alloc(cache_t *cachep, void *ptr_addr)
 	}
 	else
 	{
+#ifdef DEBUG
+		fprintf(stderr, "Extending capacity of the cache\n");
+#endif
 		old_capacity = cachep->capacity;
 		new_capacity = (old_capacity * 2);
 		added_capacity = (new_capacity - old_capacity);
@@ -468,6 +478,9 @@ cache_alloc(cache_t *cachep, void *ptr_addr)
  */
 		if (old_cache != cachep->cache)
 		{
+#ifdef DEBUG
+			fprintf(stderr, "Cache moved in heap -- patching pointers\n");
+#endif
 			if (owner_addr && in_cache)
 				owner_addr = (void *)((char *)cachep->cache + owner_off);
 
