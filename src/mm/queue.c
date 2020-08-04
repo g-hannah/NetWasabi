@@ -74,9 +74,14 @@ QUEUE_dequeue(queue_obj_t *queue_obj)
 {
 	assert(queue_obj);
 
+	if (!queue_obj->nr_items)
+		return NULL;
+
 	queue_item_t *item = queue_obj->front;
+	assert(item);
 	queue_obj->front = item->prev;
-	queue_obj->front->next = NULL;
+	if (queue_obj->front)
+		queue_obj->front->next = NULL;
 
 	item->prev = NULL;
 	--queue_obj->nr_items;
