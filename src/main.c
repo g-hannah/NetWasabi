@@ -54,19 +54,13 @@ struct winsize winsize;
 struct url_types url_types[] =
 {
 	{ "href=\"", '"', 6 },
-	{ "HREF=\"", '"', 6 },
 	{ "src=\"", '"', 5 },
-	{ "SRC=\"", '"', 5 },
 	{ "href=\'", '\'', 6 },
-	{ "HREF=\'", '\'', 6 },
 	{ "src=\'", '\'', 5 },
-	{ "SRC=\'", '\'', 5 },
-	{ "thumbnail_src\":\"", '"', 16 },
-	{ "src\":\"", '"', 6 },
 	{ "", 0, 0 }
 };
 
-int path_max = 1024;
+int path_max = 0;
 
 static void
 __ctor __wr_init(void)
@@ -88,11 +82,6 @@ __ctor __wr_init(void)
 	}
 
 	home_dir = strdup(h);
-
-/*
- * For calling fcntl() once only in buf_read_socket/tls()
- * to set O_NONBLOCK flag. On a reconnect, reset to zero.
- */
 	pthread_mutex_init(&screen_mutex, NULL);
 
 	return;
@@ -107,6 +96,7 @@ __dtor __wr_fini(void)
 	pthread_mutex_destroy(&screen_mutex);
 }
 
+/*
 #define THREAD_SLEEP_TIME_USEC 500000
 void *
 screen_updater_thread(void *arg)
@@ -176,6 +166,7 @@ screen_updater_thread(void *arg)
 
 	pthread_exit((void *)0);
 }
+*/
 
 /*
  * Catch SIGINT
@@ -334,6 +325,9 @@ valid_url(char *url)
 	return 1;
 }
 
+/**
+ * Callback for XML_for_each_child()
+ */
 static void
 _config_hash_options(xml_node_t *node)
 {
@@ -358,27 +352,16 @@ get_configuration(void)
 	bObj_hashed_opts = NULL;
 
 	if (access(config_file, F_OK) != 0)
-	{
-		CONFIG_CRAWL_DELAY(&nwctx, DEFAULT_CRAWL_DELAY);
-		CONFIG_CRAWL_DEPTH(&nwctx, DEFAULT_CRAWL_DEPTH);
-		CONFIG_MAX_QUEUE(&nwctx, DEFAULT_MAX_QUEUE);
-
-		FAST_MODE = 0;
-
-		return;
-	}
+		goto _default;
 
 	struct XML *xml = XML_new();
 
 	if (0 != XML_parse_file(xml, config_file))
-	{
-		fprintf(stderr, "Failed to parse config.xml file\n");
-		return;
-	}
+		goto _default;
 
 	xml_node_t *n = XML_find_by_path(xml, "options");
 	if (!n)
-		return;
+		goto _default;
 
 	bObj_hashed_opts = BUCKET_object_new();
 	assert(bObj_hashed_opts);
@@ -391,9 +374,13 @@ get_configuration(void)
 
 	return;
 
-fail:
-	XML_free(xml);
+_default:
+	CONFIG_CRAWL_DELAY(&nwctx, DEFAULT_CRAWL_DELAY);
+	CONFIG_CRAWL_DEPTH(&nwctx, DEFAULT_CRAWL_DEPTH);
+	CONFIG_MAX_QUEUE(&nwctx, DEFAULT_MAX_QUEUE);
+	FAST_MODE = 0;
 
+	XML_free(xml);
 	return;
 }
 
@@ -429,7 +416,7 @@ main(int argc, char *argv[])
 	//pthread_attr_setdetachstate(&thread_screen_attr, PTHREAD_CREATE_DETACHED);
 	//pthread_create(&thread_screen_tid, &thread_screen_attr, screen_updater_thread, NULL);
 
-	if (option_set(OPT_FAST_MODE))
+	if (FAST_MODE)
 	{
 		do_fast_mode(argv[1]);
 		goto out;
@@ -466,12 +453,12 @@ main(int argc, char *argv[])
 	buf_t *rbuf = NULL;
 	buf_t *wbuf = NULL;
 
-	/*
-	 * HTTP objects have an ID associated with them
-	 * for logging purposes (i.e., if using fast
-	 * mode there are multiple threads so we can
-	 * differentiate between them).
-	 */
+/*
+ * HTTP objects have an ID associated with them
+ * for logging purposes (i.e., if using fast
+ * mode there are multiple threads so we can
+ * differentiate between them).
+ */
 #define MAIN_THREAD_ID 0x4e49414du
 	if (!(http = HTTP_new(MAIN_THREAD_ID)))
 	{
@@ -483,6 +470,10 @@ main(int argc, char *argv[])
 	http->usingSecure = 1; // Tell the HTTP module to use TLS.
 	http->verb = GET; // We will only be using GET requests anyway.
 
+#ifdef DEBUG
+	fprintf(stderr, "Created HTTP object with ID %u\n", MAIN_THREAD_ID);
+#endif
+
 	url_len = strlen(argv[1]);
 	assert(url_len < HTTP_URL_MAX);
 
@@ -491,6 +482,11 @@ main(int argc, char *argv[])
 
 	http->ops->URL_parse_host(argv[1], http->host);
 	http->ops->URL_parse_page(argv[1], http->page);
+
+#ifdef DEBUG
+	fprintf(stderr, "Host: %s\n", http->host);
+	fprintf(stderr, "Page: %s\n", http->page);
+#endif
 
 	strcpy(http->primary_host, http->host);
 
@@ -520,6 +516,7 @@ main(int argc, char *argv[])
 	 * add those to the back of the queue to be crawled later.
 	 */
 	URL_queue = QUEUE_object_new();
+	assert(URL_queue);
 
 	/*
 	 * Keep a binary tree of already-archived URLs so that
@@ -528,6 +525,7 @@ main(int argc, char *argv[])
 	 * downloaded it.
 	 */
 	tree_archived = BTREE_object_new();
+	assert(tree_archived);
 
 	http->ops->send_request(http);
 	http->ops->recv_response(http);
@@ -548,6 +546,9 @@ main(int argc, char *argv[])
 	 */
 	if (URL_parseable(http->URL))
 	{
+#ifdef DEBUG
+		fprintf(stderr, "URL is parseable - calling parse_URLs()\n");
+#endif
 		parse_URLs(http, URL_queue, tree_archived);
 		transform_document_URLs(http); // turn href links into file://<path to local dir for pages crawled from this site>
 		archive_page(http);
