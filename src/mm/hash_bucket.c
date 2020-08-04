@@ -255,6 +255,28 @@ new_bucket(void)
 	return bucket;
 }
 
+void
+BUCKET_dump_all(bucket_obj_t *bucket_obj)
+{
+	assert(bucket_obj);
+
+	bucket_t *bucket = &bucket_obj->buckets[0];
+	int i, j;
+	for (i = 0, j = bucket_obj->nr_buckets; i < j; ++i)
+	{
+		bucket = &bucket_obj->buckets[i];
+		if (!bucket->used)
+			continue;
+		assert(bucket->key);
+		assert(bucket->data);
+
+		fprintf(stderr, "Bucket #%d: key == %s, value == %s\n",
+				i, (char *)bucket->key, (char *)bucket->data);
+	}
+
+	return;
+}
+
 int
 BUCKET_put_data(bucket_obj_t *bucket_obj, char *key, void *data, size_t data_len, int flags)
 {
