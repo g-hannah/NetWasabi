@@ -46,6 +46,7 @@ bucket_t *BUCKET_get_bucket(bucket_obj_t *bObj, char *key);
 bucket_t *BUCKET_get_bucket_from_list(bucket_t *bucket, char *key);
 bucket_t *BUCKET_get_list_bucket_for_value(bucket_t *bucket, void *data, size_t data_len);
 char *BUCKET_get_key_for_value(bucket_t *bucket, void *data, size_t data_len);
+void BUCKET_dump_all(bucket_obj_t *);
 
 void BUCKET_register_callback(bucket_obj_t *bObj, BUCKET_cb_t cb);
 
