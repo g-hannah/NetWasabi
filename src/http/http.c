@@ -117,6 +117,7 @@ struct HTTP_private
 
 	bucket_obj_t *headers;
 	cache_t *cookies;
+	bucket_obj_t *redirects;
 };
 
 void http_check_host(struct http_t *) __nonnull((1));
@@ -441,7 +442,7 @@ parse_cookies(struct http_t *http)
 /**
  * Parse the response header fields into a hash bucket.
  */
-static void
+static int
 parse_response_header_1_1(struct http_t *http)
 {
 	assert(http);
@@ -456,19 +457,29 @@ parse_response_header_1_1(struct http_t *http)
 	char field_value[2048];
 	struct HTTP_private *private = (struct HTTP_private *)http;
 
+	_log("\nBEGIN FIRST 10 BYTES OF HEADER:\n%*.*s\nEND FIRST 10 BYTES OF HEADER\n", 10, 10, buf->buf_head);
 	eoh = HTTP_EOH(buf);
 	eoh -= 2;
+
+	size_t hlen = (eoh - buf->buf_head);
+
+	if (2048 < hlen)
+	{
+		//_drain_socket(http); TODO
+		return -1;
+	}
 
 	sol = buf->buf_head;
 
 	BUCKET_reset_buckets(private->headers, 0);
+	assert(0 == private->headers->nr_buckets_used);
 
 /*
  * Skip the initial line showing the status of the request (200 OK...)
  */
 	eol = memchr(sol, '\r', (eol - sol));
 	if (!eol)
-		return;
+		return -1;
 
 	sol = eol + 2;
 
@@ -531,7 +542,7 @@ parse_response_header_1_1(struct http_t *http)
 		bucket_t *bucket = BUCKET_get_bucket(private->headers, field_name);
 		assert(bucket);
 
-		size_t value_len = strlen(field_value);
+		value_len = strlen(field_value);
 		char *k = BUCKET_get_key_for_value(bucket, (void *)field_value, value_len);
 		bucket_t *b = BUCKET_get_list_bucket_for_value(bucket, (void *)field_value, value_len);
 
@@ -541,6 +552,7 @@ parse_response_header_1_1(struct http_t *http)
 	}
 
 	parse_cookies(http);
+	return 0;
 }
 
 #define HTTP_HEADER_BUFSIZE 8192
@@ -696,6 +708,24 @@ send_request_1_1(struct http_t *http)
 	buf_clear(buf);
 
 	check_target_URL(http, http->usingSecure);
+
+/*
+ * Check if this URL has a redirect URL that we cached.
+ *
+ * If the redirect we received was the exact same URL
+ * as the redirected one, we put the empty string ""
+ * in as the data for the key. Check for zero length
+ * and return -1 if we find it.
+ */
+	struct HTTP_private *private = (struct HTTP_private *)http;
+	bucket_t *bucket = BUCKET_get_bucket(private->redirects, http->URL);
+	if (bucket)
+	{
+		if (0 < strlen((char *)bucket->data))
+			memcpy(http->URL, bucket->data, bucket->data_len);
+		else
+			return -1;
+	}
 	//set_verb(http, GET);
 	build_request_header_1_1(http);
 
@@ -830,6 +860,7 @@ read_bytes(struct http_t *http, size_t toread)
 	assert(toread > 0);
 
 	ssize_t n;
+	size_t read = 0;
 	size_t r = toread;
 	buf_t *buf = &http->conn.read_buf;
 	register int cycles = 0;
@@ -857,10 +888,13 @@ read_bytes(struct http_t *http, size_t toread)
 		if (!n)
 			continue;
 		else
+		{
 			r -= n;
+			read += n;
+		}
 	}
 
-	return toread;
+	return read;
 }
 
 #define HTTP_MAX_CHUNK_STR 10
@@ -1194,7 +1228,15 @@ set_new_location(struct http_t *http)
 	assert(http);
 
 	struct HTTP_private *private = (struct HTTP_private *)http;
+#ifdef DEBUG
+	_log("Dumping HTTP response header fields\n");
+	BUCKET_dump_all(private->headers);
+	_log("Finished dumping HTTP response header fields\n");
+#endif
 	bucket_t *bucket = BUCKET_get_bucket(private->headers, "location");
+
+	if (NULL == bucket)
+		return -1;
 
 	assert(bucket->data_len < HTTP_URL_MAX);
 	strcpy(http->URL, (char *)bucket->data);
@@ -1235,8 +1277,6 @@ http_set_sock_non_blocking(struct http_t *http)
 		fcntl(http->conn.sock, F_SETFL, sock_flags);
 
 		http->conn.sock_nonblocking = 1;
-
-		return;
 	}
 
 	return;
@@ -1261,8 +1301,29 @@ http_set_ssl_non_blocking(struct http_t *http)
 		fcntl(rsock, F_SETFL, flags);
 
 		http->conn.ssl_nonblocking = 1;
+	}
 
-		return;
+	return;
+}
+
+static void
+_drain_socket(struct http_t *http)
+{
+	assert(http);
+
+	ssize_t ret = 0;
+	size_t block = 1024;
+
+	http_set_ssl_non_blocking(http);
+	http_set_sock_non_blocking(http);
+
+	_log("Draining socket\n");
+	while (1)
+	{
+		ret = read_bytes(http, block);
+		if (ret < block || 0 == ret)
+			break;
+		_log("Drained %ld bytes from socket\n", ret);
 	}
 
 	return;
@@ -1333,7 +1394,9 @@ rp_receive:
 
 	http->code = code;
 
-	parse_response_header_1_1(http);
+	int _rv = parse_response_header_1_1(http);
+	if (0 > _rv)
+		return -1;
 
 /*
  * With HEAD, always send back the code
@@ -1346,10 +1409,14 @@ rp_receive:
 
 /*
  * Check for a URL redirect status code.
+ * Regardless of the status code, we
+ * always need to break and read more
+ * from the socket as there is always
+ * a corresponding HTML document.
  */
 	switch((unsigned int)code)
 	{
-		case HTTP_OK:
+		default:
 			break;
 
 		case HTTP_FOUND:
@@ -1375,13 +1442,22 @@ rp_receive:
 			buf_clear(&http->conn.write_buf);
 			assert(http_wbuf(http).data_len == 0);
 
-			needResend = 1;
-			break;
+		/*
+		 * Still need to receive the body of the HTML page
+		 * that comes with the redirect header.
+		 */
+			if (!memcmp(tmpURL, http->URL, strlen(http->URL)))
+			{
+				BUCKET_put_data(private->redirects, (void *)tmpURL, (void *)"", strlen(http->URL), 0);
+				needResend = 0;
+			}
+			else
+			{
+				BUCKET_put_data(private->redirects, (void *)tmpURL, (void *)http->URL, strlen(http->URL), 0);
+				needResend = 1;
+			}
 
-		case HTTP_BAD_REQUEST:
-		case HTTP_NOT_FOUND:
-		default:
-			goto fail;
+			break;
 	}
 
 	bucket_t *bucket = NULL;
@@ -1457,6 +1533,7 @@ out:
 	return total_bytes;
 
 fail:
+	_drain_socket(http);
 	return -1;
 }
 
@@ -2006,6 +2083,10 @@ HTTP_init_object(struct HTTP_private *private, uint32_t id)
 	if (!private->cookies)
 		goto fail;
 
+	private->redirects = BUCKET_object_new();
+	if (!private->redirects)
+		goto fail;
+
 	http->host = calloc(HTTP_HOST_MAX+1, 1);
 	http->conn.host_ipv4 = calloc(HTTP_ALIGN_SIZE(INET_ADDRSTRLEN+1), 1);
 	http->primary_host = calloc(HTTP_HOST_MAX+1, 1);
@@ -2044,6 +2125,9 @@ fail:
 
 	if (private->cookies)
 		cache_destroy(private->cookies);
+
+	if (private->redirects)
+		BUCKET_object_destroy(private->redirects, 0);
 
 	return -1;
 }
@@ -2091,6 +2175,7 @@ HTTP_delete(struct http_t *http)
 	free(http->URL);
 
 	BUCKET_object_destroy(private->headers, 0);
+	BUCKET_object_destroy(private->redirects, 0);
 	cache_clear_all(private->cookies);
 	cache_destroy(private->cookies);
 
