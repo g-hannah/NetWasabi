@@ -821,10 +821,9 @@ Crawl_WebSite(struct http_t *http, queue_obj_t *URL_queue, btree_obj_t *tree_arc
 			if (NULL == item)
 				break;
 
-#ifdef DEBUG
-			fprintf(stderr, "Dequeued item: %s\n", (char *)item->data);
-#endif
-		} while (NULL != (node = BTREE_search_data(tree_archived, item->data, strlen((char *)item->data))));
+			Log("Dequeued item: %s\n", (char *)item->data);
+		}
+		while (NULL != (node = BTREE_search_data(tree_archived, item->data, strlen((char *)item->data))));
 
 		if (!item)
 			break;
@@ -839,7 +838,7 @@ Crawl_WebSite(struct http_t *http, queue_obj_t *URL_queue, btree_obj_t *tree_arc
 			continue;
 		}
 
-		//http->ops->URL_parse_host(http->URL, http->host);
+		http->ops->URL_parse_host(http->URL, http->host);
 		http->ops->URL_parse_page(http->URL, http->page);
 
 		BLOCK_SIGNAL(SIGINT);
