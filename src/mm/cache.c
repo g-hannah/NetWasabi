@@ -71,7 +71,7 @@ static inline int __cache_next_free_idx(cache_t *cachep)
 #define __cache_mark_used(c, i)	\
 do {\
 	unsigned char *bm = ((c)->free_bitmap + ((i) >> 3));	\
-	(*bm |= (unsigned char)(1 << ((i) & 7)));							\
+	(*bm |= (unsigned char)(1 << ((i) & 7)));		\
 } while(0)
 
 /**
@@ -82,7 +82,7 @@ do {\
 #define __cache_mark_unused(c, i)	\
 do {\
 	unsigned char *bm = ((c)->free_bitmap + ((i) >> 3));	\
-	(*bm &= (unsigned char) ~(1 << ((i) & 7)));						\
+	(*bm &= (unsigned char) ~(1 << ((i) & 7)));		\
 } while(0)
 
 /**
@@ -162,48 +162,54 @@ static inline int __owner_is_in_cache(cache_t *cachep, void *addr)
 
 #define CACHE_ASSIGN_PTR(c, p, s)\
 do {\
-	struct cache_obj_ctx *____ctx_p;\
-	int __in_cache;\
-	if ((p) && __owner_is_in_cache((c), (p)))\
-		__in_cache = 1;\
-	int ____nr_ = (c)->nr_assigned;\
-	assert(____nr_ < (c)->capacity);\
-	____ctx_p = ((c)->assigned_list + ____nr_);\
-	____ctx_p->ptr_addr = (p);\
-	____ctx_p->obj_offset = __cache_obj_offset((c), (s));\
-	if (__in_cache)\
-	{\
-		____ctx_p->in_cache = 1;\
-		____ctx_p->ptr_offset = (off_t)((char *)(p) - (char *)(c)->cache);\
-	}\
-	else\
-	{\
-		____ctx_p->in_cache = 0;\
-		____ctx_p->ptr_offset = 0;\
-	}\
-	++((c)->nr_assigned);\
+	if ((p)) \
+	{ \
+		struct cache_obj_ctx *____ctx_p;\
+		int __in_cache;\
+		if ((p) && __owner_is_in_cache((c), (p)))\
+			__in_cache = 1;\
+		int ____nr_ = (c)->nr_assigned;\
+		assert(____nr_ < (c)->capacity);\
+		____ctx_p = ((c)->assigned_list + ____nr_);\
+		____ctx_p->ptr_addr = (p);\
+		____ctx_p->obj_offset = __cache_obj_offset((c), (s));\
+		if (__in_cache)\
+		{\
+			____ctx_p->in_cache = 1;\
+			____ctx_p->ptr_offset = (off_t)((char *)(p) - (char *)(c)->cache);\
+		}\
+		else\
+		{\
+			____ctx_p->in_cache = 0;\
+			____ctx_p->ptr_offset = 0;\
+		}\
+		++((c)->nr_assigned);\
+	} \
 } while (0)
 
 #define CACHE_REMOVE_PTR(c, p)\
 do {\
-	struct cache_obj_ctx *____ctx_p = (c)->assigned_list;\
-	int ____nr_ = (c)->nr_assigned;\
-	int ____i_d_x;\
-	int ____k;\
-	assert(____nr_ <= (c)->capacity);\
-	for (____i_d_x = 0; ____i_d_x < ____nr_; ++____i_d_x)\
-	{\
-		if ((p) && ____ctx_p->ptr_addr == (p))\
+	if ((p)) \
+	{ \
+		struct cache_obj_ctx *____ctx_p = (c)->assigned_list;\
+		int ____nr_ = (c)->nr_assigned;\
+		int ____i_d_x;\
+		int ____k;\
+		assert(____nr_ <= (c)->capacity);\
+		for (____i_d_x = 0; ____i_d_x < ____nr_; ++____i_d_x)\
 		{\
-			for (____k = ____i_d_x; ____k < (____nr_ - 1); ++____k)\
-				memcpy((void *)&____ctx_p[____k], (void *)&____ctx_p[____k+1], sizeof(struct cache_obj_ctx));\
-			--((c)->nr_assigned);\
-			--____nr_;\
-			memset((void *)&____ctx_p[____k], 0, sizeof(struct cache_obj_ctx));\
-			--____i_d_x;\
+			if ((p) && ____ctx_p->ptr_addr == (p))\
+			{\
+				for (____k = ____i_d_x; ____k < (____nr_ - 1); ++____k)\
+					memcpy((void *)&____ctx_p[____k], (void *)&____ctx_p[____k+1], sizeof(struct cache_obj_ctx));\
+				--((c)->nr_assigned);\
+				--____nr_;\
+				memset((void *)&____ctx_p[____k], 0, sizeof(struct cache_obj_ctx));\
+				--____i_d_x;\
+			}\
+			++____ctx_p;\
 		}\
-		++____ctx_p;\
-	}\
+	} \
 } while (0)
 
 #define CACHE_ADJUST_PTRS(c)\
@@ -427,7 +433,8 @@ cache_alloc(cache_t *cachep, void *ptr_addr)
 #endif
 
 		__cache_mark_used(cachep, idx);
-		CACHE_ASSIGN_PTR(cachep, owner_addr, slot);
+		if (owner_addr)
+			CACHE_ASSIGN_PTR(cachep, owner_addr, slot);
 		CACHE_DEC_FREE(cachep);
 		assert(cache_nr_used(cachep) > 0);
 
@@ -504,7 +511,9 @@ cache_alloc(cache_t *cachep, void *ptr_addr)
 
 		__cache_mark_used(cachep, idx);
 
-		CACHE_ASSIGN_PTR(cachep, owner_addr, slot);
+		if (owner_addr)
+			CACHE_ASSIGN_PTR(cachep, owner_addr, slot);
+
 		CACHE_DEC_FREE(cachep);
 		assert(cache_nr_used(cachep) > 0);
 
