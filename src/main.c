@@ -23,6 +23,7 @@
 #include "netwasabi.h"
 #include "queue.h"
 #include "screen_utils.h"
+#include "string_utils.h"
 #include "utils_url.h"
 #include "xml.h"
 
@@ -398,6 +399,8 @@ main(int argc, char *argv[])
 		goto fail;
 	}
 
+	char *url = str_replace(argv[1], "http:", "https:");
+
 	get_configuration();
 	check_directory();
 
@@ -450,8 +453,6 @@ main(int argc, char *argv[])
 	struct http_t *http;
 	int rv;
 	size_t url_len;
-	buf_t *rbuf = NULL;
-	buf_t *wbuf = NULL;
 
 /*
  * HTTP objects have an ID associated with them
@@ -470,31 +471,13 @@ main(int argc, char *argv[])
 	http->usingSecure = 1; // Tell the HTTP module to use TLS.
 	http->verb = GET; // We will only be using GET requests anyway.
 
-#ifdef DEBUG
-	fprintf(stderr, "Created HTTP object with ID %u\n", MAIN_THREAD_ID);
-#endif
-
-	url_len = strlen(argv[1]);
+	url_len = strlen(url);
 	assert(url_len < HTTP_URL_MAX);
 
-	strcpy(http->URL, argv[1]);
-	http->URL_len = url_len;
-
-	http->ops->URL_parse_host(argv[1], http->host);
-	http->ops->URL_parse_page(argv[1], http->page);
-
-#ifdef DEBUG
-	fprintf(stderr, "Host: %s\n", http->host);
-	fprintf(stderr, "Page: %s\n", http->page);
-#endif
-
-	strcpy(http->primary_host, http->host);
-
+	http->ops->URL_parse_host(url, http->primary_host);
+	strcpy(http->host, http->primary_host);
 	if (http_connect(http) < 0)
 		goto fail;
-
-	rbuf = &http_rbuf(http);
-	wbuf = &http_wbuf(http);
 
 	/*
 	 * Catch SIGINT and SIGQUIT so we can release memory.
@@ -505,11 +488,6 @@ main(int argc, char *argv[])
 		put_error_msg("Signal caught");
 		goto out_disconnect;
 	}
-
-	buf_clear(rbuf);
-	buf_clear(wbuf);
-
-	update_current_url(http->URL);
 
 	/*
 	 * When we parse URLs from an HTML document, we will
@@ -527,6 +505,7 @@ main(int argc, char *argv[])
 	tree_archived = BTREE_object_new();
 	assert(tree_archived);
 
+/*
 	http->ops->send_request(http);
 	http->ops->recv_response(http);
 
@@ -540,10 +519,10 @@ main(int argc, char *argv[])
 
 	BTREE_put_data(tree_archived, (void *)http->URL, http->URL_len);
 
-	/*
+	*
 	 * i.e., it's not an image file or something
 	 * else that has no HTML structure.
-	 */
+	 *
 	if (URL_parseable(http->URL))
 	{
 #ifdef DEBUG
@@ -558,11 +537,16 @@ main(int argc, char *argv[])
 		update_operation_status("No URLs to parse from document");
 		goto out_disconnect;
 	}
+*/
 
+	QUEUE_enqueue(URL_queue, (void *)url, strlen(url));
 	rv = Crawl_WebSite(http, URL_queue, tree_archived);
 
 	if (rv < 0)
 	{
+#ifdef DEBUG
+		fprintf(stderr, "rv < 0 ...\n");
+#endif
 		goto fail_disconnect;
 	}
 
