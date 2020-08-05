@@ -46,7 +46,7 @@ QUEUE_enqueue(queue_obj_t *queue_obj, void *data, size_t data_len)
 	memcpy(item->data, data, data_len);
 	item->data_len = data_len;
 
-	if (!queue_obj->back)
+	if (!queue_obj->front)
 	{
 		queue_obj->back = queue_obj->front = item;
 		item->next = item->prev = NULL;
@@ -74,6 +74,14 @@ QUEUE_dequeue(queue_obj_t *queue_obj)
 {
 	assert(queue_obj);
 
+#ifdef DEBUG
+	fprintf(stderr,
+		"%d items in queue\n"
+		"front @ %p, back @ %p\n",
+		queue_obj->nr_items,
+		queue_obj->front, queue_obj->back);
+#endif
+
 	if (!queue_obj->nr_items)
 		return NULL;
 
@@ -82,6 +90,8 @@ QUEUE_dequeue(queue_obj_t *queue_obj)
 	queue_obj->front = item->prev;
 	if (queue_obj->front)
 		queue_obj->front->next = NULL;
+	else
+		queue_obj->back = NULL;
 
 	item->prev = NULL;
 	--queue_obj->nr_items;
