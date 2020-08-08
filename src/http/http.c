@@ -308,7 +308,7 @@ parse_cookies(struct http_t *http)
 	assert(http);
 
 	struct HTTP_private *private = (struct HTTP_private *)http;
-	bucket_t *bucket = BUCKET_get_bucket(private->headers, "set-cookie");
+	bucket_t *bucket = private->headers->get(private->headers, "set-cookie");
 	if (!bucket)
 		return;
 
@@ -471,7 +471,8 @@ parse_response_header_1_1(struct http_t *http)
 
 	sol = buf->buf_head;
 
-	BUCKET_reset_buckets(private->headers, 0);
+	private->headers->reset(private->headers, 0);
+
 	assert(0 == private->headers->nr_buckets_used);
 
 /*
@@ -534,17 +535,17 @@ parse_response_header_1_1(struct http_t *http)
 		 *	The value of the pointer in DATA itself will just be stored.
 		 *
 		 */
-		BUCKET_put_data(private->headers, field_name, (void *)field_value, value_len, 0);
+		private->headers->put(private->headers, field_name, (void *)field_value, value_len, 0);
 
 		sol = eol + 2;
 
 #ifdef DEBUG
-		bucket_t *bucket = BUCKET_get_bucket(private->headers, field_name);
+		bucket_t *bucket = private->headers->get(private->headers, field_name);
 		assert(bucket);
 
 		value_len = strlen(field_value);
-		char *k = BUCKET_get_key_for_value(bucket, (void *)field_value, value_len);
-		bucket_t *b = BUCKET_get_list_bucket_for_value(bucket, (void *)field_value, value_len);
+		char *k = private->headers->get_key(private->headers, (void *)field_value, value_len);
+		bucket_t *b = private->headers->get_bucket_from_list_for_value(bucket, (void *)field_value, value_len);
 
 		assert(!memcmp((void *)k, (void *)field_name, strlen(field_name)));
 		assert(!memcmp((void *)field_value, b->data, value_len));
@@ -718,7 +719,7 @@ send_request_1_1(struct http_t *http)
  * and return -1 if we find it.
  */
 	struct HTTP_private *private = (struct HTTP_private *)http;
-	bucket_t *bucket = BUCKET_get_bucket(private->redirects, http->URL);
+	bucket_t *bucket = private->redirects->get(private->redirects, http->URL);
 	if (bucket)
 	{
 		if (0 < strlen((char *)bucket->data))
@@ -1233,7 +1234,7 @@ set_new_location(struct http_t *http)
 	BUCKET_dump_all(private->headers);
 	_log("Finished dumping HTTP response header fields\n");
 #endif
-	bucket_t *bucket = BUCKET_get_bucket(private->headers, "location");
+	bucket_t *bucket = private->headers->get(private->headers, "location");
 
 	if (NULL == bucket)
 		return -1;
@@ -1407,6 +1408,8 @@ rp_receive:
 	if (HEAD == http->verb)
 		goto out;
 
+	bucket_obj_t *bObj = private->headers;
+	assert(bObj);
 /*
  * Check for a URL redirect status code.
  * Regardless of the status code, we
@@ -1446,14 +1449,15 @@ rp_receive:
 		 * Still need to receive the body of the HTML page
 		 * that comes with the redirect header.
 		 */
+			bucket_obj_t *bObjR = private->redirects;
 			if (!memcmp(tmpURL, http->URL, strlen(http->URL)))
 			{
-				BUCKET_put_data(private->redirects, (void *)tmpURL, (void *)"", strlen(http->URL), 0);
+				bObjR->put(bObjR, (void *)tmpURL, (void *)"", strlen(http->URL), 0);
 				needResend = 0;
 			}
 			else
 			{
-				BUCKET_put_data(private->redirects, (void *)tmpURL, (void *)http->URL, strlen(http->URL), 0);
+				bObjR->put(bObjR, (void *)tmpURL, (void *)http->URL, strlen(http->URL), 0);
 				needResend = 1;
 			}
 
@@ -1461,7 +1465,7 @@ rp_receive:
 	}
 
 	bucket_t *bucket = NULL;
-	bucket = BUCKET_get_bucket(private->headers, "transfer-encoding");
+	bucket = bObj->get(bObj, "transfer-encoding");
 
 	if (bucket && !strcasecmp((char *)bucket->data, "chunked"))
 	{
@@ -1474,7 +1478,7 @@ rp_receive:
 		goto done_reading;
 	}
 
-	bucket = BUCKET_get_bucket(private->headers, "content-length");
+	bucket = bObj->get(bObj, "content-length");
 
 	if (bucket)
 	{
@@ -1918,7 +1922,7 @@ fetch_header_1_1(struct http_t *http, char *key)
 	assert(key);
 
 	struct HTTP_private *private = (struct HTTP_private *)http;
-	bucket_t *bucket = BUCKET_get_bucket(private->headers, key);
+	bucket_t *bucket = private->headers->get(private->headers, key);
 	if (!bucket)
 		return NULL;
 
@@ -1932,7 +1936,7 @@ append_cookies_1_1(struct http_t *http)
 
 	struct HTTP_private *private = (struct HTTP_private *)http;
 
-	bucket_t *bucket = BUCKET_get_bucket(private->headers, "set-cookie");
+	bucket_t *bucket = private->headers->get(private->headers, "set-cookie");
 
 	if (!bucket)
 		return;
@@ -2121,13 +2125,13 @@ fail:
 	buf_destroy(&http->conn.read_buf);
 
 	if (private->headers)
-		BUCKET_object_destroy(private->headers, 0);
+		private->headers->destroy(private->headers, 0);
 
 	if (private->cookies)
 		cache_destroy(private->cookies);
 
 	if (private->redirects)
-		BUCKET_object_destroy(private->redirects, 0);
+		private->redirects->destroy(private->redirects, 0);
 
 	return -1;
 }
@@ -2174,8 +2178,8 @@ HTTP_delete(struct http_t *http)
 	free(http->conn.host_ipv4);
 	free(http->URL);
 
-	BUCKET_object_destroy(private->headers, 0);
-	BUCKET_object_destroy(private->redirects, 0);
+	private->headers->destroy(private->headers, 0);
+	private->redirects->destroy(private->redirects, 0);
 	cache_clear_all(private->cookies);
 	cache_destroy(private->cookies);
 
