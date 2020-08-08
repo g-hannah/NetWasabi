@@ -448,6 +448,16 @@ BUCKET_object_new(void)
 
 	memset(bucket_obj->buckets, 0, sizeof(bucket_t) * DEFAULT_NUMBER_BUCKETS);
 
+	bucket_obj->put = BUCKET_put_data;
+	bucket_obj->get = BUCKET_get_bucket;
+	bucket_obj->get_bucket = BUCKET_get_bucket;
+	bucket_obj->get_bucket_from_list = BUCKET_get_bucket_from_list;
+	bucket_obj->get_bucket_from_list_for_value = BUCKET_get_list_bucket_for_value;
+	bucket_obj->get_key = BUCKET_get_key_for_value;
+	bucket_obj->reset = BUCKET_reset_buckets;
+	bucket_obj->add_callback = BUCKET_register_callback;
+	bucket_obj->destroy = BUCKET_object_destroy;
+
 	return bucket_obj;
 
 fail_release_bucket_obj:
